@@ -315,7 +315,7 @@ impl ClassEnvironment {
     }
 }
 
-pub fn resolve_all_classes(env: &mut ClassEnvironment) -> Result<(), ClassResolveError> {
+pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
     let mut resolving_class = Box::new(Class {
         version: (0, 0),
         constant_pool: vec![],
@@ -339,7 +339,10 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment) -> Result<(), ClassResolv
     while let Some(resolving_id) = worklist.pop_front() {
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
-            println!("Resolving {}...", resolving_class.name);
+
+            if verbose {
+                eprintln!("Resolving {}...", resolving_class.name);
+            };
         } else {
             continue;
         };
@@ -348,10 +351,14 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment) -> Result<(), ClassResolv
             if let ConstantPoolEntry::Class(ref mut cpe) = *cpe {
                 if cpe.class_id == ClassId::UNRESOLVED {
                     cpe.class_id = if let Some(resolved_id) = env.try_find(&cpe.name) {
-                        println!("    Already loaded {}", cpe.name);
+                        if verbose {
+                            eprintln!("    Already loaded {}", cpe.name);
+                        };
                         resolved_id
                     } else {
-                        println!("    Loading {}...", cpe.name);
+                        if verbose {
+                            eprintln!("    Loading {}...", cpe.name);
+                        };
                         let resolved_id = env.load(&cpe.name)?;
 
                         worklist.push_back(resolved_id);
