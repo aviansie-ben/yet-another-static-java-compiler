@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
@@ -331,6 +331,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
         name: Arc::from(String::from("").into_boxed_str())
     });
     let mut worklist = VecDeque::new();
+    let mut not_found = HashSet::new();
 
     for id in env.class_ids() {
         worklist.push_back(id);
@@ -349,7 +350,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
 
         for cpe in resolving_class.constant_pool.iter_mut() {
             if let ConstantPoolEntry::Class(ref mut cpe) = *cpe {
-                if cpe.class_id == ClassId::UNRESOLVED {
+                if cpe.class_id == ClassId::UNRESOLVED && !not_found.contains(&cpe.name) {
                     cpe.class_id = if let Some(resolved_id) = env.try_find(&cpe.name) {
                         if verbose {
                             eprintln!("    Already loaded {}", cpe.name);
@@ -359,7 +360,17 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
                         if verbose {
                             eprintln!("    Loading {}...", cpe.name);
                         };
-                        let resolved_id = env.load(&cpe.name)?;
+                        let resolved_id = match env.load(&cpe.name) {
+                            Result::Ok(resolved_id) => resolved_id,
+                            Result::Err(ClassResolveError::NoSuchClass(_)) => {
+                                eprintln!("WARNING: Unable to find class {}", cpe.name);
+                                not_found.insert(cpe.name.clone());
+                                continue;
+                            },
+                            Result::Err(err) => {
+                                return Result::Err(err);
+                            }
+                        };
 
                         worklist.push_back(resolved_id);
                         resolved_id
