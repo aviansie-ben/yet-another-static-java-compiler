@@ -66,6 +66,12 @@ fn main() {
 
     let mut env = resolve::ClassEnvironment::new(class_loaders);
 
+    if let Result::Err(err) = env.load_bootstrap_classes() {
+        eprint!("error loading bootstrap classes: ");
+        print_resolve_error(&env, &err);
+        return;
+    };
+
     let main_class = match env.find_or_load(args.value_of("main").unwrap()) {
         Result::Ok(main_class) => main_class,
         Result::Err(err) => {

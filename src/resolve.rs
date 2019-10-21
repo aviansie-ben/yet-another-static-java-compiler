@@ -26,6 +26,8 @@ impl ClassId {
     pub const PRIMITIVE_LONG: ClassId = ClassId(5);
     pub const PRIMITIVE_SHORT: ClassId = ClassId(6);
     pub const PRIMITIVE_BOOLEAN: ClassId = ClassId(7);
+    pub const JAVA_LANG_OBJECT: ClassId = ClassId(8);
+    pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(9);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -218,48 +220,58 @@ pub struct ClassEnvironment {
 
 impl ClassEnvironment {
     pub fn new(class_loaders: Vec<Box<dyn ClassLoader>>) -> ClassEnvironment {
-        let mut env = ClassEnvironment {
+        ClassEnvironment {
             class_loaders,
             internals: ClassEnvironmentInternals {
                 classes: vec![],
                 class_names: HashMap::new()
             }
-        };
+        }
+    }
 
+    pub fn load_bootstrap_classes(&mut self) -> Result<(), ClassResolveError> {
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Byte))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Byte))),
             ClassId::PRIMITIVE_BYTE
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Char))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Char))),
             ClassId::PRIMITIVE_CHAR
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Double))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Double))),
             ClassId::PRIMITIVE_DOUBLE
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Float))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Float))),
             ClassId::PRIMITIVE_FLOAT
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Int))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Int))),
             ClassId::PRIMITIVE_INT
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Long))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Long))),
             ClassId::PRIMITIVE_LONG
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Short))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Short))),
             ClassId::PRIMITIVE_SHORT
         );
         assert_eq!(
-            env.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Boolean))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Boolean))),
             ClassId::PRIMITIVE_BOOLEAN
         );
+        assert_eq!(
+            self.load("java/lang/Object")?,
+            ClassId::JAVA_LANG_OBJECT
+        );
+        assert_eq!(
+            self.load("java/lang/invoke/MethodHandle")?,
+            ClassId::JAVA_LANG_INVOKE_METHODHANDLE
+        );
 
-        env
+        Result::Ok(())
     }
 
     fn load(&mut self, name: &str) -> Result<ClassId, ClassResolveError> {
