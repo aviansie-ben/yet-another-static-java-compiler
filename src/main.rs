@@ -31,6 +31,24 @@ fn parse_args<'a>() -> ArgMatches<'a> {
         .get_matches()
 }
 
+fn print_resolve_error(env: &resolve::ClassEnvironment, err: &resolve::ClassResolveError) {
+    match *err {
+        resolve::ClassResolveError::ReadError(ref err) => {
+            eprintln!("class read error: {:?}", err);
+        },
+        resolve::ClassResolveError::NoSuchClass(ref name) => {
+            eprintln!("class {} was not found", name);
+        },
+        resolve::ClassResolveError::TooManyClasses => {
+            eprintln!("too many classes were loaded");
+        },
+        resolve::ClassResolveError::WhileResolvingClass(class_id, ref err) => {
+            eprint!("while resolving for class {}: ", env.get(class_id).name(env));
+            print_resolve_error(env, err);
+        }
+    }
+}
+
 fn main() {
     let args = parse_args();
     let mut class_loaders: Vec<Box<dyn resolve::ClassLoader>> = vec![Box::new(resolve::ArrayClassLoader())];
@@ -48,8 +66,19 @@ fn main() {
 
     let mut env = resolve::ClassEnvironment::new(class_loaders);
 
-    let main_class = env.find_or_load(args.value_of("main").unwrap()).unwrap();
-    resolve::resolve_all_classes(&mut env, args.is_present("verbose")).unwrap();
+    let main_class = match env.find_or_load(args.value_of("main").unwrap()) {
+        Result::Ok(main_class) => main_class,
+        Result::Err(err) => {
+            eprint!("error loading main class: ");
+            print_resolve_error(&env, &err);
+            return;
+        }
+    };
 
+    if let Result::Err(err) = resolve::resolve_all_classes(&mut env, args.is_present("verbose")) {
+        eprint!("error during resolution: ");
+        print_resolve_error(&env, &err);
+        return;
+    };
     println!("Resolved {} classes ({} class files)", env.num_classes(), env.num_user_classes());
 }
