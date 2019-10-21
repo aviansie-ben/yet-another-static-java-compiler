@@ -263,13 +263,6 @@ pub struct ConstantMethodref {
 }
 
 #[derive(Debug, Clone)]
-pub struct ConstantInterfaceMethodref {
-    pub class: u16,
-    pub name: Arc<str>,
-    pub descriptor: MethodDescriptor
-}
-
-#[derive(Debug, Clone)]
 pub struct ConstantString {
     pub contents: Arc<str>
 }
@@ -294,7 +287,7 @@ pub enum ConstantPoolEntry {
     Class(ConstantClass),
     Fieldref(ConstantFieldref),
     Methodref(ConstantMethodref),
-    InterfaceMethodref(ConstantInterfaceMethodref),
+    InterfaceMethodref(ConstantMethodref),
     String(ConstantString),
     Integer(i32),
     Float(u32),
@@ -527,7 +520,7 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
             }),
             RawConstantPoolEntry::InterfaceMethodref { class_index, name_and_type_index } => ConstantPoolEntry::InterfaceMethodref({
                 let (name, descriptor) = resolve_name_and_type(&raw_constant_pool, i, name_and_type_index)?;
-                ConstantInterfaceMethodref {
+                ConstantMethodref {
                     class: class_index,
                     name,
                     descriptor: if let Some(d) = MethodDescriptor::parse(&descriptor) {
