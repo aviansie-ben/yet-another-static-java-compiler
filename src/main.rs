@@ -39,6 +39,12 @@ fn print_resolve_error(env: &resolve::ClassEnvironment, err: &resolve::ClassReso
         resolve::ClassResolveError::NoSuchClass(ref name) => {
             eprintln!("class {} was not found", name);
         },
+        resolve::ClassResolveError::NoSuchField(class_id, ref name, ref descriptor) => {
+            eprintln!("class {} has no field {} {}", env.get(class_id).name(env), name, descriptor);
+        },
+        resolve::ClassResolveError::NoSuchMethod(class_id, ref name, ref descriptor) => {
+            eprintln!("class {} has no method {}{}", env.get(class_id).name(env), name, descriptor);
+        },
         resolve::ClassResolveError::TooManyClasses => {
             eprintln!("too many classes were loaded");
         },
@@ -87,4 +93,10 @@ fn main() {
         return;
     };
     println!("Resolved {} classes ({} class files)", env.num_classes(), env.num_user_classes());
+
+    if let Result::Err(err) = resolve::resolve_all_subitem_references(&mut env, args.is_present("verbose")) {
+        eprint!("error during resolution: ");
+        print_resolve_error(&env, &err);
+        return;
+    };
 }

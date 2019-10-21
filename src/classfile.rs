@@ -139,7 +139,7 @@ impl FlatTypeDescriptor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDescriptor {
     pub flat: FlatTypeDescriptor,
     pub array_dims: u8
@@ -180,7 +180,7 @@ impl fmt::Display for TypeDescriptor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodDescriptor {
     pub return_type: Option<TypeDescriptor>,
     pub param_types: Vec<TypeDescriptor>

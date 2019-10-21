@@ -1,12 +1,13 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::Debug;
+use std::fmt::{Debug, Write};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use lazy_static::lazy_static;
 use zip::ZipArchive;
 use zip::result::{ZipError, ZipResult};
 
@@ -164,6 +165,8 @@ impl <R: Read + Seek + Debug> ClassLoader for JarClassLoader<R> {
 pub enum ClassResolveError {
     ReadError(ClassFileReadError),
     NoSuchClass(String),
+    NoSuchField(ClassId, String, TypeDescriptor),
+    NoSuchMethod(ClassId, String, MethodDescriptor),
     TooManyClasses,
     WhileResolvingClass(ClassId, Box<ClassResolveError>)
 }
@@ -173,6 +176,58 @@ pub enum ResolvedClass {
     User(Class),
     Primitive(PrimitiveType),
     Array(u8, ClassId)
+}
+
+impl ResolvedClass {
+    pub fn name(&self, env: &ClassEnvironment) -> String {
+        let mut name = String::new();
+
+        match *self {
+            ResolvedClass::User(ref class) => {
+                write!(name, "{}", class.meta.name).unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Byte) => {
+                write!(name, "byte").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Char) => {
+                write!(name, "char").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Double) => {
+                write!(name, "double").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Float) => {
+                write!(name, "float").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Int) => {
+                write!(name, "int").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Long) => {
+                write!(name, "long").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Short) => {
+                write!(name, "short").unwrap();
+            },
+            ResolvedClass::Primitive(PrimitiveType::Boolean) => {
+                write!(name, "boolean").unwrap();
+            },
+            ResolvedClass::Array(dims, inner_id) => {
+                for _ in 0..dims {
+                    write!(name, "[").unwrap();
+                };
+                match **env.get(inner_id) {
+                    ResolvedClass::User(ref class) => {
+                        write!(name, "L{};", class.meta.name).unwrap();
+                    },
+                    ResolvedClass::Primitive(t) => {
+                        write!(name, "{}", t).unwrap();
+                    },
+                    ResolvedClass::Array(_, _) => unreachable!()
+                };
+            }
+        };
+
+        name
+    }
 }
 
 #[derive(Debug)]
@@ -415,6 +470,225 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
         resolving_class.meta.interface_ids = resolving_class.interfaces.iter().map(|&i| {
             get_constant_pool_class(&resolving_class.constant_pool, i)
         }).collect();
+
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+        } else {
+            unreachable!();
+        };
+    };
+
+    Result::Ok(())
+}
+
+fn find_with_super<T, U>(
+    env: &ClassEnvironment,
+    class_id: ClassId,
+    resolving_t: &[T],
+    resolving_meta: &ClassMeta,
+    get_class_t: &impl Fn (&Class) -> &[T],
+    find_t: &impl Fn(ClassId, &[T]) -> Option<U>
+) -> Option<U> {
+    let (t, meta) = if class_id == resolving_meta.this_id {
+        (resolving_t, resolving_meta)
+    } else {
+        match **env.get(class_id) {
+            ResolvedClass::User(ref class) => (get_class_t(class), &class.meta),
+            ResolvedClass::Primitive(_) => {
+                return None;
+            },
+            ResolvedClass::Array(_, _) => {
+                return find_with_super(
+                    env,
+                    ClassId::JAVA_LANG_OBJECT,
+                    resolving_t,
+                    resolving_meta,
+                    get_class_t,
+                    find_t
+                );
+            }
+        }
+    };
+
+    find_t(class_id, t).or_else(|| {
+        meta.interface_ids.iter()
+            .cloned()
+            .chain(itertools::repeat_n(meta.super_id, 1))
+            .filter_map(|id| {
+                if id != ClassId::UNRESOLVED {
+                    find_with_super(env, id, resolving_t, resolving_meta, get_class_t, find_t)
+                } else {
+                    None
+                }
+            })
+            .next()
+    })
+}
+
+fn find_field(
+    env: &ClassEnvironment,
+    class_id: ClassId,
+    resolving_fields: &[Field],
+    resolving_meta: &ClassMeta,
+    fieldref: &ConstantFieldref
+) -> FieldId {
+    find_with_super(
+        env,
+        class_id,
+        resolving_fields,
+        resolving_meta,
+        &|class| &class.fields,
+        &|class_id, fields| {
+            fields.iter().enumerate()
+                .filter(|(_, f)| f.name == fieldref.name && f.descriptor == fieldref.descriptor)
+                .next()
+                .map(|(i, _)| FieldId(class_id, i as u16))
+        }
+    ).unwrap_or(FieldId::UNRESOLVED)
+}
+
+lazy_static! {
+    static ref METHODHANDLE_INVOKE_DESCRIPTOR: MethodDescriptor = MethodDescriptor {
+        return_type: Some(TypeDescriptor {
+            array_dims: 0,
+            flat: FlatTypeDescriptor::Reference(Arc::from(String::from("java/lang/Object").into_boxed_str()))
+        }),
+        param_types: vec![
+            TypeDescriptor {
+                array_dims: 1,
+                flat: FlatTypeDescriptor::Reference(Arc::from(String::from("java/lang/Object").into_boxed_str()))
+            }
+        ]
+    };
+}
+
+fn is_signature_polymorphic(class_id: ClassId, method: &Method) -> bool {
+    class_id == ClassId::JAVA_LANG_INVOKE_METHODHANDLE
+        && method.descriptor == *METHODHANDLE_INVOKE_DESCRIPTOR
+        && method.flags.contains(MethodFlags::VARARGS | MethodFlags::NATIVE)
+}
+
+fn is_compatible_method(
+    class_id: ClassId,
+    method: &Method,
+    methodref: &ConstantMethodref
+) -> bool {
+    method.name == methodref.name && (method.descriptor == methodref.descriptor || is_signature_polymorphic(class_id, method))
+}
+
+fn find_method(
+    env: &ClassEnvironment,
+    class_id: ClassId,
+    resolving_methods: &[Method],
+    resolving_meta: &ClassMeta,
+    methodref: &ConstantMethodref
+) -> MethodId {
+    find_with_super(
+        env,
+        class_id,
+        resolving_methods,
+        resolving_meta,
+        &|class| &class.methods,
+        &|class_id, methods| {
+            methods.iter().enumerate()
+                .filter(|(_, m)| is_compatible_method(class_id, m, methodref))
+                .next()
+                .map(|(i, _)| MethodId(class_id, i as u16))
+        }
+    ).unwrap_or(MethodId::UNRESOLVED)
+}
+
+pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
+    let mut resolving_class = Box::new(Class::dummy_class());
+    let mut class_ids = vec![];
+
+    for resolving_id in env.class_ids() {
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+
+            if verbose {
+                eprintln!("Resolving subitems from {}...", resolving_class.meta.name);
+            };
+        } else {
+            continue;
+        };
+
+        class_ids.clear();
+        class_ids.extend(resolving_class.constant_pool.iter().map(|cpe| {
+            if let ConstantPoolEntry::Class(ref cpe) = *cpe {
+                cpe.class_id
+            } else {
+                ClassId::UNRESOLVED
+            }
+        }));
+
+        for cpe in resolving_class.constant_pool.iter_mut() {
+            match *cpe {
+                ConstantPoolEntry::Fieldref(ref mut cpe) => {
+                    let class_id = class_ids[cpe.class as usize];
+
+                    cpe.field_id = if class_id != ClassId::UNRESOLVED {
+                        let field_id = find_field(env, class_id, &resolving_class.fields, &resolving_class.meta, cpe);
+
+                        if field_id == FieldId::UNRESOLVED {
+                            let err = ClassResolveError::NoSuchField(
+                                class_id,
+                                String::from(cpe.name.as_ref()),
+                                cpe.descriptor.clone()
+                            );
+
+                            if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+                                mem::swap(class, &mut resolving_class);
+                            } else {
+                                unreachable!();
+                            };
+
+                            return Result::Err(ClassResolveError::WhileResolvingClass(resolving_id, Box::new(err)));
+                        };
+
+                        field_id
+                    } else {
+                        FieldId::UNRESOLVED
+                    };
+
+                    if verbose {
+                        eprintln!("    Resolved field {} {} as {:?}", cpe.name, cpe.descriptor, cpe.field_id);
+                    };
+                },
+                ConstantPoolEntry::Methodref(ref mut cpe) | ConstantPoolEntry::InterfaceMethodref(ref mut cpe) => {
+                    let class_id = class_ids[cpe.class as usize];
+
+                    cpe.method_id = if class_id != ClassId::UNRESOLVED {
+                        let method_id = find_method(env, class_id, &resolving_class.methods, &resolving_class.meta, cpe);
+
+                        if method_id == MethodId::UNRESOLVED {
+                            let err = ClassResolveError::NoSuchMethod(
+                                class_id,
+                                String::from(cpe.name.as_ref()),
+                                cpe.descriptor.clone()
+                            );
+
+                            if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+                                mem::swap(class, &mut resolving_class);
+                            } else {
+                                unreachable!();
+                            };
+
+                            return Result::Err(ClassResolveError::WhileResolvingClass(resolving_id, Box::new(err)));
+                        };
+
+                        method_id
+                    } else {
+                        MethodId::UNRESOLVED
+                    };
+
+                    if verbose {
+                        eprintln!("    Resolved method {}{} as {:?}", cpe.name, cpe.descriptor, cpe.method_id);
+                    };
+                }
+                _ => {}
+            };
+        };
 
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
