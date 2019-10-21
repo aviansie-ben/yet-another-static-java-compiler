@@ -162,7 +162,8 @@ impl <R: Read + Seek + Debug> ClassLoader for JarClassLoader<R> {
 pub enum ClassResolveError {
     ReadError(ClassFileReadError),
     NoSuchClass(String),
-    TooManyClasses
+    TooManyClasses,
+    WhileResolvingClass(ClassId, Box<ClassResolveError>)
 }
 
 #[derive(Debug, Clone)]
@@ -372,7 +373,13 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
                                 continue;
                             },
                             Result::Err(err) => {
-                                return Result::Err(err);
+                                if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+                                    mem::swap(class, &mut resolving_class);
+                                } else {
+                                    unreachable!();
+                                };
+
+                                return Result::Err(ClassResolveError::WhileResolvingClass(resolving_id, Box::new(err)));
                             }
                         };
 
