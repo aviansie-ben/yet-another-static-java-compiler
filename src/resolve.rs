@@ -188,7 +188,7 @@ impl ClassEnvironmentInternals {
         let id = ClassId(self.classes.len() as u32);
 
         if let ResolvedClass::User(ref mut class) = *class {
-            class.id = id;
+            class.meta.this_id = id;
 
             if let ConstantPoolEntry::Class(ref mut cp_entry) = class.constant_pool[class.this_class_cp as usize] {
                 cp_entry.class_id = id;
@@ -203,7 +203,7 @@ impl ClassEnvironmentInternals {
 
     fn add_class(&mut self, name: &str, mut class: Box<ResolvedClass>) -> ClassId {
         if let ResolvedClass::User(ref mut class) = *class {
-            class.name = Arc::from(name.to_owned().into_boxed_str());
+            class.meta.name = Arc::from(name.to_owned().into_boxed_str());
         };
 
         let id = self.add_unnamed_class(class);
@@ -340,21 +340,18 @@ impl ClassEnvironment {
     }
 }
 
-pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
-    let mut resolving_class = Box::new(Class {
-        version: (0, 0),
-        constant_pool: vec![],
-        flags: ClassFlags::empty(),
-        this_class_cp: 0,
-        super_class_cp: 0,
-        interfaces: vec![],
-        fields: vec![],
-        methods: vec![],
-        attributes: vec![],
+fn get_constant_pool_class(constant_pool: &[ConstantPoolEntry], i: u16) -> ClassId {
+    if i == 0 {
+        ClassId::UNRESOLVED
+    } else if let ConstantPoolEntry::Class(ref cpe) = constant_pool[i as usize] {
+        cpe.class_id
+    } else {
+        unreachable!()
+    }
+}
 
-        id: ClassId::UNRESOLVED,
-        name: Arc::from(String::from("").into_boxed_str())
-    });
+pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
+    let mut resolving_class = Box::new(Class::dummy_class());
     let mut worklist = VecDeque::new();
     let mut not_found = HashSet::new();
 
@@ -367,7 +364,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
             mem::swap(class, &mut resolving_class);
 
             if verbose {
-                eprintln!("Resolving {}...", resolving_class.name);
+                eprintln!("Resolving classes from {}...", resolving_class.meta.name);
             };
         } else {
             continue;
@@ -413,6 +410,11 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
                 };
             };
         };
+
+        resolving_class.meta.super_id = get_constant_pool_class(&resolving_class.constant_pool, resolving_class.super_class_cp);
+        resolving_class.meta.interface_ids = resolving_class.interfaces.iter().map(|&i| {
+            get_constant_pool_class(&resolving_class.constant_pool, i)
+        }).collect();
 
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);

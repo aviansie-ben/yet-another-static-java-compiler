@@ -355,6 +355,14 @@ pub struct Attribute {
 }
 
 #[derive(Debug, Clone)]
+pub struct ClassMeta {
+    pub this_id: ClassId,
+    pub super_id: ClassId,
+    pub interface_ids: Vec<ClassId>,
+    pub name: Arc<str>
+}
+
+#[derive(Debug, Clone)]
 pub struct Class {
     pub version: (u16, u16),
     pub constant_pool: Vec<ConstantPoolEntry>,
@@ -366,8 +374,29 @@ pub struct Class {
     pub methods: Vec<Method>,
     pub attributes: Vec<Attribute>,
 
-    pub id: ClassId,
-    pub name: Arc<str>
+    pub meta: ClassMeta
+}
+
+impl Class {
+    pub fn dummy_class() -> Class {
+        Class {
+            version: (0, 0),
+            constant_pool: vec![],
+            flags: ClassFlags::empty(),
+            this_class_cp: 0,
+            super_class_cp: 0,
+            interfaces: vec![],
+            fields: vec![],
+            methods: vec![],
+            attributes: vec![],
+            meta: ClassMeta {
+                this_id: ClassId::UNRESOLVED,
+                super_id: ClassId::UNRESOLVED,
+                interface_ids: vec![],
+                name: Arc::from(String::new().into_boxed_str())
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -731,8 +760,11 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
         fields,
         methods,
         attributes,
-
-        id: ClassId::UNRESOLVED,
-        name: Arc::from(String::new().into_boxed_str())
+        meta: ClassMeta {
+            this_id: ClassId::UNRESOLVED,
+            super_id: ClassId::UNRESOLVED,
+            interface_ids: vec![],
+            name: Arc::from(String::new().into_boxed_str())
+        }
     })
 }
