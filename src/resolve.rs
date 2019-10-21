@@ -51,6 +51,10 @@ impl MethodId {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct FieldId(pub ClassId, pub u16);
 
+impl FieldId {
+    pub const UNRESOLVED: FieldId = FieldId(ClassId::UNRESOLVED, !0);
+}
+
 pub trait ClassLoader: Debug {
     fn try_load(
         &self,

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bitflags::bitflags;
 use byteorder::{BigEndian, ReadBytesExt};
 
-use crate::resolve::ClassId;
+use crate::resolve::{ClassId, FieldId, MethodId};
 
 bitflags! {
     pub struct ClassFlags: u16 {
@@ -252,14 +252,16 @@ pub struct ConstantClass {
 pub struct ConstantFieldref {
     pub class: u16,
     pub name: Arc<str>,
-    pub descriptor: TypeDescriptor
+    pub descriptor: TypeDescriptor,
+    pub field_id: FieldId
 }
 
 #[derive(Debug, Clone)]
 pub struct ConstantMethodref {
     pub class: u16,
     pub name: Arc<str>,
-    pub descriptor: MethodDescriptor
+    pub descriptor: MethodDescriptor,
+    pub method_id: MethodId
 }
 
 #[derive(Debug, Clone)]
@@ -503,7 +505,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                         d
                     } else {
                         return Result::Err(ClassFileReadError::InvalidConstantPoolEntry(i));
-                    }
+                    },
+                    field_id: FieldId::UNRESOLVED
                 }
             }),
             RawConstantPoolEntry::Methodref { class_index, name_and_type_index } => ConstantPoolEntry::Methodref({
@@ -515,7 +518,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                         d
                     } else {
                         return Result::Err(ClassFileReadError::InvalidConstantPoolEntry(i));
-                    }
+                    },
+                    method_id: MethodId::UNRESOLVED
                 }
             }),
             RawConstantPoolEntry::InterfaceMethodref { class_index, name_and_type_index } => ConstantPoolEntry::InterfaceMethodref({
@@ -527,7 +531,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                         d
                     } else {
                         return Result::Err(ClassFileReadError::InvalidConstantPoolEntry(i));
-                    }
+                    },
+                    method_id: MethodId::UNRESOLVED
                 }
             }),
             RawConstantPoolEntry::String { string_index } => ConstantPoolEntry::String(ConstantString {
