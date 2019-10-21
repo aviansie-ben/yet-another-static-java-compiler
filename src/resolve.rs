@@ -385,8 +385,15 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
                         if verbose {
                             eprintln!("    Loading {}...", cpe.name);
                         };
-                        let resolved_id = match env.load(&cpe.name) {
-                            Result::Ok(resolved_id) => resolved_id,
+
+                        let old_num_classes = env.num_classes();
+                        match env.load(&cpe.name) {
+                            Result::Ok(resolved_id) => {
+                                for loaded_id in old_num_classes..env.num_classes() {
+                                    worklist.push_back(ClassId(loaded_id as u32))
+                                };
+                                resolved_id
+                            },
                             Result::Err(ClassResolveError::NoSuchClass(_)) => {
                                 eprintln!("WARNING: Unable to find class {}", cpe.name);
                                 not_found.insert(cpe.name.clone());
@@ -401,10 +408,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
 
                                 return Result::Err(ClassResolveError::WhileResolvingClass(resolving_id, Box::new(err)));
                             }
-                        };
-
-                        worklist.push_back(resolved_id);
-                        resolved_id
+                        }
                     };
                 };
             };
