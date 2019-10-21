@@ -282,13 +282,21 @@ impl ClassEnvironment {
 
             let class: ResolvedClass = class_loaders.iter().map(|cl| {
                 cl.try_load(name, &mut |name| {
-                    do_load(name, class_loaders, internals)
+                    do_find_or_load(name, class_loaders, internals)
                 })
             }).filter_map(|result| result).next().unwrap_or_else(
                 || Result::Err(ClassResolveError::NoSuchClass(name.to_owned()))
             )?;
 
             Result::Ok(internals.add_class(name, Box::new(class)))
+        }
+
+        fn do_find_or_load(name: &str, class_loaders: &[Box<dyn ClassLoader>], internals: &mut ClassEnvironmentInternals) -> Result<ClassId, ClassResolveError> {
+            if let Some(&existing_id) = internals.class_names.get(name) {
+                Result::Ok(existing_id)
+            } else {
+                do_load(name, class_loaders, internals)
+            }
         }
 
         do_load(name, &self.class_loaders, &mut self.internals)
