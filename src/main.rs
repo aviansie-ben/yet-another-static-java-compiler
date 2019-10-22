@@ -1,8 +1,10 @@
 #![feature(try_blocks)]
 
+pub mod bytecode;
 pub mod classfile;
 pub mod resolve;
 
+use byteorder::ByteOrder;
 use clap::{App, Arg, ArgMatches};
 
 fn parse_args<'a>() -> ArgMatches<'a> {
@@ -98,5 +100,23 @@ fn main() {
         eprint!("error during resolution: ");
         print_resolve_error(&env, &err);
         return;
+    };
+
+    for id in env.class_ids() {
+        if let resolve::ResolvedClass::User(ref class) = **env.get(id) {
+            for m in class.methods.iter() {
+                for a in m.attributes.iter() {
+                    if a.name.as_ref() == "Code" {
+                        println!("{}.{}{}", class.meta.name, m.name, m.descriptor);
+                        let len = byteorder::BigEndian::read_u32(&a.data[4..]) as usize;
+                        let code = &a.data[8..(8 + len)];
+
+                        for instr in bytecode::BytecodeIterator(code, 0) {
+                            println!("{:?}", instr.unwrap());
+                        };
+                    };
+                };
+            };
+        };
     };
 }
