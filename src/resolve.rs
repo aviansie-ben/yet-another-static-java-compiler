@@ -29,6 +29,7 @@ impl ClassId {
     pub const PRIMITIVE_BOOLEAN: ClassId = ClassId(7);
     pub const JAVA_LANG_OBJECT: ClassId = ClassId(8);
     pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(9);
+    pub const JAVA_LANG_STRING: ClassId = ClassId(10);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -324,6 +325,10 @@ impl ClassEnvironment {
         assert_eq!(
             self.load("java/lang/invoke/MethodHandle")?,
             ClassId::JAVA_LANG_INVOKE_METHODHANDLE
+        );
+        assert_eq!(
+            self.load("java/lang/String")?,
+            ClassId::JAVA_LANG_STRING
         );
 
         Result::Ok(())
