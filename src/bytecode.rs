@@ -476,6 +476,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
     })
 }
 
+#[derive(Debug, Clone)]
 pub struct BytecodeIterator<'a>(pub &'a [u8], pub usize);
 
 impl <'a> Iterator for BytecodeIterator<'a> {

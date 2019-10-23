@@ -342,11 +342,31 @@ pub struct Field {
 }
 
 #[derive(Debug, Clone)]
+pub struct MethodSummary {
+    pub may_virtual_call: Vec<MethodId>,
+    pub may_special_call: Vec<MethodId>,
+    pub may_construct: Vec<ClassId>,
+    pub may_clinit: Vec<ClassId>
+}
+
+impl MethodSummary {
+    pub fn empty() -> MethodSummary {
+        MethodSummary {
+            may_virtual_call: vec![],
+            may_special_call: vec![],
+            may_construct: vec![],
+            may_clinit: vec![]
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Method {
     pub flags: MethodFlags,
     pub name: Arc<str>,
     pub descriptor: MethodDescriptor,
-    pub attributes: Vec<Attribute>
+    pub attributes: Vec<Attribute>,
+    pub summary: MethodSummary
 }
 
 #[derive(Debug, Clone)]
@@ -706,7 +726,7 @@ fn parse_method<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Result<
 
     let attributes = parse_attributes(cp, r)?;
 
-    Result::Ok(Method { flags, name, descriptor, attributes })
+    Result::Ok(Method { flags, name, descriptor, attributes, summary: MethodSummary::empty() })
 }
 
 fn parse_methods<R: Read>(cp: &[ConstantPoolEntry], r: &mut R) -> Result<Vec<Method>, ClassFileReadError> {
