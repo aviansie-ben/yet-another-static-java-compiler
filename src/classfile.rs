@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bitflags::bitflags;
 use byteorder::{BigEndian, ReadBytesExt};
+use lazy_static::lazy_static;
 
 use crate::resolve::{ClassId, FieldId, MethodId};
 
@@ -359,6 +360,8 @@ pub struct ClassMeta {
     pub this_id: ClassId,
     pub super_id: ClassId,
     pub interface_ids: Vec<ClassId>,
+    pub clinit_method: Option<u16>,
+
     pub name: Arc<str>
 }
 
@@ -393,6 +396,7 @@ impl Class {
                 this_id: ClassId::UNRESOLVED,
                 super_id: ClassId::UNRESOLVED,
                 interface_ids: vec![],
+                clinit_method: None,
                 name: Arc::from(String::new().into_boxed_str())
             }
         }
@@ -716,6 +720,20 @@ fn parse_methods<R: Read>(cp: &[ConstantPoolEntry], r: &mut R) -> Result<Vec<Met
     Result::Ok(methods)
 }
 
+lazy_static! {
+    static ref NULLARY_METHOD_DESCRIPTOR: MethodDescriptor = MethodDescriptor {
+        return_type: None,
+        param_types: vec![]
+    };
+}
+
+fn find_clinit_method(methods: &[Method]) -> Option<u16> {
+    methods.iter().enumerate()
+        .filter(|(_, m)| m.name.as_ref() == "<clinit>" && m.descriptor == *NULLARY_METHOD_DESCRIPTOR)
+        .map(|(i, _)| i as u16)
+        .next()
+}
+
 pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError> {
     if r.read_u32::<BigEndian>()? != 0xcafebabe {
         return Result::Err(ClassFileReadError::InvalidMagic);
@@ -750,6 +768,8 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
     let methods = parse_methods(&constant_pool, r)?;
     let attributes = parse_attributes(&constant_pool, r)?;
 
+    let clinit_method = find_clinit_method(&methods);
+
     Result::Ok(Class {
         version: (version_major, version_minor),
         constant_pool,
@@ -764,6 +784,7 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
             this_id: ClassId::UNRESOLVED,
             super_id: ClassId::UNRESOLVED,
             interface_ids: vec![],
+            clinit_method,
             name: Arc::from(String::new().into_boxed_str())
         }
     })
