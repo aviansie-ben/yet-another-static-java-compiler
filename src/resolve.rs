@@ -812,6 +812,47 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
         };
     };
 
+    let mut worklist: VecDeque<_> = overridden_by.keys().cloned().collect();
+    let mut inherited_overrides = vec![];
+
+    while let Some(resolving_id) = worklist.pop_front() {
+        for overrider_id in overridden_by[&resolving_id].iter() {
+            if let Some(overridden_by) = overridden_by.get(overrider_id) {
+                inherited_overrides.extend(overridden_by.iter().cloned());
+            };
+        };
+
+        let overridden_by = overridden_by.get_mut(&resolving_id).unwrap();
+
+        let mut changed = false;
+        for overrider_id in inherited_overrides.drain(..) {
+            if !overridden_by.contains(&overrider_id) {
+                overridden_by.push(overrider_id);
+                changed = true;
+            };
+        };
+
+        if changed {
+            let method = if let ResolvedClass::User(ref class) = **env.get(resolving_id.0) {
+                &class.methods[resolving_id.1 as usize]
+            } else {
+                unreachable!();
+            };
+
+            if method.overrides.overrides_virtual != MethodId::UNRESOLVED {
+                if !worklist.contains(&method.overrides.overrides_virtual) {
+                    worklist.push_back(method.overrides.overrides_virtual);
+                };
+            };
+
+            for interface_method in method.overrides.overrides_interface.iter().cloned() {
+                if !worklist.contains(&interface_method) {
+                    worklist.push_back(interface_method);
+                };
+            };
+        };
+    };
+
     for resolving_id in env.class_ids() {
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
