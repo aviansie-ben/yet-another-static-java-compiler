@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map;
 use std::fmt::{Debug, Write};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
@@ -494,6 +495,10 @@ fn find_with_super<T, U>(
     get_class_t: &impl Fn (&Class) -> &[T],
     find_t: &impl Fn(ClassId, &[T]) -> Option<U>
 ) -> Option<U> {
+    if class_id == ClassId::UNRESOLVED {
+        return None;
+    };
+
     let (t, meta) = if class_id == resolving_meta.this_id {
         (resolving_t, resolving_meta)
     } else {
@@ -692,6 +697,145 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                     };
                 }
                 _ => {}
+            };
+        };
+
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+        } else {
+            unreachable!();
+        };
+    };
+
+    Result::Ok(())
+}
+
+pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
+    let mut resolving_class = Box::new(Class::dummy_class());
+    let mut overridden_by: HashMap<MethodId, Vec<MethodId>> = HashMap::new();
+
+    for resolving_id in env.class_ids() {
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+
+            if verbose {
+                eprintln!("Resolving overriding from {}...", resolving_class.meta.name);
+            };
+        } else {
+            continue;
+        };
+
+        let resolving_meta = &resolving_class.meta;
+
+        for (i, m) in resolving_class.methods.iter_mut().enumerate() {
+            if m.flags.intersects(MethodFlags::STATIC | MethodFlags::PRIVATE) || m.name.as_ref() == "<init>" {
+                continue;
+            };
+
+            let method_id = MethodId(resolving_class.meta.this_id, i as u16);
+
+            if verbose {
+                eprintln!("    {}{}:", m.name, m.descriptor);
+            };
+
+            let methodref = ConstantMethodref {
+                class: 0,
+                name: m.name.clone(),
+                descriptor: m.descriptor.clone(),
+                method_id: MethodId::UNRESOLVED
+            };
+
+            m.overrides.overrides_virtual = find_method(
+                env,
+                resolving_class.meta.super_id,
+                &[],
+                resolving_meta,
+                &methodref
+            );
+
+            m.overrides.overrides_interface = resolving_class.meta.interface_ids.iter().cloned()
+                .filter_map(|interface| {
+                    let method = find_method(env, interface, &[], resolving_meta, &methodref);
+                    if method != MethodId::UNRESOLVED {
+                        Some(method)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if m.overrides.overrides_virtual != MethodId::UNRESOLVED {
+                match overridden_by.entry(m.overrides.overrides_virtual) {
+                    hash_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(method_id);
+                    },
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(vec![method_id]);
+                    }
+                };
+            };
+
+            for &interface_method in m.overrides.overrides_interface.iter() {
+                match overridden_by.entry(interface_method) {
+                    hash_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(method_id);
+                    },
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(vec![method_id]);
+                    }
+                };
+            };
+
+            if verbose {
+                if m.overrides.overrides_virtual != MethodId::UNRESOLVED {
+                    eprintln!("        Virtual override for {}", env.get(m.overrides.overrides_virtual.0).name(env));
+                } else {
+                    eprintln!("        Not a virtual override");
+                };
+
+                if !m.overrides.overrides_interface.is_empty() {
+                    eprint!("        Interface override for:");
+                    for interface_method in m.overrides.overrides_interface.iter() {
+                        eprint!(" {}", env.get(interface_method.0).name(env));
+                    };
+                    eprintln!();
+                } else {
+                    eprintln!("        Does not override any interfaces");
+                };
+            };
+        };
+
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+        } else {
+            unreachable!();
+        };
+    };
+
+    for resolving_id in env.class_ids() {
+        if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            mem::swap(class, &mut resolving_class);
+
+            if verbose {
+                eprintln!("Resolving overriding of {}...", resolving_class.meta.name);
+            };
+        } else {
+            continue;
+        };
+
+        for (i, m) in resolving_class.methods.iter_mut().enumerate() {
+            let method_id = MethodId(resolving_class.meta.this_id, i as u16);
+
+            if let Some(overridden_by) = overridden_by.remove(&method_id) {
+                if verbose {
+                    eprint!("    {}{} is overridden by:", m.name, m.descriptor);
+                    for overrider in overridden_by.iter() {
+                        eprint!(" {}", env.get(overrider.0).name(env));
+                    };
+                    eprintln!();
+                };
+
+                m.overrides.overridden_by = overridden_by;
             };
         };
 

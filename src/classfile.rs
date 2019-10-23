@@ -361,12 +361,30 @@ impl MethodSummary {
 }
 
 #[derive(Debug, Clone)]
+pub struct MethodOverrideInfo {
+    pub overrides_virtual: MethodId,
+    pub overrides_interface: Vec<MethodId>,
+    pub overridden_by: Vec<MethodId>
+}
+
+impl MethodOverrideInfo {
+    pub fn empty() -> MethodOverrideInfo {
+        MethodOverrideInfo {
+            overrides_virtual: MethodId::UNRESOLVED,
+            overrides_interface: vec![],
+            overridden_by: vec![]
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Method {
     pub flags: MethodFlags,
     pub name: Arc<str>,
     pub descriptor: MethodDescriptor,
     pub attributes: Vec<Attribute>,
-    pub summary: MethodSummary
+    pub summary: MethodSummary,
+    pub overrides: MethodOverrideInfo
 }
 
 #[derive(Debug, Clone)]
@@ -726,7 +744,14 @@ fn parse_method<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Result<
 
     let attributes = parse_attributes(cp, r)?;
 
-    Result::Ok(Method { flags, name, descriptor, attributes, summary: MethodSummary::empty() })
+    Result::Ok(Method {
+        flags,
+        name,
+        descriptor,
+        attributes,
+        summary: MethodSummary::empty(),
+        overrides: MethodOverrideInfo::empty()
+    })
 }
 
 fn parse_methods<R: Read>(cp: &[ConstantPoolEntry], r: &mut R) -> Result<Vec<Method>, ClassFileReadError> {

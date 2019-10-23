@@ -103,6 +103,12 @@ fn main() {
         return;
     };
 
+    if let Result::Err(err) = resolve::resolve_overriding(&mut env, args.is_present("verbose")) {
+        eprint!("error during resolution: ");
+        print_resolve_error(&env, &err);
+        return;
+    };
+
     for id in env.class_ids() {
         if let resolve::ResolvedClass::User(ref mut class) = **env.get_mut(id) {
             for m in class.methods.iter_mut() {
