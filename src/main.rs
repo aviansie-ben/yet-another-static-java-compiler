@@ -2,11 +2,13 @@
 
 pub mod bytecode;
 pub mod classfile;
+pub mod liveness;
 pub mod resolve;
 pub mod static_interp;
 
 use byteorder::ByteOrder;
 use clap::{App, Arg, ArgMatches};
+use lazy_static::lazy_static;
 
 fn parse_args<'a>() -> ArgMatches<'a> {
     App::new("Mocha")
@@ -58,6 +60,18 @@ fn print_resolve_error(env: &resolve::ClassEnvironment, err: &resolve::ClassReso
     }
 }
 
+lazy_static! {
+    static ref MAIN_DESCRIPTOR: classfile::MethodDescriptor = classfile::MethodDescriptor {
+        return_type: None,
+        param_types: vec![
+            classfile::TypeDescriptor {
+                array_dims: 1,
+                flat: classfile::FlatTypeDescriptor::Reference(std::sync::Arc::from(String::from("java/lang/String").into_boxed_str()))
+            }
+        ]
+    };
+}
+
 fn main() {
     let args = parse_args();
     let mut class_loaders: Vec<Box<dyn resolve::ClassLoader>> = vec![Box::new(resolve::ArrayClassLoader())];
@@ -89,6 +103,21 @@ fn main() {
             return;
         }
     };
+    let main_method = match **env.get(main_class) {
+        resolve::ResolvedClass::User(ref main_class) => {
+            main_class.methods.iter().enumerate()
+                .filter(|(_, m)| m.name.as_ref() == "main" && m.descriptor == *MAIN_DESCRIPTOR && m.flags.contains(classfile::MethodFlags::STATIC | classfile::MethodFlags::PUBLIC))
+                .map(|(i, _)| i)
+                .next()
+        },
+        _ => None
+    };
+    let main_method = resolve::MethodId(main_class, if let Some(main_method) = main_method {
+        main_method as u16
+    } else {
+        eprintln!("Class {} has no public static method main{}", args.value_of("main").unwrap(), *MAIN_DESCRIPTOR);
+        return;
+    });
 
     if let Result::Err(err) = resolve::resolve_all_classes(&mut env, args.is_present("verbose")) {
         eprint!("error during resolution: ");
@@ -121,11 +150,21 @@ fn main() {
                             bytecode::BytecodeIterator(code, 0),
                             &class.constant_pool
                         );
-
-                        println!("{}.{}{} = {:#?}", class.meta.name, m.name, m.descriptor, m.summary);
                     };
                 };
             };
+        };
+    };
+
+    let liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
+    println!("Found {} classes requiring initialization ({} classes constructible)", liveness.needs_clinit.len(), liveness.may_construct.len());
+
+    for m in liveness.may_call {
+        let class = env.get(m.0).as_user_class();
+        let method = &class.methods[m.1 as usize];
+
+        if method.flags.contains(classfile::MethodFlags::NATIVE) {
+            println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
         };
     };
 }

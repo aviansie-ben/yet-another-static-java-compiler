@@ -230,6 +230,14 @@ impl ResolvedClass {
 
         name
     }
+
+    pub fn as_user_class(&self) -> &Class {
+        if let ResolvedClass::User(ref class) = *self {
+            class
+        } else {
+            unreachable!();
+        }
+    }
 }
 
 #[derive(Debug)]
