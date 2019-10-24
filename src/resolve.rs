@@ -31,6 +31,7 @@ impl ClassId {
     pub const JAVA_LANG_OBJECT: ClassId = ClassId(8);
     pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(9);
     pub const JAVA_LANG_STRING: ClassId = ClassId(10);
+    pub const JAVA_LANG_CLASS: ClassId = ClassId(11);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -338,6 +339,10 @@ impl ClassEnvironment {
         assert_eq!(
             self.load("java/lang/String")?,
             ClassId::JAVA_LANG_STRING
+        );
+        assert_eq!(
+            self.load("java/lang/Class")?,
+            ClassId::JAVA_LANG_CLASS
         );
 
         Result::Ok(())
