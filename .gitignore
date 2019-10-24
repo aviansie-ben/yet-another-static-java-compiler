@@ -2,6 +2,9 @@
 /target
 **/*.rs.bk
 
+# Java
+*.class
+
 # IntelliJ IDEA
 .idea
 *.iml
