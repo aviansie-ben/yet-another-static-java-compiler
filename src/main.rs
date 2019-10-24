@@ -87,6 +87,7 @@ fn main() {
         })
     };
 
+    let start_load_classes = std::time::Instant::now();
     let mut env = resolve::ClassEnvironment::new(class_loaders);
 
     if let Result::Err(err) = env.load_bootstrap_classes() {
@@ -124,8 +125,9 @@ fn main() {
         print_resolve_error(&env, &err);
         return;
     };
-    println!("Resolved {} classes ({} class files)", env.num_classes(), env.num_user_classes());
+    println!("Loaded {} classes ({} class files) in {:.3}s", env.num_classes(), env.num_user_classes(), start_load_classes.elapsed().as_secs_f32());
 
+    let start_resolve_subitems = std::time::Instant::now();
     if let Result::Err(err) = resolve::resolve_all_subitem_references(&mut env, args.is_present("verbose")) {
         eprint!("error during resolution: ");
         print_resolve_error(&env, &err);
@@ -137,7 +139,10 @@ fn main() {
         print_resolve_error(&env, &err);
         return;
     };
+    println!("Resolved subitems in {:.3}s", start_resolve_subitems.elapsed().as_secs_f32());
 
+    let start_summarize_methods = std::time::Instant::now();
+    let mut num_methods_summarized = 0;
     for id in env.class_ids() {
         if let resolve::ResolvedClass::User(ref mut class) = **env.get_mut(id) {
             for m in class.methods.iter_mut() {
@@ -150,14 +155,17 @@ fn main() {
                             bytecode::BytecodeIterator(code, 0),
                             &class.constant_pool
                         );
+                        num_methods_summarized += 1;
                     };
                 };
             };
         };
     };
+    println!("Summarized {} methods in {:.3}s", num_methods_summarized, start_summarize_methods.elapsed().as_secs_f32());
 
+    let start_analyze_liveness = std::time::Instant::now();
     let liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
-    println!("Found {} classes requiring initialization ({} classes constructible)", liveness.needs_clinit.len(), liveness.may_construct.len());
+    println!("Found {} classes requiring initialization ({} classes constructible) in {:.3}s", liveness.needs_clinit.len(), liveness.may_construct.len(), start_analyze_liveness.elapsed().as_secs_f32());
 
     for m in liveness.may_call {
         let class = env.get(m.0).as_user_class();
