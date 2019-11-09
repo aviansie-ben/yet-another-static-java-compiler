@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::collections::hash_map;
 use std::fmt::{Debug, Write};
@@ -6,7 +5,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
 use zip::ZipArchive;
@@ -73,7 +72,7 @@ impl FieldId {
     pub const UNRESOLVED: FieldId = FieldId(ClassId::UNRESOLVED, !0);
 }
 
-pub trait ClassLoader: Debug {
+pub trait ClassLoader: Debug + Send + Sync {
     fn try_load(
         &self,
         name: &str,
@@ -143,22 +142,22 @@ impl ClassLoader for FileClassLoader {
 }
 
 #[derive(Debug)]
-pub struct JarClassLoader<R: Read + Seek + Debug>(RefCell<ZipArchive<R>>);
+pub struct JarClassLoader<R: Read + Seek + Debug + Send + Sync>(Mutex<ZipArchive<R>>);
 
-impl <R: Read + Seek + Debug> JarClassLoader<R> {
+impl <R: Read + Seek + Debug + Send + Sync> JarClassLoader<R> {
     pub fn new(read: R) -> ZipResult<JarClassLoader<R>> {
-        Result::Ok(JarClassLoader(RefCell::new(ZipArchive::new(read)?)))
+        Result::Ok(JarClassLoader(Mutex::new(ZipArchive::new(read)?)))
     }
 }
 
-impl <R: Read + Seek + Debug> ClassLoader for JarClassLoader<R> {
+impl <R: Read + Seek + Debug + Send + Sync> ClassLoader for JarClassLoader<R> {
     fn try_load(
         &self,
         name: &str,
         _: &mut dyn FnMut (&str) -> Result<ClassId, ClassResolveError>
     ) -> Option<Result<ResolvedClass, ClassResolveError>> {
         let name = format!("{}.class", name);
-        let mut archive = self.0.borrow_mut();
+        let mut archive = self.0.lock().unwrap();
         let file = archive.by_name(&name);
 
         match file {
