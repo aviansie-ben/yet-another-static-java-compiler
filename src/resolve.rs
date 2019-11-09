@@ -28,10 +28,22 @@ impl ClassId {
     pub const PRIMITIVE_LONG: ClassId = ClassId(5);
     pub const PRIMITIVE_SHORT: ClassId = ClassId(6);
     pub const PRIMITIVE_BOOLEAN: ClassId = ClassId(7);
-    pub const JAVA_LANG_OBJECT: ClassId = ClassId(8);
-    pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(9);
-    pub const JAVA_LANG_STRING: ClassId = ClassId(10);
-    pub const JAVA_LANG_CLASS: ClassId = ClassId(11);
+
+    pub const PRIMITIVE_BYTE_ARRAY: ClassId = ClassId(8);
+    pub const PRIMITIVE_CHAR_ARRAY: ClassId = ClassId(9);
+    pub const PRIMITIVE_DOUBLE_ARRAY: ClassId = ClassId(10);
+    pub const PRIMITIVE_FLOAT_ARRAY: ClassId = ClassId(11);
+    pub const PRIMITIVE_INT_ARRAY: ClassId = ClassId(12);
+    pub const PRIMITIVE_LONG_ARRAY: ClassId = ClassId(13);
+    pub const PRIMITIVE_SHORT_ARRAY: ClassId = ClassId(14);
+    pub const PRIMITIVE_BOOLEAN_ARRAY: ClassId = ClassId(15);
+
+    pub const JAVA_LANG_OBJECT: ClassId = ClassId(16);
+    pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(17);
+    pub const JAVA_LANG_STRING: ClassId = ClassId(18);
+    pub const JAVA_LANG_CLASS: ClassId = ClassId(19);
+
+    pub const JAVA_LANG_OBJECT_ARRAY: ClassId = ClassId(20);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -328,6 +340,40 @@ impl ClassEnvironment {
             self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Boolean))),
             ClassId::PRIMITIVE_BOOLEAN
         );
+
+        assert_eq!(
+            self.load("[B")?,
+            ClassId::PRIMITIVE_BYTE_ARRAY
+        );
+        assert_eq!(
+            self.load("[C")?,
+            ClassId::PRIMITIVE_CHAR_ARRAY
+        );
+        assert_eq!(
+            self.load("[D")?,
+            ClassId::PRIMITIVE_DOUBLE_ARRAY
+        );
+        assert_eq!(
+            self.load("[F")?,
+            ClassId::PRIMITIVE_FLOAT_ARRAY
+        );
+        assert_eq!(
+            self.load("[I")?,
+            ClassId::PRIMITIVE_INT_ARRAY
+        );
+        assert_eq!(
+            self.load("[J")?,
+            ClassId::PRIMITIVE_LONG_ARRAY
+        );
+        assert_eq!(
+            self.load("[S")?,
+            ClassId::PRIMITIVE_SHORT_ARRAY
+        );
+        assert_eq!(
+            self.load("[Z")?,
+            ClassId::PRIMITIVE_BOOLEAN_ARRAY
+        );
+
         assert_eq!(
             self.load("java/lang/Object")?,
             ClassId::JAVA_LANG_OBJECT
@@ -343,6 +389,11 @@ impl ClassEnvironment {
         assert_eq!(
             self.load("java/lang/Class")?,
             ClassId::JAVA_LANG_CLASS
+        );
+
+        assert_eq!(
+            self.load("[Ljava/lang/Object;")?,
+            ClassId::JAVA_LANG_OBJECT_ARRAY
         );
 
         Result::Ok(())
