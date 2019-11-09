@@ -140,9 +140,11 @@ pub fn analyze_all(env: &ClassEnvironment, main_method: MethodId, verbose: bool)
 
     let mut indent = Indent(0);
 
-    ensure_constructed(env, &mut liveness, ClassId::JAVA_LANG_OBJECT, &mut indent, verbose);
-    ensure_constructed(env, &mut liveness, ClassId::JAVA_LANG_STRING, &mut indent, verbose);
-    ensure_constructed(env, &mut liveness, ClassId::JAVA_LANG_CLASS, &mut indent, verbose);
+    for class_id in ClassId::special_classes() {
+        if class_id != ClassId::JAVA_LANG_INVOKE_METHODHANDLE {
+            ensure_constructed(env, &mut liveness, class_id, &mut indent, verbose);
+        };
+    };
 
     ensure_clinit(env, &mut liveness, main_method.0, &mut indent, verbose);
     analyze_method(env, &mut liveness, main_method, false, &mut indent, verbose);

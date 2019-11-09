@@ -56,6 +56,27 @@ impl ClassId {
             PrimitiveType::Boolean => ClassId::PRIMITIVE_BOOLEAN
         }
     }
+
+    pub fn for_primitive_type_array(t: PrimitiveType) -> ClassId {
+        match t {
+            PrimitiveType::Byte => ClassId::PRIMITIVE_BYTE_ARRAY,
+            PrimitiveType::Char => ClassId::PRIMITIVE_CHAR_ARRAY,
+            PrimitiveType::Double => ClassId::PRIMITIVE_DOUBLE_ARRAY,
+            PrimitiveType::Float => ClassId::PRIMITIVE_FLOAT_ARRAY,
+            PrimitiveType::Int => ClassId::PRIMITIVE_INT_ARRAY,
+            PrimitiveType::Long => ClassId::PRIMITIVE_LONG_ARRAY,
+            PrimitiveType::Short => ClassId::PRIMITIVE_SHORT_ARRAY,
+            PrimitiveType::Boolean => ClassId::PRIMITIVE_BOOLEAN_ARRAY
+        }
+    }
+
+    pub fn num_special_classes() -> u32 {
+        21
+    }
+
+    pub fn special_classes() -> impl Iterator<Item=ClassId> {
+        (0..ClassId::num_special_classes()).map(|i| ClassId(i))
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
