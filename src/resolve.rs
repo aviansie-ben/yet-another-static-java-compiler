@@ -388,6 +388,17 @@ impl ClassEnvironment {
         self.internals.class_names.get(name).map(|&id| id)
     }
 
+    pub fn try_find_for_descriptor(&self, ty: &TypeDescriptor) -> Option<ClassId> {
+        if ty.array_dims > 0 {
+            self.try_find(&format!("{}", ty))
+        } else {
+            match ty.flat {
+                FlatTypeDescriptor::Primitive(ty) => Some(ClassId::for_primitive_type(ty)),
+                FlatTypeDescriptor::Reference(ref name) => self.try_find(name)
+            }
+        }
+    }
+
     pub fn find_or_load(&mut self, name: &str) -> Result<ClassId, ClassResolveError> {
         if let Some(id) = self.try_find(name) {
             Result::Ok(id)
@@ -711,6 +722,10 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                 }
                 _ => {}
             };
+        };
+
+        for f in resolving_class.fields.iter_mut() {
+            f.class_id = env.try_find_for_descriptor(&f.descriptor).unwrap_or(ClassId::UNRESOLVED);
         };
 
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {

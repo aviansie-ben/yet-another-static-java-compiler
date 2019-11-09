@@ -2,6 +2,7 @@
 
 pub mod bytecode;
 pub mod classfile;
+pub mod layout;
 pub mod liveness;
 pub mod resolve;
 pub mod static_interp;
@@ -167,7 +168,7 @@ fn main() {
     let liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
     println!("Found {} classes requiring initialization ({} classes constructible) in {:.3}s", liveness.needs_clinit.len(), liveness.may_construct.len(), start_analyze_liveness.elapsed().as_secs_f32());
 
-    for m in liveness.may_call {
+    for m in liveness.may_call.iter().cloned() {
         let class = env.get(m.0).as_user_class();
         let method = &class.methods[m.1 as usize];
 
@@ -175,4 +176,8 @@ fn main() {
             println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
         };
     };
+
+    let start_layout = std::time::Instant::now();
+    layout::compute_all_layouts(&mut env, &liveness, args.is_present("verbose"));
+    println!("Computed object layouts in {:.3}s", start_layout.elapsed().as_secs_f32());
 }

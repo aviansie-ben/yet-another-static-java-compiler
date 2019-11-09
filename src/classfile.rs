@@ -7,6 +7,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use lazy_static::lazy_static;
 
 use crate::resolve::{ClassId, FieldId, MethodId};
+use crate::layout::ObjectLayout;
 
 bitflags! {
     pub struct ClassFlags: u16 {
@@ -338,7 +339,9 @@ pub struct Field {
     pub flags: FieldFlags,
     pub name: Arc<str>,
     pub descriptor: TypeDescriptor,
-    pub attributes: Vec<Attribute>
+    pub attributes: Vec<Attribute>,
+    pub class_id: ClassId,
+    pub off: u32
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +386,7 @@ pub struct Method {
     pub name: Arc<str>,
     pub descriptor: MethodDescriptor,
     pub attributes: Vec<Attribute>,
+    pub virtual_slot: u32,
     pub summary: MethodSummary,
     pub overrides: MethodOverrideInfo
 }
@@ -414,6 +418,7 @@ pub struct Class {
     pub fields: Vec<Field>,
     pub methods: Vec<Method>,
     pub attributes: Vec<Attribute>,
+    pub layout: ObjectLayout,
 
     pub meta: ClassMeta
 }
@@ -430,6 +435,7 @@ impl Class {
             fields: vec![],
             methods: vec![],
             attributes: vec![],
+            layout: ObjectLayout::empty(),
             meta: ClassMeta {
                 this_id: ClassId::UNRESOLVED,
                 super_id: ClassId::UNRESOLVED,
@@ -703,7 +709,7 @@ fn parse_field<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Result<F
 
     let attributes = parse_attributes(cp, r)?;
 
-    Result::Ok(Field { flags, name, descriptor, attributes })
+    Result::Ok(Field { flags, name, descriptor, attributes, class_id: ClassId::UNRESOLVED, off: !0 })
 }
 
 fn parse_fields<R: Read>(cp: &[ConstantPoolEntry], r: &mut R) -> Result<Vec<Field>, ClassFileReadError> {
@@ -749,6 +755,7 @@ fn parse_method<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Result<
         name,
         descriptor,
         attributes,
+        virtual_slot: !0,
         summary: MethodSummary::empty(),
         overrides: MethodOverrideInfo::empty()
     })
@@ -825,6 +832,7 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
         fields,
         methods,
         attributes,
+        layout: ObjectLayout::empty(),
         meta: ClassMeta {
             this_id: ClassId::UNRESOLVED,
             super_id: ClassId::UNRESOLVED,
