@@ -1,6 +1,6 @@
 use byteorder::{BigEndian, ByteOrder};
 
-use crate::classfile::PrimitiveType;
+use crate::classfile::{AttributeCode, AttributeData, Method, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BytecodeCondition {
@@ -478,6 +478,33 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
 
 #[derive(Debug, Clone)]
 pub struct BytecodeIterator<'a>(pub &'a [u8], pub usize);
+
+impl <'a> BytecodeIterator<'a> {
+    pub fn for_code(code: &'a AttributeCode) -> BytecodeIterator<'a> {
+        BytecodeIterator(&code.code, 0)
+    }
+
+    pub fn for_method(method: &'a Method) -> Option<BytecodeIterator<'a>> {
+        for a in method.attributes.iter() {
+            match a.data {
+                AttributeData::Code(ref code) => {
+                    return Some(BytecodeIterator::for_code(code));
+                },
+                _ => {}
+            };
+        };
+
+        None
+    }
+}
+
+impl <'a> PartialEq for BytecodeIterator<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 as *const [u8] == other.0 as *const [u8] && self.1 == other.1
+    }
+}
+
+impl <'a> Eq for BytecodeIterator<'a> {}
 
 impl <'a> Iterator for BytecodeIterator<'a> {
     type Item = Result<BytecodeInstruction, usize>;

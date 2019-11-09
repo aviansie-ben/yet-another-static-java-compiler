@@ -147,17 +147,12 @@ fn main() {
     for id in env.class_ids() {
         if let resolve::ResolvedClass::User(ref mut class) = **env.get_mut(id) {
             for m in class.methods.iter_mut() {
-                for a in m.attributes.iter() {
-                    if a.name.as_ref() == "Code" {
-                        let len = byteorder::BigEndian::read_u32(&a.data[4..]) as usize;
-                        let code = &a.data[8..(8 + len)];
-
-                        m.summary = static_interp::summarize_bytecode(
-                            bytecode::BytecodeIterator(code, 0),
-                            &class.constant_pool
-                        );
-                        num_methods_summarized += 1;
-                    };
+                if let Some(code) = bytecode::BytecodeIterator::for_method(m) {
+                    m.summary = static_interp::summarize_bytecode(
+                        code,
+                        &class.constant_pool
+                    );
+                    num_methods_summarized += 1;
                 };
             };
         };

@@ -391,10 +391,48 @@ pub struct Method {
     pub overrides: MethodOverrideInfo
 }
 
+impl Method {
+    pub fn code_attribute(&self) -> Option<&AttributeCode> {
+        for attr in self.attributes.iter() {
+            match attr.data {
+                AttributeData::Code(ref code) => {
+                    return Some(code);
+                },
+                _ => {}
+            }
+        };
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExceptionTableEntry {
+    pub start_pc: u16,
+    pub end_pc: u16,
+    pub handler_pc: u16,
+    pub catch_type: u16
+}
+
+#[derive(Debug, Clone)]
+pub struct AttributeCode {
+    pub max_stack: u16,
+    pub max_locals: u16,
+    pub code: Box<[u8]>,
+    pub exception_table: Vec<ExceptionTableEntry>,
+    pub attributes: Vec<Attribute>
+}
+
+#[derive(Debug, Clone)]
+pub enum AttributeData {
+    Unknown(Box<[u8]>),
+    Code(AttributeCode),
+    ConstantData(u16)
+}
+
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: Arc<str>,
-    pub data: Box<[u8]>
+    pub data: AttributeData
 }
 
 #[derive(Debug, Clone)]
@@ -665,8 +703,51 @@ fn parse_attribute<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Resu
         }
     };
 
-    let mut data = vec![0_u8; r.read_u32::<BigEndian>()? as usize].into_boxed_slice();
-    r.read_exact(&mut data)?;
+    let len = r.read_u32::<BigEndian>()? as usize;
+    let data = match &*name {
+        "Code" => {
+            let max_stack = r.read_u16::<BigEndian>()?;
+            let max_locals = r.read_u16::<BigEndian>()?;
+            let code_len = r.read_u32::<BigEndian>()?;
+
+            if code_len == 0 || code_len >= 65536 {
+                return Result::Err(ClassFileReadError::InvalidAttribute(i));
+            };
+
+            let mut code = vec![0_u8; code_len as usize].into_boxed_slice();
+            r.read_exact(&mut code)?;
+
+            let exception_table_len = r.read_u16::<BigEndian>()?;
+            let mut exception_table = Vec::with_capacity(exception_table_len as usize);
+
+            for _ in 0..exception_table_len {
+                exception_table.push(ExceptionTableEntry {
+                    start_pc: r.read_u16::<BigEndian>()?,
+                    end_pc: r.read_u16::<BigEndian>()?,
+                    handler_pc: r.read_u16::<BigEndian>()?,
+                    catch_type: r.read_u16::<BigEndian>()?
+                });
+            };
+
+            let attributes = parse_attributes(cp, r)?;
+
+            AttributeData::Code(AttributeCode {
+                max_stack,
+                max_locals,
+                code,
+                exception_table,
+                attributes
+            })
+        },
+        "ConstantData" => {
+            AttributeData::ConstantData(r.read_u16::<BigEndian>()?)
+        },
+        _ => {
+            let mut data = vec![0_u8; len].into_boxed_slice();
+            r.read_exact(&mut data)?;
+            AttributeData::Unknown(data)
+        }
+    };
 
     Result::Ok(Attribute { name, data })
 }
