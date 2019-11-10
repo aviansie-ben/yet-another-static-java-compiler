@@ -1,3 +1,5 @@
+#![feature(allocator_api)]
+#![feature(drain_filter)]
 #![feature(try_blocks)]
 
 pub mod bytecode;
@@ -5,6 +7,7 @@ pub mod classfile;
 pub mod layout;
 pub mod liveness;
 pub mod resolve;
+pub mod static_heap;
 pub mod static_interp;
 
 use byteorder::ByteOrder;
@@ -175,4 +178,17 @@ fn main() {
     let start_layout = std::time::Instant::now();
     layout::compute_all_layouts(&mut env, &liveness, args.is_present("verbose"));
     println!("Computed object layouts in {:.3}s", start_layout.elapsed().as_secs_f32());
+
+    let start_heap = std::time::Instant::now();
+    let constant_strings = static_heap::collect_constant_strings(liveness.needs_clinit.iter().cloned(), &mut env);
+    let mut heap = unsafe { static_heap::JavaStaticHeap::new(&env, 64 * 1024 * 1024) };
+    if heap.init_class_objects(liveness.needs_clinit.iter().cloned()).is_err() {
+        eprintln!("Failed to create class objects in static heap");
+        return;
+    };
+    if heap.init_constant_strings(constant_strings.iter().map(|r| r.as_ref())).is_err() {
+        eprintln!("Failed to create constant strings in static heap");
+    };
+
+    println!("Constructed initial static heap in {:.3}s", start_heap.elapsed().as_secs_f32());
 }

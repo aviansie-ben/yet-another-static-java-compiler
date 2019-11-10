@@ -268,7 +268,8 @@ pub struct ConstantMethodref {
 
 #[derive(Debug, Clone)]
 pub struct ConstantString {
-    pub contents: Arc<str>
+    pub contents: Arc<str>,
+    pub index: usize
 }
 
 #[derive(Debug, Clone)]
@@ -651,7 +652,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                 }
             }),
             RawConstantPoolEntry::String { string_index } => ConstantPoolEntry::String(ConstantString {
-                contents: resolve_utf8(&raw_constant_pool, i, string_index)?
+                contents: resolve_utf8(&raw_constant_pool, i, string_index)?,
+                index: !0
             }),
             RawConstantPoolEntry::Integer(val) => ConstantPoolEntry::Integer(val),
             RawConstantPoolEntry::Float(val) => ConstantPoolEntry::Float(val),

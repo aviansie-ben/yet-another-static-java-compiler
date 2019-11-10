@@ -32,6 +32,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     static native Class<?> getPrimitiveClass(String name);
 
     transient ClassValue.ClassValueMap classValueMap;
+    private transient long internalAddress;
 
     @SuppressWarnings("unchecked")
     public <U> Class<? extends U> asSubclass(Class<U> clazz) {

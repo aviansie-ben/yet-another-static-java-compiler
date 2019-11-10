@@ -478,6 +478,11 @@ impl ClassEnvironment {
         }
     }
 
+    pub fn force_set_class(&mut self, name: &str, class: ResolvedClass) -> ClassId {
+        assert!(!self.internals.class_names.contains_key(name));
+        self.internals.add_class(name, Box::new(class))
+    }
+
     pub fn num_classes(&self) -> usize {
         self.internals.classes.len()
     }

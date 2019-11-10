@@ -1,6 +1,7 @@
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{ConstantPoolEntry, MethodSummary};
 use crate::resolve::{ClassId, FieldId, MethodId};
+use crate::static_heap::JavaStaticRef;
 
 fn add_may_virtual_call(summary: &mut MethodSummary, method_id: MethodId) {
     if method_id.0 != ClassId::UNRESOLVED && !summary.may_virtual_call.contains(&method_id) {
@@ -121,4 +122,57 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) ->
     };
 
     summary
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value<'a> {
+    Int(i32),
+    Long(i64),
+    Float(u32),
+    Double(u64),
+    Ref(Option<JavaStaticRef<'a>>)
+}
+
+impl <'a> Value<'a> {
+    pub fn as_int(&self) -> Option<i32> {
+        match *self {
+            Value::Int(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_long(&self) -> Option<i64> {
+        match *self {
+            Value::Long(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_float(&self) -> Option<u32> {
+        match *self {
+            Value::Float(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_double(&self) -> Option<u64> {
+        match *self {
+            Value::Double(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_ref(&self) -> Option<Option<&JavaStaticRef<'a>>> {
+        match *self {
+            Value::Ref(ref val) => Some(val.as_ref()),
+            _ => None
+        }
+    }
+
+    pub fn into_ref(self) -> Result<Option<JavaStaticRef<'a>>, Value<'a>> {
+        match self {
+            Value::Ref(java_ref) => Result::Ok(java_ref),
+            val => Result::Err(val)
+        }
+    }
 }

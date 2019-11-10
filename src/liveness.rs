@@ -130,6 +130,32 @@ fn analyze_method(env: &ClassEnvironment, liveness: &mut LivenessInfo, method_id
     };
 }
 
+pub fn create_full_liveness(env: &ClassEnvironment) -> LivenessInfo {
+    let mut liveness = LivenessInfo {
+        needs_clinit: HashSet::new(),
+        may_construct: HashSet::new(),
+        may_virtual_call: HashSet::new(),
+        may_call: HashSet::new()
+    };
+
+    for class_id in env.class_ids() {
+        liveness.needs_clinit.insert(class_id);
+        liveness.may_construct.insert(class_id);
+
+        match **env.get(class_id) {
+            ResolvedClass::User(ref class) => {
+                for i in 0..(class.methods.len()) {
+                    liveness.may_virtual_call.insert(MethodId(class_id, i as u16));
+                    liveness.may_call.insert(MethodId(class_id, i as u16));
+                };
+            },
+            _ => {}
+        };
+    };
+
+    liveness
+}
+
 pub fn analyze_all(env: &ClassEnvironment, main_method: MethodId, verbose: bool) -> LivenessInfo {
     let mut liveness = LivenessInfo {
         needs_clinit: HashSet::new(),
