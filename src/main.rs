@@ -10,8 +10,8 @@ pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
 
-use byteorder::ByteOrder;
 use clap::{App, Arg, ArgMatches};
+use itertools::Itertools;
 use lazy_static::lazy_static;
 
 fn parse_args<'a>() -> ArgMatches<'a> {
@@ -172,6 +172,8 @@ fn main() {
 
         if method.flags.contains(classfile::MethodFlags::NATIVE) {
             println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
+        } else {
+            println!("JAVA   {}.{}{}", class.meta.name, method.name, method.descriptor);
         };
     };
 
@@ -191,4 +193,22 @@ fn main() {
     };
 
     println!("Constructed initial static heap in {:.3}s", start_heap.elapsed().as_secs_f32());
+
+    let mut good_clinit = 0usize;
+    let mut bad_clinit = 0usize;
+
+    let start_clinit = std::time::Instant::now();
+    for class_id in liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0) {
+        if static_interp::try_run_clinit(&env, &heap, class_id, args.is_present("verbose")) {
+            good_clinit += 1;
+        } else {
+            bad_clinit += 1;
+        };
+    };
+    println!(
+        "Ran static class initialization for {} classes ({} failed) in {:.3}s",
+        good_clinit + bad_clinit,
+        bad_clinit,
+        start_clinit.elapsed().as_secs_f32()
+    );
 }
