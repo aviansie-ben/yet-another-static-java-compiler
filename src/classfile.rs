@@ -247,7 +247,8 @@ impl MethodDescriptor {
 #[derive(Debug, Clone)]
 pub struct ConstantClass {
     pub name: Arc<str>,
-    pub class_id: ClassId
+    pub class_id: ClassId,
+    pub array_class_id: ClassId
 }
 
 #[derive(Debug, Clone)]
@@ -610,7 +611,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
         constant_pool.push(match *raw_entry {
             RawConstantPoolEntry::Class { name_index } => ConstantPoolEntry::Class(ConstantClass {
                 name: resolve_utf8(&raw_constant_pool, i, name_index)?,
-                class_id: ClassId::UNRESOLVED
+                class_id: ClassId::UNRESOLVED,
+                array_class_id: ClassId::UNRESOLVED
             }),
             RawConstantPoolEntry::Fieldref { class_index, name_and_type_index } => ConstantPoolEntry::Fieldref({
                 let (name, descriptor) = resolve_name_and_type(&raw_constant_pool, i, name_and_type_index)?;

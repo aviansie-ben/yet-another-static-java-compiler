@@ -37,8 +37,13 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) ->
 
     for instr in instrs {
         match instr.unwrap() {
-            BytecodeInstruction::ANewArray(_) => {
-                // TODO
+            BytecodeInstruction::ANewArray(cpe) => {
+                let cpe = match cp[cpe as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                add_may_construct(&mut summary, cpe.array_class_id);
             },
             BytecodeInstruction::GetField(cpe) => {
                 // TODO

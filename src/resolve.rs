@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 use zip::ZipArchive;
 use zip::result::{ZipError, ZipResult};
 
+use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
 use crate::classfile::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -113,11 +114,14 @@ impl ClassLoader for ArrayClassLoader {
         if name.starts_with("[") {
             if let Some(descriptor) = TypeDescriptor::parse(name) {
                 Some(try {
-                    let elem_id = match descriptor.flat {
-                        FlatTypeDescriptor::Primitive(t) => ClassId::for_primitive_type(t),
-                        FlatTypeDescriptor::Reference(ref elem_name) => resolve(elem_name)?
-                    };
-                    ResolvedClass::Array(descriptor.array_dims, elem_id)
+                    ResolvedClass::Array(if descriptor.array_dims > 1 {
+                        resolve(&name[1..])?
+                    } else {
+                        match descriptor.flat {
+                            FlatTypeDescriptor::Primitive(t) => ClassId::for_primitive_type(t),
+                            FlatTypeDescriptor::Reference(ref elem_name) => resolve(elem_name)?
+                        }
+                    })
                 })
             } else {
                 None
@@ -210,7 +214,7 @@ pub enum ClassResolveError {
 pub enum ResolvedClass {
     User(Class),
     Primitive(PrimitiveType),
-    Array(u8, ClassId)
+    Array(ClassId)
 }
 
 impl ResolvedClass {
@@ -245,18 +249,23 @@ impl ResolvedClass {
             ResolvedClass::Primitive(PrimitiveType::Boolean) => {
                 write!(name, "boolean").unwrap();
             },
-            ResolvedClass::Array(dims, inner_id) => {
-                for _ in 0..dims {
-                    write!(name, "[").unwrap();
-                };
-                match **env.get(inner_id) {
-                    ResolvedClass::User(ref class) => {
-                        write!(name, "L{};", class.meta.name).unwrap();
-                    },
-                    ResolvedClass::Primitive(t) => {
-                        write!(name, "{}", t).unwrap();
-                    },
-                    ResolvedClass::Array(_, _) => unreachable!()
+            ResolvedClass::Array(mut inner_id) => {
+                write!(name, "[").unwrap();
+                loop {
+                    match **env.get(inner_id) {
+                        ResolvedClass::User(ref class) => {
+                            write!(name, "L{};", class.meta.name).unwrap();
+                            break;
+                        },
+                        ResolvedClass::Primitive(t) => {
+                            write!(name, "{}", t).unwrap();
+                            break;
+                        },
+                        ResolvedClass::Array(elem) => {
+                            write!(name, "[").unwrap();
+                            inner_id = elem;
+                        }
+                    };
                 };
             }
         };
@@ -470,12 +479,34 @@ impl ClassEnvironment {
         }
     }
 
+    pub fn try_find_array(&self, elem_id: ClassId) -> Option<ClassId> {
+        self.try_find(&self.array_name(elem_id))
+    }
+
     pub fn find_or_load(&mut self, name: &str) -> Result<ClassId, ClassResolveError> {
         if let Some(id) = self.try_find(name) {
             Result::Ok(id)
         } else {
             self.load(name)
         }
+    }
+
+    fn array_name(&self, elem_id: ClassId) -> String {
+        match **self.get(elem_id) {
+            ResolvedClass::User(ref class) => {
+                format!("[L{};", class.meta.name)
+            },
+            ResolvedClass::Array(_) => {
+                format!("[{}", self.get(elem_id).name(self))
+            },
+            ResolvedClass::Primitive(ty) => {
+                format!("[{}", ty)
+            }
+        }
+    }
+
+    pub fn find_or_load_array(&mut self, elem_id: ClassId) -> Result<ClassId, ClassResolveError> {
+        self.find_or_load(&self.array_name(elem_id))
     }
 
     pub fn force_set_class(&mut self, name: &str, class: ResolvedClass) -> ClassId {
@@ -522,6 +553,10 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
 
     while let Some(resolving_id) = worklist.pop_front() {
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
+            // The name of the dummy class must be set correctly in case we try to load an array of
+            // the current class due to an anewarray opcode.
+            resolving_class.meta.name = class.meta.name.clone();
+
             mem::swap(class, &mut resolving_class);
 
             if verbose {
@@ -577,6 +612,26 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
             get_constant_pool_class(&resolving_class.constant_pool, i)
         }).collect();
 
+        for m in resolving_class.methods.iter() {
+            if let Some(instrs) = BytecodeIterator::for_method(m) {
+                for instr in instrs {
+                    match instr.unwrap() {
+                        BytecodeInstruction::ANewArray(cpe) => {
+                            let cpe = match resolving_class.constant_pool[cpe as usize] {
+                                ConstantPoolEntry::Class(ref mut cpe) => cpe,
+                                _ => unreachable!()
+                            };
+
+                            if cpe.class_id != ClassId::UNRESOLVED && cpe.array_class_id == ClassId::UNRESOLVED {
+                                cpe.array_class_id = env.find_or_load_array(cpe.class_id).unwrap();
+                            };
+                        },
+                        _ => {}
+                    };
+                };
+            };
+        };
+
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
         } else {
@@ -607,7 +662,7 @@ fn find_with_super<T, U>(
             ResolvedClass::Primitive(_) => {
                 return None;
             },
-            ResolvedClass::Array(_, _) => {
+            ResolvedClass::Array(_) => {
                 return find_with_super(
                     env,
                     ClassId::JAVA_LANG_OBJECT,

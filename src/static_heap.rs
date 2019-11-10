@@ -152,7 +152,7 @@ impl <'a> JavaStaticRef<'a> {
 
     pub fn read_array_length(&self) -> i32 {
         match *self.class() {
-            ResolvedClass::Array(_, _) => unsafe { self.read_array_length_unchecked() },
+            ResolvedClass::Array(_) => unsafe { self.read_array_length_unchecked() },
             _ => {
                 panic!("Invalid read of array length on object of type {}", self.class().name(self.env));
             }
@@ -180,7 +180,7 @@ impl <'a> JavaStaticRef<'a> {
 
     pub fn read_array_element(&self, idx: i32) -> Value<'a> {
         match *self.class() {
-            ResolvedClass::Array(1, elem_class_id) => unsafe {
+            ResolvedClass::Array(elem_class_id) => unsafe {
                 assert!(idx >= 0 && idx < self.read_array_length_unchecked());
 
                 match elem_class_id {
@@ -301,7 +301,7 @@ impl <'a> JavaStaticRef<'a> {
 
     pub fn write_array_element(&self, idx: i32, value: Value<'a>) {
         match *self.class() {
-            ResolvedClass::Array(1, elem_class_id) => unsafe {
+            ResolvedClass::Array(elem_class_id) => unsafe {
                 assert!(idx >= 0 && idx < self.read_array_length_unchecked());
 
                 match elem_class_id {
@@ -590,13 +590,13 @@ impl JavaStaticObject {
 
     fn calculate_array_size(class_id: ClassId, env: &ClassEnvironment, len: u32) -> Option<usize> {
         let elem_class = match **env.get(class_id) {
-            ResolvedClass::Array(1, elem_class_id) => elem_class_id,
+            ResolvedClass::Array(elem_class_id) => elem_class_id,
             _ => unimplemented!()
         };
 
         let elem_size: usize = match **env.get(elem_class) {
             ResolvedClass::User(_) => 8,
-            ResolvedClass::Array(_, _) => 8,
+            ResolvedClass::Array(_) => 8,
             ResolvedClass::Primitive(PrimitiveType::Byte) => 1,
             ResolvedClass::Primitive(PrimitiveType::Char) => 2,
             ResolvedClass::Primitive(PrimitiveType::Double) => 8,

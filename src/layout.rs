@@ -70,7 +70,7 @@ fn get_field_size_align(env: &ClassEnvironment, class_id: ClassId) -> (u32, u32)
         ResolvedClass::Primitive(PrimitiveType::Long) => (8, 8),
         ResolvedClass::Primitive(PrimitiveType::Short) => (2, 2),
         ResolvedClass::Primitive(PrimitiveType::Boolean) => (1, 1),
-        ResolvedClass::Array(_, _) => (8, 8)
+        ResolvedClass::Array(_) => (8, 8)
     }
 }
 
