@@ -317,7 +317,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
         0x1d => (BytecodeInstruction::ILoad(3), 1),
         0x68 => (BytecodeInstruction::IMul, 1),
         0x74 => (BytecodeInstruction::INeg, 1),
-        0xc1 => (BytecodeInstruction::CheckCast(read_u16(bytecode, off + 1)?), 3),
+        0xc1 => (BytecodeInstruction::InstanceOf(read_u16(bytecode, off + 1)?), 3),
         0xba => {
             let ind = read_u16(bytecode, off + 1)?;
             if read_u16(bytecode, off + 3)? != 0 {
