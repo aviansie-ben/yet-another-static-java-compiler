@@ -16,6 +16,7 @@ public class SecurityManager {
     public void checkAccess(ThreadGroup g) {}
     public void checkAwtEventQueueAccess() {}
     public void checkConnect(String host, int port) {}
+    public void checkConnect(String host, int port, Object context) {}
     public void checkCreateClassLoader() {}
     public void checkDelete(String file) {}
     public void checkExec(String cmd) {}
