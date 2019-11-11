@@ -614,7 +614,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
 
         for m in resolving_class.methods.iter() {
             if let Some(instrs) = BytecodeIterator::for_method(m) {
-                for instr in instrs {
+                for (_, instr) in instrs {
                     match instr.unwrap() {
                         BytecodeInstruction::ANewArray(cpe) => {
                             let cpe = match resolving_class.constant_pool[cpe as usize] {

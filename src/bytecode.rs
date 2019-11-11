@@ -507,11 +507,12 @@ impl <'a> PartialEq for BytecodeIterator<'a> {
 impl <'a> Eq for BytecodeIterator<'a> {}
 
 impl <'a> Iterator for BytecodeIterator<'a> {
-    type Item = Result<BytecodeInstruction, usize>;
+    type Item = (usize, Result<BytecodeInstruction, usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.1 != self.0.len() {
-            Some(match read_op(self.0, self.1) {
+            let off = self.1;
+            let instr = match read_op(self.0, self.1) {
                 Result::Ok((instr, len)) => {
                     self.1 += len;
                     Result::Ok(instr)
@@ -520,7 +521,9 @@ impl <'a> Iterator for BytecodeIterator<'a> {
                     self.1 = self.0.len();
                     Result::Err(err)
                 }
-            })
+            };
+
+            Some((off, instr))
         } else {
             None
         }

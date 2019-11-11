@@ -40,7 +40,7 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) ->
         may_clinit: vec![]
     };
 
-    for instr in instrs {
+    for (_, instr) in instrs {
         match instr.unwrap() {
             BytecodeInstruction::ANewArray(cpe) => {
                 let cpe = match cp[cpe as usize] {
@@ -499,7 +499,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
         eprintln!("  Interpreting {}.{}{}", class.meta.name, method.name, method.descriptor);
     };
 
-    while let Some(instr) = state.instrs.next() {
+    while let Some((_, instr)) = state.instrs.next() {
         let instr = instr.unwrap();
         match instr {
             BytecodeInstruction::Ldc(idx) | BytecodeInstruction::Ldc2(idx) => {
