@@ -256,7 +256,8 @@ pub struct ConstantFieldref {
     pub class: u16,
     pub name: Arc<str>,
     pub descriptor: TypeDescriptor,
-    pub field_id: FieldId
+    pub field_id: FieldId,
+    pub type_id: ClassId
 }
 
 #[derive(Debug, Clone)]
@@ -624,7 +625,8 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                     } else {
                         return Result::Err(ClassFileReadError::InvalidConstantPoolEntry(i));
                     },
-                    field_id: FieldId::UNRESOLVED
+                    field_id: FieldId::UNRESOLVED,
+                    type_id: ClassId::UNRESOLVED
                 }
             }),
             RawConstantPoolEntry::Methodref { class_index, name_and_type_index } => ConstantPoolEntry::Methodref({

@@ -815,6 +815,7 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                     } else {
                         FieldId::UNRESOLVED
                     };
+                    cpe.type_id = env.try_find_for_descriptor(&cpe.descriptor).unwrap_or(ClassId::UNRESOLVED);
 
                     if verbose {
                         eprintln!("    Resolved field {} {} as {:?}", cpe.name, cpe.descriptor, cpe.field_id);
