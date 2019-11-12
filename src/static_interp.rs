@@ -101,6 +101,14 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) ->
 
                 add_may_virtual_call(&mut summary, cpe.method_id);
             },
+            BytecodeInstruction::Ldc(cpe) | BytecodeInstruction::Ldc2(cpe) => {
+                match cp[cpe as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => {
+                        add_may_clinit(&mut summary, cpe.class_id);
+                    },
+                    _ => {}
+                };
+            },
             BytecodeInstruction::MultiANewArray(_, _) => {
                 // TODO
             },
