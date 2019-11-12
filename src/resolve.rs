@@ -20,30 +20,31 @@ pub struct ClassId(pub u32);
 impl ClassId {
     pub const UNRESOLVED: ClassId = ClassId(!0);
 
-    pub const PRIMITIVE_BYTE: ClassId = ClassId(0);
-    pub const PRIMITIVE_CHAR: ClassId = ClassId(1);
-    pub const PRIMITIVE_DOUBLE: ClassId = ClassId(2);
-    pub const PRIMITIVE_FLOAT: ClassId = ClassId(3);
-    pub const PRIMITIVE_INT: ClassId = ClassId(4);
-    pub const PRIMITIVE_LONG: ClassId = ClassId(5);
-    pub const PRIMITIVE_SHORT: ClassId = ClassId(6);
-    pub const PRIMITIVE_BOOLEAN: ClassId = ClassId(7);
+    pub const PRIMITIVE_VOID: ClassId = ClassId(0);
+    pub const PRIMITIVE_BYTE: ClassId = ClassId(1);
+    pub const PRIMITIVE_CHAR: ClassId = ClassId(2);
+    pub const PRIMITIVE_DOUBLE: ClassId = ClassId(3);
+    pub const PRIMITIVE_FLOAT: ClassId = ClassId(4);
+    pub const PRIMITIVE_INT: ClassId = ClassId(5);
+    pub const PRIMITIVE_LONG: ClassId = ClassId(6);
+    pub const PRIMITIVE_SHORT: ClassId = ClassId(7);
+    pub const PRIMITIVE_BOOLEAN: ClassId = ClassId(8);
 
-    pub const PRIMITIVE_BYTE_ARRAY: ClassId = ClassId(8);
-    pub const PRIMITIVE_CHAR_ARRAY: ClassId = ClassId(9);
-    pub const PRIMITIVE_DOUBLE_ARRAY: ClassId = ClassId(10);
-    pub const PRIMITIVE_FLOAT_ARRAY: ClassId = ClassId(11);
-    pub const PRIMITIVE_INT_ARRAY: ClassId = ClassId(12);
-    pub const PRIMITIVE_LONG_ARRAY: ClassId = ClassId(13);
-    pub const PRIMITIVE_SHORT_ARRAY: ClassId = ClassId(14);
-    pub const PRIMITIVE_BOOLEAN_ARRAY: ClassId = ClassId(15);
+    pub const PRIMITIVE_BYTE_ARRAY: ClassId = ClassId(9);
+    pub const PRIMITIVE_CHAR_ARRAY: ClassId = ClassId(10);
+    pub const PRIMITIVE_DOUBLE_ARRAY: ClassId = ClassId(11);
+    pub const PRIMITIVE_FLOAT_ARRAY: ClassId = ClassId(12);
+    pub const PRIMITIVE_INT_ARRAY: ClassId = ClassId(13);
+    pub const PRIMITIVE_LONG_ARRAY: ClassId = ClassId(14);
+    pub const PRIMITIVE_SHORT_ARRAY: ClassId = ClassId(15);
+    pub const PRIMITIVE_BOOLEAN_ARRAY: ClassId = ClassId(16);
 
-    pub const JAVA_LANG_OBJECT: ClassId = ClassId(16);
-    pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(17);
-    pub const JAVA_LANG_STRING: ClassId = ClassId(18);
-    pub const JAVA_LANG_CLASS: ClassId = ClassId(19);
+    pub const JAVA_LANG_OBJECT: ClassId = ClassId(17);
+    pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(18);
+    pub const JAVA_LANG_STRING: ClassId = ClassId(19);
+    pub const JAVA_LANG_CLASS: ClassId = ClassId(20);
 
-    pub const JAVA_LANG_OBJECT_ARRAY: ClassId = ClassId(20);
+    pub const JAVA_LANG_OBJECT_ARRAY: ClassId = ClassId(21);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -72,7 +73,7 @@ impl ClassId {
     }
 
     pub fn num_special_classes() -> u32 {
-        21
+        22
     }
 
     pub fn special_classes() -> impl Iterator<Item=ClassId> {
@@ -213,7 +214,7 @@ pub enum ClassResolveError {
 #[derive(Debug, Clone)]
 pub enum ResolvedClass {
     User(Class),
-    Primitive(PrimitiveType),
+    Primitive(Option<PrimitiveType>),
     Array(ClassId)
 }
 
@@ -225,28 +226,31 @@ impl ResolvedClass {
             ResolvedClass::User(ref class) => {
                 write!(name, "{}", class.meta.name).unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Byte) => {
+            ResolvedClass::Primitive(None) => {
+                write!(name, "void").unwrap();
+            },
+            ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => {
                 write!(name, "byte").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Char) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Char)) => {
                 write!(name, "char").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Double) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Double)) => {
                 write!(name, "double").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Float) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Float)) => {
                 write!(name, "float").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Int) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Int)) => {
                 write!(name, "int").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Long) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Long)) => {
                 write!(name, "long").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Short) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Short)) => {
                 write!(name, "short").unwrap();
             },
-            ResolvedClass::Primitive(PrimitiveType::Boolean) => {
+            ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => {
                 write!(name, "boolean").unwrap();
             },
             ResolvedClass::Array(mut inner_id) => {
@@ -257,7 +261,11 @@ impl ResolvedClass {
                             write!(name, "L{};", class.meta.name).unwrap();
                             break;
                         },
-                        ResolvedClass::Primitive(t) => {
+                        ResolvedClass::Primitive(None) => {
+                            write!(name, "void").unwrap();
+                            break;
+                        },
+                        ResolvedClass::Primitive(Some(t)) => {
                             write!(name, "{}", t).unwrap();
                             break;
                         },
@@ -338,35 +346,39 @@ impl ClassEnvironment {
 
     pub fn load_bootstrap_classes(&mut self) -> Result<(), ClassResolveError> {
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Byte))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(None))),
+            ClassId::PRIMITIVE_VOID
+        );
+        assert_eq!(
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Byte)))),
             ClassId::PRIMITIVE_BYTE
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Char))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Char)))),
             ClassId::PRIMITIVE_CHAR
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Double))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Double)))),
             ClassId::PRIMITIVE_DOUBLE
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Float))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Float)))),
             ClassId::PRIMITIVE_FLOAT
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Int))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Int)))),
             ClassId::PRIMITIVE_INT
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Long))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Long)))),
             ClassId::PRIMITIVE_LONG
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Short))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Short)))),
             ClassId::PRIMITIVE_SHORT
         );
         assert_eq!(
-            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(PrimitiveType::Boolean))),
+            self.internals.add_unnamed_class(Box::new(ResolvedClass::Primitive(Some(PrimitiveType::Boolean)))),
             ClassId::PRIMITIVE_BOOLEAN
         );
 
@@ -499,7 +511,10 @@ impl ClassEnvironment {
             ResolvedClass::Array(_) => {
                 format!("[{}", self.get(elem_id).name(self))
             },
-            ResolvedClass::Primitive(ty) => {
+            ResolvedClass::Primitive(None) => {
+                format!("[void")
+            },
+            ResolvedClass::Primitive(Some(ty)) => {
                 format!("[{}", ty)
             }
         }

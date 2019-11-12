@@ -278,6 +278,7 @@ fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), Static
         let name = name.read_string();
 
         let result = match name.as_str() {
+            "void" => state.heap.get_class_object(ClassId::PRIMITIVE_VOID),
             "byte" => state.heap.get_class_object(ClassId::PRIMITIVE_BYTE),
             "char" => state.heap.get_class_object(ClassId::PRIMITIVE_CHAR),
             "double" => state.heap.get_class_object(ClassId::PRIMITIVE_DOUBLE),

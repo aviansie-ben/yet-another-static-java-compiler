@@ -62,14 +62,15 @@ fn get_field_size_align(env: &ClassEnvironment, class_id: ClassId) -> (u32, u32)
 
     match **env.get(class_id) {
         ResolvedClass::User(_) => (8, 8),
-        ResolvedClass::Primitive(PrimitiveType::Byte) => (1, 1),
-        ResolvedClass::Primitive(PrimitiveType::Char) => (2, 2),
-        ResolvedClass::Primitive(PrimitiveType::Double) => (8, 8),
-        ResolvedClass::Primitive(PrimitiveType::Float) => (4, 4),
-        ResolvedClass::Primitive(PrimitiveType::Int) => (4, 4),
-        ResolvedClass::Primitive(PrimitiveType::Long) => (8, 8),
-        ResolvedClass::Primitive(PrimitiveType::Short) => (2, 2),
-        ResolvedClass::Primitive(PrimitiveType::Boolean) => (1, 1),
+        ResolvedClass::Primitive(None) => panic!("Cannot have a field of type void"),
+        ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => (1, 1),
+        ResolvedClass::Primitive(Some(PrimitiveType::Char)) => (2, 2),
+        ResolvedClass::Primitive(Some(PrimitiveType::Double)) => (8, 8),
+        ResolvedClass::Primitive(Some(PrimitiveType::Float)) => (4, 4),
+        ResolvedClass::Primitive(Some(PrimitiveType::Int)) => (4, 4),
+        ResolvedClass::Primitive(Some(PrimitiveType::Long)) => (8, 8),
+        ResolvedClass::Primitive(Some(PrimitiveType::Short)) => (2, 2),
+        ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => (1, 1),
         ResolvedClass::Array(_) => (8, 8)
     }
 }

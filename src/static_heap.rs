@@ -597,14 +597,15 @@ impl JavaStaticObject {
         let elem_size: usize = match **env.get(elem_class) {
             ResolvedClass::User(_) => 8,
             ResolvedClass::Array(_) => 8,
-            ResolvedClass::Primitive(PrimitiveType::Byte) => 1,
-            ResolvedClass::Primitive(PrimitiveType::Char) => 2,
-            ResolvedClass::Primitive(PrimitiveType::Double) => 8,
-            ResolvedClass::Primitive(PrimitiveType::Float) => 4,
-            ResolvedClass::Primitive(PrimitiveType::Int) => 4,
-            ResolvedClass::Primitive(PrimitiveType::Long) => 8,
-            ResolvedClass::Primitive(PrimitiveType::Short) => 2,
-            ResolvedClass::Primitive(PrimitiveType::Boolean) => 1
+            ResolvedClass::Primitive(None) => panic!("Cannot have an array of void"),
+            ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => 1,
+            ResolvedClass::Primitive(Some(PrimitiveType::Char)) => 2,
+            ResolvedClass::Primitive(Some(PrimitiveType::Double)) => 8,
+            ResolvedClass::Primitive(Some(PrimitiveType::Float)) => 4,
+            ResolvedClass::Primitive(Some(PrimitiveType::Int)) => 4,
+            ResolvedClass::Primitive(Some(PrimitiveType::Long)) => 8,
+            ResolvedClass::Primitive(Some(PrimitiveType::Short)) => 2,
+            ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => 1
         };
 
         let header_size = 12;
