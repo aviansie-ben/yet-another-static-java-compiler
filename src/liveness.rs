@@ -21,11 +21,7 @@ impl std::fmt::Display for Indent {
     }
 }
 
-fn ensure_clinit(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
-    if class_id == ClassId::UNRESOLVED || !liveness.needs_clinit.insert(class_id) {
-        return;
-    };
-
+fn ensure_clinit_unchecked(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
     let class = if let ResolvedClass::User(ref class) = **env.get(class_id) {
         class
     } else {
@@ -42,6 +38,14 @@ fn ensure_clinit(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: 
     };
 
     indent.0 -= 1;
+}
+
+fn ensure_clinit(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
+    if class_id == ClassId::UNRESOLVED || !liveness.needs_clinit.insert(class_id) {
+        return;
+    };
+
+    ensure_clinit_unchecked(env, liveness, class_id, indent, verbose);
 }
 
 fn may_call_parent_virtual(env: &ClassEnvironment, liveness: &LivenessInfo, method: &Method) -> bool {
@@ -176,4 +180,19 @@ pub fn analyze_all(env: &ClassEnvironment, main_method: MethodId, verbose: bool)
     analyze_method(env, &mut liveness, main_method, false, &mut indent, verbose);
 
     liveness
+}
+
+pub fn analyze_post_clinit(env: &ClassEnvironment, main_method: MethodId, liveness: &mut LivenessInfo, needs_runtime_clinit: HashSet<ClassId>, verbose: bool) {
+    let mut indent = Indent(0);
+
+    liveness.may_call.clear();
+    liveness.may_virtual_call.clear();
+
+    for class_id in needs_runtime_clinit.iter().cloned() {
+        ensure_clinit_unchecked(env, liveness, class_id, &mut indent, verbose);
+    };
+
+    analyze_method(env, liveness, main_method, false, &mut indent, verbose);
+
+    liveness.needs_clinit = needs_runtime_clinit;
 }

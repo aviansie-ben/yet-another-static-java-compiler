@@ -10,6 +10,8 @@ pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
 
+use std::collections::HashSet;
+
 use clap::{App, Arg, ArgMatches};
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -163,19 +165,8 @@ fn main() {
     println!("Summarized {} methods in {:.3}s", num_methods_summarized, start_summarize_methods.elapsed().as_secs_f32());
 
     let start_analyze_liveness = std::time::Instant::now();
-    let liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
+    let mut liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
     println!("Found {} classes requiring initialization ({} classes constructible) in {:.3}s", liveness.needs_clinit.len(), liveness.may_construct.len(), start_analyze_liveness.elapsed().as_secs_f32());
-
-    for m in liveness.may_call.iter().cloned() {
-        let class = env.get(m.0).as_user_class();
-        let method = &class.methods[m.1 as usize];
-
-        if method.flags.contains(classfile::MethodFlags::NATIVE) {
-            println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
-        } else {
-            println!("JAVA   {}.{}{}", class.meta.name, method.name, method.descriptor);
-        };
-    };
 
     let start_layout = std::time::Instant::now();
     layout::compute_all_layouts(&mut env, &liveness, args.is_present("verbose"));
@@ -196,6 +187,7 @@ fn main() {
 
     let mut good_clinit = 0usize;
     let mut bad_clinit = 0usize;
+    let mut needs_runtime_clinit = HashSet::new();
 
     let start_clinit = std::time::Instant::now();
     for class_id in liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0) {
@@ -203,6 +195,7 @@ fn main() {
             good_clinit += 1;
         } else {
             bad_clinit += 1;
+            needs_runtime_clinit.insert(class_id);
         };
     };
     println!(
@@ -211,4 +204,19 @@ fn main() {
         bad_clinit,
         start_clinit.elapsed().as_secs_f32()
     );
+
+    let start_liveness_methods = std::time::Instant::now();
+    liveness::analyze_post_clinit(&env, main_method, &mut liveness, needs_runtime_clinit, args.is_present("verbose"));
+    println!("Found {} executable methods in {:.3}s", liveness.may_call.len(), start_liveness_methods.elapsed().as_secs_f32());
+
+    for m in liveness.may_call.iter().cloned() {
+        let class = env.get(m.0).as_user_class();
+        let method = &class.methods[m.1 as usize];
+
+        if method.flags.contains(classfile::MethodFlags::NATIVE) {
+            println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
+        } else {
+            println!("JAVA   {}.{}{}", class.meta.name, method.name, method.descriptor);
+        };
+    };
 }
