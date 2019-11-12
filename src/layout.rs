@@ -178,6 +178,12 @@ fn commit_layout(class: &mut Class, layout: ObjectLayout) {
         class.fields[i as usize].off = off;
     };
 
+    for (slot, MethodId(method_class, i)) in layout.virtual_slots.iter().cloned().enumerate() {
+        if method_class == class.meta.this_id {
+            class.methods[i as usize].virtual_slot = slot as u32;
+        };
+    };
+
     class.layout = layout;
 }
 
