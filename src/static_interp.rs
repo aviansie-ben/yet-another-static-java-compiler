@@ -572,12 +572,13 @@ fn do_compare_ref<'a>(i: Option<JavaStaticRef<'a>>, j: Option<JavaStaticRef<'a>>
 fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
     let class = env.get(method_id.0).as_user_class();
     let method = &class.methods[method_id.1 as usize];
-    let instrs = match BytecodeIterator::for_method(method) {
-        Some(instrs) => instrs,
+    let code = match method.code_attribute() {
+        Some(code) => code,
         None => {
             return Result::Err(StaticInterpretError::UnknownNativeCall(method_id));
         }
     };
+    let instrs = BytecodeIterator::for_code(code);
 
     let mut state = InterpreterState {
         env,
@@ -591,6 +592,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
 
     if verbose {
         eprintln!("  Interpreting {}.{}{}", class.meta.name, method.name, method.descriptor);
+    };
+
+    for _ in 0..(code.max_locals as usize) {
+        state.locals.push(Value::Ref(None));
     };
 
     while let Some((_, instr)) = state.instrs.next() {
