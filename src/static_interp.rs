@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{AttributeData, Class, ConstantPoolEntry, FieldFlags, MethodFlags, MethodSummary};
+use crate::classfile::{AttributeData, Class, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodFlags, MethodSummary, PrimitiveType};
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
 use crate::static_heap::{ObjectFlags, JavaStaticHeap, JavaStaticRef};
 
@@ -149,7 +149,8 @@ pub enum Value<'a> {
     Float(u32),
     Double(u64),
     Ref(Option<JavaStaticRef<'a>>),
-    ReturnAddress(MethodId, usize, usize)
+    ReturnAddress(MethodId, usize, usize),
+    Empty
 }
 
 impl <'a> Value<'a> {
@@ -199,6 +200,14 @@ impl <'a> Value<'a> {
         match *self {
             Value::ReturnAddress(method, off, drop_locals) => Some((method, off, drop_locals)),
             _ => None
+        }
+    }
+
+    pub fn needs_dual_slot(&self) -> bool {
+        match *self {
+            Value::Long(_) => true,
+            Value::Double(_) => true,
+            _ => false
         }
     }
 }
@@ -263,7 +272,7 @@ fn native_nop(_state: &mut InterpreterState) -> Result<(), StaticInterpretError>
 }
 
 fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
-    let name = state.stack.pop().unwrap().into_ref().unwrap();
+    let name = state.stack.pop().into_ref().unwrap();
 
     if let Some(name) = name {
         let name = name.read_string();
@@ -291,25 +300,25 @@ fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), Static
 }
 
 fn native_get_raw_float_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
-    let val = state.stack.pop().unwrap().as_float().unwrap();
+    let val = state.stack.pop().as_float().unwrap();
     state.stack.push(Value::Int(val as i32));
     Result::Ok(())
 }
 
 fn native_float_from_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
-    let val = state.stack.pop().unwrap().as_int().unwrap();
+    let val = state.stack.pop().as_int().unwrap();
     state.stack.push(Value::Float(val as u32));
     Result::Ok(())
 }
 
 fn native_get_raw_double_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
-    let val = state.stack.pop().unwrap().as_double().unwrap();
+    let val = state.stack.pop().as_double().unwrap();
     state.stack.push(Value::Long(val as i64));
     Result::Ok(())
 }
 
 fn native_double_from_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
-    let val = state.stack.pop().unwrap().as_long().unwrap();
+    let val = state.stack.pop().as_long().unwrap();
     state.stack.push(Value::Double(val as u64));
     Result::Ok(())
 }
@@ -350,6 +359,55 @@ lazy_static! {
     };
 }
 
+struct InterpreterStack<'b> {
+    stack: Vec<Value<'b>>
+}
+
+impl <'b> InterpreterStack<'b> {
+    fn new() -> InterpreterStack<'b> {
+        InterpreterStack { stack: vec![] }
+    }
+
+    fn push_slot(&mut self, val: Value<'b>) {
+        self.stack.push(val);
+    }
+
+    fn push(&mut self, val: Value<'b>) {
+        let needs_dual_slot = val.needs_dual_slot();
+        self.push_slot(val);
+        if needs_dual_slot {
+            self.push_slot(Value::Empty);
+        };
+    }
+
+    fn pop_slot(&mut self) -> Value<'b> {
+        self.stack.pop().unwrap()
+    }
+
+    fn pop(&mut self) -> Value<'b> {
+        match self.pop_slot() {
+            Value::Empty => self.pop_slot(),
+            val => val
+        }
+    }
+
+    fn peek(&self) -> &Value<'b> {
+        self.read(0)
+    }
+
+    fn read(&self, depth: usize) -> &Value<'b> {
+        &self.stack[self.len() - 1 - depth]
+    }
+
+    fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.stack.len()
+    }
+}
+
 struct InterpreterState<'a, 'b> {
     env: &'a ClassEnvironment,
     heap: &'a JavaStaticHeap<'b>,
@@ -357,7 +415,7 @@ struct InterpreterState<'a, 'b> {
     class: &'a Class,
     instrs: BytecodeIterator<'a>,
 
-    stack: Vec<Value<'b>>,
+    stack: InterpreterStack<'b>,
     locals: Vec<Value<'b>>
 }
 
@@ -377,7 +435,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
             return Result::Ok(true);
         };
 
-        let (method_id, off, drop_locals) = self.stack.pop().unwrap().as_return_address().unwrap();
+        let (method_id, off, drop_locals) = self.stack.pop().as_return_address().unwrap();
 
         let class = self.env.get(method_id.0).as_user_class();
         let method = &class.methods[method_id.1 as usize];
@@ -412,7 +470,19 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         let decl_class = self.env.get(method_id.0).as_user_class();
         let decl_method = &decl_class.methods[method_id.1 as usize];
 
-        Result::Ok(self.stack[self.stack.len() - decl_method.descriptor.param_types.len() - 1].as_ref().unwrap())
+        let num_param_slots = decl_method.descriptor.param_types.iter().map(|t| {
+            if t.array_dims == 0 {
+                match t.flat {
+                    FlatTypeDescriptor::Primitive(PrimitiveType::Long) => 2,
+                    FlatTypeDescriptor::Primitive(PrimitiveType::Double) => 2,
+                    _ => 1
+                }
+            } else {
+                1
+            }
+        }).sum();
+
+        Result::Ok(self.stack.read(num_param_slots).as_ref().unwrap())
     }
 
     fn enter_method(&mut self, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
@@ -428,17 +498,28 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
 
             let code = method.code_attribute().unwrap();
 
-            let mut num_params = method.descriptor.param_types.len();
+            let mut num_param_slots = method.descriptor.param_types.iter().map(|t| {
+                if t.array_dims == 0 {
+                    match t.flat {
+                        FlatTypeDescriptor::Primitive(PrimitiveType::Long) => 2,
+                        FlatTypeDescriptor::Primitive(PrimitiveType::Double) => 2,
+                        _ => 1
+                    }
+                } else {
+                    1
+                }
+            }).sum();
+
             if !method.flags.contains(MethodFlags::STATIC) {
-                num_params += 1;
+                num_param_slots += 1;
             };
 
-            for _ in num_params..(code.max_locals as usize) {
-                self.locals.push(Value::Ref(None));
+            for _ in num_param_slots..(code.max_locals as usize) {
+                self.locals.push(Value::Empty);
             };
 
-            for _ in 0..num_params {
-                self.locals.push(self.stack.pop().unwrap());
+            for _ in 0..num_param_slots {
+                self.locals.push(self.stack.pop_slot());
             };
 
             self.stack.push(Value::ReturnAddress(self.method_id, self.instrs.1, code.max_locals as usize));
@@ -499,7 +580,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
         method_id,
         class,
         instrs,
-        stack: vec![],
+        stack: InterpreterStack::new(),
         locals: vec![]
     };
 
@@ -526,7 +607,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 state.stack.push(Value::Int(val as i32));
             },
             BytecodeInstruction::Dup => {
-                let val = state.stack.last().unwrap().clone();
+                let val = state.stack.peek().clone();
                 state.stack.push(val);
             },
             BytecodeInstruction::ALoad(idx) | BytecodeInstruction::DLoad(idx) | BytecodeInstruction::FLoad(idx) |
@@ -536,32 +617,32 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             },
             BytecodeInstruction::AStore(idx) | BytecodeInstruction::DStore(idx) | BytecodeInstruction::FStore(idx) |
             BytecodeInstruction::IStore(idx) | BytecodeInstruction::LStore(idx) => {
-                let val = state.stack.pop().unwrap();
+                let val = state.stack.pop();
                 state.set_local(idx as usize, val);
             },
             BytecodeInstruction::I2L => {
-                let val = state.stack.pop().unwrap().as_int().unwrap();
+                let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Long(val as i64));
             },
             BytecodeInstruction::ISub => {
-                let o2 = state.stack.pop().unwrap().as_int().unwrap();
-                let o1 = state.stack.pop().unwrap().as_int().unwrap();
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(o1.wrapping_sub(o2)));
             },
             BytecodeInstruction::LAdd => {
-                let o2 = state.stack.pop().unwrap().as_long().unwrap();
-                let o1 = state.stack.pop().unwrap().as_long().unwrap();
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1.wrapping_add(o2)));
             },
             BytecodeInstruction::LAnd => {
-                let o2 = state.stack.pop().unwrap().as_long().unwrap();
-                let o1 = state.stack.pop().unwrap().as_long().unwrap();
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1 & o2));
             },
             BytecodeInstruction::LShl => {
-                let o2 = state.stack.pop().unwrap().as_int().unwrap();
-                let o1 = state.stack.pop().unwrap().as_long().unwrap();
-                state.stack.push(Value::Long(o1 << o2));
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1 << (o2 as i64)));
             },
             BytecodeInstruction::New(idx) => {
                 match state.class.constant_pool[idx as usize] {
@@ -573,7 +654,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 };
             },
             BytecodeInstruction::NewArray(t) => {
-                let len = state.stack.pop().unwrap().as_int().unwrap();
+                let len = state.stack.pop().as_int().unwrap();
 
                 if len < 0 {
                     return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
@@ -586,7 +667,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::ANewArray(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => {
-                        let len = state.stack.pop().unwrap().as_int().unwrap();
+                        let len = state.stack.pop().as_int().unwrap();
 
                         if len < 0 {
                             return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
@@ -601,8 +682,8 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             },
             BytecodeInstruction::AALoad | BytecodeInstruction::BALoad | BytecodeInstruction::CALoad | BytecodeInstruction::DALoad |
             BytecodeInstruction::FALoad | BytecodeInstruction::IALoad | BytecodeInstruction::LALoad | BytecodeInstruction::SALoad => {
-                let idx = state.stack.pop().unwrap().as_int().unwrap();
-                let arr_ref = state.stack.pop().unwrap().into_ref().unwrap();
+                let idx = state.stack.pop().as_int().unwrap();
+                let arr_ref = state.stack.pop().into_ref().unwrap();
 
                 if let Some(arr_ref) = arr_ref {
                     let val = arr_ref.read_array_element(idx);
@@ -613,9 +694,9 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             },
             BytecodeInstruction::AAStore | BytecodeInstruction::BAStore | BytecodeInstruction::CAStore | BytecodeInstruction::DAStore |
             BytecodeInstruction::FAStore | BytecodeInstruction::IAStore | BytecodeInstruction::LAStore | BytecodeInstruction::SAStore => {
-                let val = state.stack.pop().unwrap();
-                let idx = state.stack.pop().unwrap().as_int().unwrap();
-                let arr_ref = state.stack.pop().unwrap().into_ref().unwrap();
+                let val = state.stack.pop();
+                let idx = state.stack.pop().as_int().unwrap();
+                let arr_ref = state.stack.pop().into_ref().unwrap();
 
                 if let Some(arr_ref) = arr_ref {
                     // TODO Check class of element stored
@@ -625,7 +706,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 };
             },
             BytecodeInstruction::ArrayLength => {
-                let arr_ref = state.stack.pop().unwrap().into_ref().unwrap();
+                let arr_ref = state.stack.pop().into_ref().unwrap();
 
                 if let Some(arr_ref) = arr_ref {
                     state.stack.push(Value::Int(arr_ref.read_array_length()));
@@ -636,7 +717,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::GetField(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
-                        let obj_ref = state.stack.pop().unwrap().into_ref().unwrap();
+                        let obj_ref = state.stack.pop().into_ref().unwrap();
 
                         if let Some(obj_ref) = obj_ref {
                             let value = obj_ref.read_field(cpe.field_id);
@@ -651,8 +732,8 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::PutField(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
-                        let value = state.stack.pop().unwrap();
-                        let obj_ref = state.stack.pop().unwrap().into_ref().unwrap();
+                        let value = state.stack.pop();
+                        let obj_ref = state.stack.pop().into_ref().unwrap();
 
                         if let Some(obj_ref) = obj_ref {
                             obj_ref.write_field(cpe.field_id, value);
@@ -677,40 +758,40 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
                         let class_obj = state.heap.get_class_object(cpe.field_id.0);
-                        let value = state.stack.pop().unwrap();
+                        let value = state.stack.pop();
                         class_obj.write_field(cpe.field_id, value);
                     },
                     _ => unreachable!()
                 };
             },
             BytecodeInstruction::If(cond, dest) => {
-                let operand = state.stack.pop().unwrap().as_int().unwrap();
+                let operand = state.stack.pop().as_int().unwrap();
                 if do_compare_int(operand, 0, cond) {
                     state.instrs.1 = dest;
                 };
             },
             BytecodeInstruction::IfICmp(cond, dest) => {
-                let o2 = state.stack.pop().unwrap().as_int().unwrap();
-                let o1 = state.stack.pop().unwrap().as_int().unwrap();
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
                 if do_compare_int(o1, o2, cond) {
                     state.instrs.1 = dest;
                 };
             },
             BytecodeInstruction::IfACmp(cond, dest) => {
-                let o2 = state.stack.pop().unwrap().into_ref().unwrap();
-                let o1 = state.stack.pop().unwrap().into_ref().unwrap();
+                let o2 = state.stack.pop().into_ref().unwrap();
+                let o1 = state.stack.pop().into_ref().unwrap();
                 if do_compare_ref(o1, o2, cond) {
                     state.instrs.1 = dest;
                 };
             },
             BytecodeInstruction::IfNonNull(dest) => {
-                let operand = state.stack.pop().unwrap().into_ref().unwrap();
+                let operand = state.stack.pop().into_ref().unwrap();
                 if operand.is_some() {
                     state.instrs.1 = dest;
                 };
             },
             BytecodeInstruction::IfNull(dest) => {
-                let operand = state.stack.pop().unwrap().into_ref().unwrap();
+                let operand = state.stack.pop().into_ref().unwrap();
                 if operand.is_none() {
                     state.instrs.1 = dest;
                 };
@@ -720,7 +801,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             },
             BytecodeInstruction::InstanceOf(idx) => {
                 // TODO Perform the actual check
-                state.stack.pop().unwrap();
+                state.stack.pop();
                 state.stack.push(Value::Int(1));
             },
             BytecodeInstruction::CheckCast(idx) => {
@@ -749,7 +830,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 };
             },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
-                let result = state.stack.pop().unwrap();
+                let result = state.stack.pop();
                 assert!(!state.exit_method(verbose)?);
                 state.stack.push(result);
             },
