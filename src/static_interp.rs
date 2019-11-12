@@ -659,6 +659,8 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::New(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => {
+                        try_run_clinit_without_checkpoint(env, heap, cpe.class_id, verbose)?;
+
                         let obj_ref = state.heap.allocate_object(cpe.class_id)?;
                         state.stack.push(Value::Ref(Some(obj_ref)));
                     },
@@ -759,6 +761,8 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::GetStatic(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
+                        try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose)?;
+
                         let class_obj = state.heap.get_class_object(cpe.field_id.0);
                         let value = class_obj.read_field(cpe.field_id);
                         state.stack.push(value);
@@ -769,6 +773,8 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::PutStatic(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
+                        try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose)?;
+
                         let class_obj = state.heap.get_class_object(cpe.field_id.0);
                         let value = state.stack.pop();
                         class_obj.write_field(cpe.field_id, value);
