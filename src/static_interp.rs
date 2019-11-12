@@ -216,12 +216,13 @@ impl <'a> Value<'a> {
 pub enum StaticInterpretError {
     UnimplementedBytecode(MethodId, BytecodeInstruction),
     UnknownNativeCall(MethodId),
+    OutOfMemory,
     WouldThrowException(ClassId)
 }
 
 impl From<AllocErr> for StaticInterpretError {
     fn from(_: AllocErr) -> Self {
-        StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT)
+        StaticInterpretError::OutOfMemory
     }
 }
 
