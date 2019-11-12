@@ -17,12 +17,12 @@ import java.security.ProtectionDomain;
 import java.util.Map;
 
 public final class Class<T> implements Serializable, GenericDeclaration, Type, AnnotatedElement {
-    public static Class<?> forName(String className) {
+    public static Class<?> forName(String className) throws ClassNotFoundException {
         return forName(className, true, null);
     }
 
-    public static Class<?> forName(String className, boolean initialize, ClassLoader loader) {
-        return null;
+    public static Class<?> forName(String className, boolean initialize, ClassLoader loader) throws ClassNotFoundException {
+        throw new ClassNotFoundException(className);
     }
 
     static byte[] getExecutableTypeAnnotationBytes(Executable e) {
