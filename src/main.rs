@@ -6,11 +6,12 @@ pub mod bytecode;
 pub mod classfile;
 pub mod layout;
 pub mod liveness;
+pub mod mil;
 pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use clap::{App, Arg, ArgMatches};
 use itertools::Itertools;
@@ -219,4 +220,26 @@ fn main() {
             println!("JAVA   {}.{}{}", class.meta.name, method.name, method.descriptor);
         };
     };
+
+    let mut known_object_map = mil::il::MilKnownObjectMap::new();
+    let mut known_objects = mil::ilgen::KnownObjects {
+        classes: HashMap::new(),
+        strings: vec![]
+    };
+
+    for class_id in liveness.needs_clinit.iter().cloned() {
+        known_objects.classes.insert(class_id, known_object_map.add(()));
+    };
+    for _ in 0..(constant_strings.len()) {
+        known_objects.strings.push(known_object_map.add(()));
+    };
+
+    let start_ilgen = std::time::Instant::now();
+    let mut num_functions_generated = 0usize;
+    for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
+        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &known_objects, args.is_present("verbose")) {
+            num_functions_generated += 1;
+        };
+    };
+    println!("Generated MIL for {} functions in {:.3}s", num_functions_generated, start_ilgen.elapsed().as_secs_f32());
 }
