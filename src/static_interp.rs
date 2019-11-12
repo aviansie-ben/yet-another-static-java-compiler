@@ -905,6 +905,7 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
         Result::Ok(()) => true,
         Result::Err(err) => {
             eprintln!("WARNING: Failed to statically run <clinit> for {}: {:?}", env.get(class).name(env), err);
+            heap.rollback();
             false
         }
     }
