@@ -830,6 +830,9 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     ConstantPoolEntry::Methodref(ref cpe) => {
                         state.enter_method(cpe.method_id, verbose)?;
                     },
+                    ConstantPoolEntry::InterfaceMethodref(ref cpe) => {
+                        state.enter_method(cpe.method_id, verbose)?;
+                    },
                     _ => unreachable!()
                 };
             },
