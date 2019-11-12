@@ -462,7 +462,12 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         Result::Ok(if decl_method.virtual_slot == !0 {
             method_id
         } else {
-            receiver.class().as_user_class().layout.virtual_slots[decl_method.virtual_slot as usize]
+            match receiver.class() {
+                ResolvedClass::User(ref recv_class) => {
+                    recv_class.layout.virtual_slots[decl_method.virtual_slot as usize]
+                },
+                _ => method_id
+            }
         })
     }
 
