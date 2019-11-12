@@ -915,7 +915,24 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
     match try_run_clinit_without_checkpoint(env, heap, class, verbose) {
         Result::Ok(()) => true,
         Result::Err(err) => {
-            eprintln!("WARNING: Failed to statically run <clinit> for {}: {:?}", env.get(class).name(env), err);
+            eprint!("WARNING: Failed to statically run <clinit> for {}: ", env.get(class).name(env));
+            match err {
+                StaticInterpretError::UnimplementedBytecode(_, bc) => {
+                    eprintln!("Unimplemented bytecode {:?}", bc);
+                },
+                StaticInterpretError::UnknownNativeCall(method_id) => {
+                    let class = env.get(method_id.0).as_user_class();
+                    let method = &class.methods[method_id.1 as usize];
+
+                    eprintln!("Unknown native call to {}.{}{}", class.meta.name, method.name, method.descriptor);
+                },
+                StaticInterpretError::OutOfMemory => {
+                    eprintln!("Ran out of memory in static heap");
+                },
+                StaticInterpretError::WouldThrowException(exception_class_id) => {
+                    eprintln!("Threw exception of type {}", env.get(exception_class_id).name(env));
+                }
+            };
             heap.rollback();
             false
         }
