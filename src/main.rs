@@ -176,7 +176,7 @@ fn main() {
     let start_heap = std::time::Instant::now();
     let constant_strings = static_heap::collect_constant_strings(liveness.needs_clinit.iter().cloned(), &mut env);
     let mut heap = unsafe { static_heap::JavaStaticHeap::new(&env, 64 * 1024 * 1024) };
-    if heap.init_class_objects(liveness.needs_clinit.iter().cloned()).is_err() {
+    if heap.init_class_objects(liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0)).is_err() {
         eprintln!("Failed to create class objects in static heap");
         return;
     };
