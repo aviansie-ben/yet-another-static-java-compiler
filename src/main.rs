@@ -199,6 +199,8 @@ fn main() {
             needs_runtime_clinit.insert(class_id);
         };
     };
+
+    let has_class_object = liveness.needs_clinit.iter().cloned().collect_vec();
     println!(
         "Ran static class initialization for {} classes ({} failed) in {:.3}s",
         good_clinit + bad_clinit,
@@ -227,7 +229,7 @@ fn main() {
         strings: vec![]
     };
 
-    for class_id in liveness.needs_clinit.iter().cloned() {
+    for class_id in has_class_object.iter().cloned() {
         known_objects.classes.insert(class_id, known_object_map.add(()));
     };
     for _ in 0..(constant_strings.len()) {
