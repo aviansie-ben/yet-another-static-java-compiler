@@ -4,6 +4,9 @@ use crate::classfile::{Class, FieldFlags, PrimitiveType};
 use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
 
+pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
+pub const JAVA_LANG_CLASS_SIZE: u32 = 24;
+
 #[derive(Debug, Clone)]
 pub struct ObjectLayout {
     pub fields: Vec<(FieldId, u32)>,
@@ -18,11 +21,11 @@ impl ObjectLayout {
     pub fn empty() -> ObjectLayout {
         ObjectLayout {
             fields: vec![],
-            size: 8 /* Skip the vtable pointer and lock word */,
+            size: JAVA_OBJECT_HEADER_SIZE,
             virtual_slots: vec![],
             interface_slots: vec![],
             static_fields: vec![],
-            static_size: 24 /* Size of java/lang/Class objects */
+            static_size: JAVA_LANG_CLASS_SIZE
         }
     }
 
