@@ -242,6 +242,7 @@ pub enum MilEndInstructionKind {
     Nop,
     Call(ClassId, MethodId, MilRegister, Vec<MilOperand>),
     CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
+    CallNative(ClassId, String, MilRegister, Vec<MilOperand>),
     Return(MilOperand),
     Jump(MilBlockId)
 }
@@ -342,6 +343,12 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
+            MilEndInstructionKind::CallNative(ty, ref name, tgt, ref args) => {
+                write!(f, "call_native_{} <{}> {}", MilType::for_class(ty), name, tgt)?;
+                for a in args.iter() {
+                    write!(f, ", {}", a.pretty(self.1))?;
+                };
+            },
             MilEndInstructionKind::Return(ref val) => {
                 write!(f, "ret {}", val.pretty(self.1))?;
             },
@@ -413,6 +420,7 @@ impl <'a> fmt::Display for PrettyMilBlock<'a> {
 
 #[derive(Debug, Clone)]
 pub struct MilFunction {
+    pub id: MethodId,
     pub reg_alloc: MilRegisterAllocator,
     pub reg_map: MilRegisterMap,
     pub block_alloc: MilBlockIdAllocator,
@@ -421,8 +429,9 @@ pub struct MilFunction {
 }
 
 impl MilFunction {
-    pub fn new() -> MilFunction {
+    pub fn new(id: MethodId) -> MilFunction {
         MilFunction {
+            id,
             reg_alloc: MilRegisterAllocator::new(),
             reg_map: MilRegisterMap::new(),
             block_alloc: MilBlockIdAllocator::new(),

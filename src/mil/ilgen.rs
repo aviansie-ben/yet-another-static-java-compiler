@@ -12,9 +12,9 @@ pub struct MilBuilder {
 }
 
 impl MilBuilder {
-    pub fn new() -> MilBuilder {
+    pub fn new(id: MethodId) -> MilBuilder {
         MilBuilder {
-            func: MilFunction::new(),
+            func: MilFunction::new(id),
             current_block: MilBlock::new()
         }
     }
@@ -214,10 +214,40 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
     };
 }
 
+fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, method_id: MethodId, known_objects: &KnownObjects) -> MilFunction {
+    let mut builder = MilBuilder::new(method_id);
+
+    let mut args = vec![];
+
+    if method.flags.contains(MethodFlags::STATIC) {
+        args.push(MilOperand::KnownObject(known_objects.classes[&method_id.0], ClassId::JAVA_LANG_CLASS));
+    };
+
+    args.extend(
+        method.param_types.iter().cloned().enumerate()
+            .map(|(i, param_type)| MilOperand::Register(
+                read_param(&mut builder, i.try_into().unwrap(), param_type)
+            ))
+    );
+
+    let reg = builder.allocate_reg(MilType::for_class(method.return_type));
+
+    builder.append_end_instruction(
+        MilEndInstructionKind::CallNative(method.return_type, name, reg, args),
+        0
+    );
+    builder.append_end_instruction(MilEndInstructionKind::Return(MilOperand::Register(reg)), 0);
+
+    builder.finish()
+}
+
 pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &KnownObjects, verbose: bool) -> Option<MilFunction> {
     let (class, method) = env.get_method(method_id);
 
-    if method.flags.intersects(MethodFlags::ABSTRACT | MethodFlags::NATIVE) {
+    if method.flags.contains(MethodFlags::NATIVE) {
+        let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
+        return Some(generate_native_thunk(env, name, method, method_id, known_objects));
+    } else if method.flags.contains(MethodFlags::ABSTRACT) {
         return None;
     };
 
@@ -232,7 +262,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
     let mut stack = vec![];
 
     let mut targets = collect_targets(instrs);
-    let mut builder = MilBuilder::new();
+    let mut builder = MilBuilder::new(method_id);
 
     get_params(&mut builder, &mut locals, method);
 
