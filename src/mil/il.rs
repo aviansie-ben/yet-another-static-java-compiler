@@ -116,6 +116,23 @@ pub enum MilType {
     Double
 }
 
+impl MilType {
+    pub fn for_class(class_id: ClassId) -> MilType {
+        match class_id {
+            ClassId::PRIMITIVE_VOID => MilType::Void,
+            ClassId::PRIMITIVE_BYTE => MilType::Int,
+            ClassId::PRIMITIVE_CHAR => MilType::Int,
+            ClassId::PRIMITIVE_DOUBLE => MilType::Double,
+            ClassId::PRIMITIVE_FLOAT => MilType::Float,
+            ClassId::PRIMITIVE_INT => MilType::Int,
+            ClassId::PRIMITIVE_LONG => MilType::Long,
+            ClassId::PRIMITIVE_SHORT => MilType::Int,
+            ClassId::PRIMITIVE_BOOLEAN => MilType::Int,
+            _ => MilType::Ref
+        }
+    }
+}
+
 impl fmt::Display for MilType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -223,8 +240,8 @@ pub enum MilInstructionKind {
 #[derive(Debug, Clone)]
 pub enum MilEndInstructionKind {
     Nop,
-    Call(MilType, MethodId, MilRegister, Vec<MilOperand>),
-    CallVirtual(MilType, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
+    Call(ClassId, MethodId, MilRegister, Vec<MilOperand>),
+    CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     Return(MilOperand),
     Jump(MilBlockId)
 }
@@ -315,14 +332,14 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                 write!(f, "nop")?;
             },
             MilEndInstructionKind::Call(ty, method_id, tgt, ref args) => {
-                write!(f, "call_{} <{}> {}", ty, MethodName(method_id, self.1), tgt)?;
+                write!(f, "call_{} <{}> {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt)?;
 
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
             MilEndInstructionKind::CallVirtual(ty, method_id, tgt, ref obj, ref args) => {
-                write!(f, "call_virtual_{} <{}> {}, {}", ty, MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+                write!(f, "call_virtual_{} <{}> {}, {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };

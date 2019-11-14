@@ -310,19 +310,19 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_ty = cpe.descriptor.return_type.as_ref().map_or(MilType::Void, get_mil_type_for_descriptor);
-                let reg = builder.allocate_reg(ret_ty);
+                let ret_class = cpe.descriptor.return_type.as_ref().map_or(ClassId::PRIMITIVE_VOID, |d| env.try_find_for_descriptor(d).unwrap());
+                let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len());
                 builder.append_end_instruction(
                     MilEndInstructionKind::Call(
-                        ret_ty,
+                        ret_class,
                         cpe.method_id,
                         reg,
                         args
                     ),
                     bc
                 );
-                if ret_ty != MilType::Void {
+                if ret_class != ClassId::PRIMITIVE_VOID {
                     stack.push(reg);
                 };
             },
@@ -332,19 +332,19 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_ty = cpe.descriptor.return_type.as_ref().map_or(MilType::Void, get_mil_type_for_descriptor);
-                let reg = builder.allocate_reg(ret_ty);
+                let ret_class = cpe.descriptor.return_type.as_ref().map_or(ClassId::PRIMITIVE_VOID, |d| env.try_find_for_descriptor(d).unwrap());
+                let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
                 builder.append_end_instruction(
                     MilEndInstructionKind::Call(
-                        ret_ty,
+                        ret_class,
                         cpe.method_id,
                         reg,
                         args
                     ),
                     bc
                 );
-                if ret_ty != MilType::Void {
+                if ret_class != ClassId::PRIMITIVE_VOID {
                     stack.push(reg);
                 };
             },
