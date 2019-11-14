@@ -434,14 +434,18 @@ impl <'a> fmt::Display for PrettyMilFunction<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct MilProgram {
-    pub funcs: HashMap<MethodId, MilFunction>
+pub struct MilProgram<'a> {
+    pub funcs: HashMap<MethodId, MilFunction>,
+    pub known_objects: MilKnownObjectMap<'a>,
+    pub main_method: MethodId
 }
 
-impl MilProgram {
-    pub fn new() -> MilProgram {
+impl <'a> MilProgram<'a> {
+    pub fn new(known_objects: MilKnownObjectMap, main_method: MethodId) -> MilProgram {
         MilProgram {
-            funcs: HashMap::new()
+            funcs: HashMap::new(),
+            known_objects,
+            main_method
         }
     }
 }

@@ -237,11 +237,11 @@ fn main() {
     };
 
     let start_ilgen = std::time::Instant::now();
-    let mut num_functions_generated = 0usize;
+    let mut program = mil::il::MilProgram::new(known_object_map, main_method);
     for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
         if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &known_objects, args.is_present("verbose")) {
-            num_functions_generated += 1;
+            program.funcs.insert(method_id, func);
         };
     };
-    println!("Generated MIL for {} functions in {:.3}s", num_functions_generated, start_ilgen.elapsed().as_secs_f32());
+    println!("Generated MIL for {} functions in {:.3}s", program.funcs.len(), start_ilgen.elapsed().as_secs_f32());
 }
