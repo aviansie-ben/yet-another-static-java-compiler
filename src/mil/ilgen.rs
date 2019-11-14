@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 use super::il::*;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
@@ -181,36 +182,35 @@ fn constant_from_cpe(cpe: &ConstantPoolEntry, known_objects: &KnownObjects) -> M
     }
 }
 
-fn get_params(env: &ClassEnvironment, builder: &mut MilBuilder, locals: &mut MilLocals, this_id: ClassId, method: &Method) {
-    let mut next_param = 0;
+fn read_param(builder: &mut MilBuilder, i: u16, param_type: ClassId) -> MilRegister {
+    let reg = builder.allocate_reg(MilType::for_class(param_type));
 
-    if !method.flags.contains(MethodFlags::STATIC) {
-        let this_reg = builder.allocate_reg(MilType::Ref);
-        builder.append_instruction(
-            MilInstructionKind::GetParam(next_param, this_id, this_reg),
-            0
+    builder.append_instruction(
+        if param_type != ClassId::UNRESOLVED {
+            MilInstructionKind::GetParam(i.try_into().unwrap(), param_type, reg)
+        } else {
+            MilInstructionKind::Copy(reg, MilOperand::Null)
+        },
+        0
+    );
+
+    reg
+}
+
+fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method) {
+    let mut next_param_local = 0;
+
+    for (i, param_type) in method.param_types.iter().cloned().enumerate() {
+        locals.set(
+            next_param_local,
+            MilType::for_class(param_type),
+            read_param(builder, i.try_into().unwrap(), param_type)
         );
 
-        locals.set(next_param, MilType::Ref, this_reg);
-        next_param += 1;
-    };
-
-    for param_ty in method.descriptor.param_types.iter() {
-        let param_reg = builder.allocate_reg(get_mil_type_for_descriptor(param_ty));
-        if let Some(param_ty) = env.try_find_for_descriptor(param_ty) {
-            builder.append_instruction(
-                MilInstructionKind::GetParam(next_param, param_ty, param_reg),
-                0
-            );
-        } else {
-            builder.append_instruction(
-                MilInstructionKind::Copy(param_reg, MilOperand::Null),
-                0
-            );
+        next_param_local += 1;
+        if param_type.needs_dual_slot() {
+            next_param_local += 1;
         };
-
-        locals.set(next_param, MilType::Ref, param_reg);
-        next_param += 1;
     };
 }
 
@@ -235,7 +235,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
     let mut targets = collect_targets(instrs);
     let mut builder = MilBuilder::new();
 
-    get_params(env, &mut builder, &mut locals, method_id.0, method);
+    get_params(&mut builder, &mut locals, method);
 
     for (bc, instr) in instrs {
         let bc = bc as u32;
@@ -310,7 +310,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_class = cpe.descriptor.return_type.as_ref().map_or(ClassId::PRIMITIVE_VOID, |d| env.try_find_for_descriptor(d).unwrap());
+                let ret_class = env.get(cpe.method_id.0).as_user_class().methods[cpe.method_id.1 as usize].return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len());
                 builder.append_end_instruction(
@@ -332,7 +332,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_class = cpe.descriptor.return_type.as_ref().map_or(ClassId::PRIMITIVE_VOID, |d| env.try_find_for_descriptor(d).unwrap());
+                let ret_class = env.get(cpe.method_id.0).as_user_class().methods[cpe.method_id.1 as usize].return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
                 builder.append_end_instruction(
@@ -368,7 +368,6 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ty = get_mil_type_for_descriptor(&cpe.descriptor);
                 let val = MilOperand::Register(stack.pop().unwrap());
                 builder.append_instruction(
                     MilInstructionKind::PutStatic(cpe.field_id, cpe.type_id, val),

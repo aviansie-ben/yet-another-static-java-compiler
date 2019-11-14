@@ -79,6 +79,14 @@ impl ClassId {
     pub fn special_classes() -> impl Iterator<Item=ClassId> {
         (0..ClassId::num_special_classes()).map(|i| ClassId(i))
     }
+
+    pub fn needs_dual_slot(&self) -> bool {
+        match *self {
+            ClassId::PRIMITIVE_DOUBLE => true,
+            ClassId::PRIMITIVE_LONG => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -873,6 +881,21 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
 
         for f in resolving_class.fields.iter_mut() {
             f.class_id = env.try_find_for_descriptor(&f.descriptor).unwrap_or(ClassId::UNRESOLVED);
+        };
+
+        for m in resolving_class.methods.iter_mut() {
+            if !m.flags.contains(MethodFlags::STATIC) {
+                m.param_types.push(resolving_class.meta.this_id);
+            };
+
+            m.param_types.extend(m.descriptor.param_types.iter().map(|d| {
+                env.try_find_for_descriptor(d).unwrap_or(ClassId::UNRESOLVED)
+            }));
+
+            m.return_type = m.descriptor.return_type.as_ref().map_or(
+                ClassId::PRIMITIVE_VOID,
+                |d| env.try_find_for_descriptor(d).unwrap_or(ClassId::UNRESOLVED)
+            );
         };
 
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
