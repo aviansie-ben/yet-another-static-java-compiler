@@ -259,9 +259,8 @@ struct FieldName<'a>(FieldId, &'a ClassEnvironment);
 
 impl <'a> fmt::Display for FieldName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let FieldName(field_id, env) = self;
-        let class = env.get(field_id.0).as_user_class();
-        let field = &class.fields[field_id.1 as usize];
+        let FieldName(field_id, env) = *self;
+        let (class, field) = env.get_field(field_id);
 
         write!(f, "{}.{} {}", class.meta.name, field.name, field.descriptor)
     }
@@ -271,9 +270,8 @@ struct MethodName<'a>(MethodId, &'a ClassEnvironment);
 
 impl <'a> fmt::Display for MethodName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let MethodName(method_id, env) = self;
-        let class = env.get(method_id.0).as_user_class();
-        let method = &class.methods[method_id.1 as usize];
+        let MethodName(method_id, env) = *self;
+        let (class, method) = env.get_method(method_id);
 
         write!(f, "{}.{}{}", class.meta.name, method.name, method.descriptor)
     }

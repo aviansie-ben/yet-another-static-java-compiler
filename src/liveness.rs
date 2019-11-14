@@ -90,8 +90,7 @@ fn analyze_method(env: &ClassEnvironment, liveness: &mut LivenessInfo, method_id
         return;
     };
 
-    let class = env.get(method_id.0).as_user_class();
-    let method = &class.methods[method_id.1 as usize];
+    let (class, method) = env.get_method(method_id);
 
     if liveness.may_call.insert(method_id) {
         if verbose {

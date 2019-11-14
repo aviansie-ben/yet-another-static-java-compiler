@@ -484,6 +484,16 @@ impl ClassEnvironment {
         &mut self.internals.classes[id.0 as usize]
     }
 
+    pub fn get_method(&self, id: MethodId) -> (&Class, &Method) {
+        let class = self.get(id.0).as_user_class();
+        (class, &class.methods[id.1 as usize])
+    }
+
+    pub fn get_field(&self, id: FieldId) -> (&Class, &Field) {
+        let class = self.get(id.0).as_user_class();
+        (class, &class.fields[id.1 as usize])
+    }
+
     pub fn try_find(&self, name: &str) -> Option<ClassId> {
         self.internals.class_names.get(name).map(|&id| id)
     }

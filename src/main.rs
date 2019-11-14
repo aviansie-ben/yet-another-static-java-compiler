@@ -213,9 +213,7 @@ fn main() {
     println!("Found {} executable methods in {:.3}s", liveness.may_call.len(), start_liveness_methods.elapsed().as_secs_f32());
 
     for m in liveness.may_call.iter().cloned() {
-        let class = env.get(m.0).as_user_class();
-        let method = &class.methods[m.1 as usize];
-
+        let (class, method) = env.get_method(m);
         if method.flags.contains(classfile::MethodFlags::NATIVE) {
             println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
         } else {

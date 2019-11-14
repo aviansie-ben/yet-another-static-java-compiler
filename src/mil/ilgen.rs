@@ -215,8 +215,7 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
 }
 
 pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &KnownObjects, verbose: bool) -> Option<MilFunction> {
-    let class = &env.get(method_id.0).as_user_class();
-    let method = &class.methods[method_id.1 as usize];
+    let (class, method) = env.get_method(method_id);
 
     if method.flags.intersects(MethodFlags::ABSTRACT | MethodFlags::NATIVE) {
         return None;
@@ -310,7 +309,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_class = env.get(cpe.method_id.0).as_user_class().methods[cpe.method_id.1 as usize].return_type;
+                let ret_class = env.get_method(cpe.method_id).1.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len());
                 builder.append_end_instruction(
@@ -332,7 +331,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     _ => unreachable!()
                 };
 
-                let ret_class = env.get(cpe.method_id.0).as_user_class().methods[cpe.method_id.1 as usize].return_type;
+                let ret_class = env.get_method(cpe.method_id).1.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
                 builder.append_end_instruction(

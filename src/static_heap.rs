@@ -226,8 +226,7 @@ impl <'a> JavaStaticRef<'a> {
     }
 
     pub fn read_field(&self, field_id: FieldId) -> Value<'a> {
-        let class = self.env.get(field_id.0).as_user_class();
-        let field = &class.fields[field_id.1 as usize];
+        let (class, field) = self.env.get_field(field_id);
 
         if field.flags.contains(FieldFlags::STATIC) {
             let class_of = match self.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)) {
@@ -372,8 +371,7 @@ impl <'a> JavaStaticRef<'a> {
     }
 
     pub fn write_field(&self, field_id: FieldId, value: Value<'a>) {
-        let class = self.env.get(field_id.0).as_user_class();
-        let field = &class.fields[field_id.1 as usize];
+        let (class, field) = self.env.get_field(field_id);
 
         if field.flags.contains(FieldFlags::STATIC) {
             let class_of = match self.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)) {

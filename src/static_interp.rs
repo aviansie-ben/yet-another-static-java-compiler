@@ -438,9 +438,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         };
 
         let (method_id, off, drop_locals) = self.stack.pop().as_return_address().unwrap();
-
-        let class = self.env.get(method_id.0).as_user_class();
-        let method = &class.methods[method_id.1 as usize];
+        let (class, method) = self.env.get_method(method_id);
 
         if verbose {
             eprintln!("    RETURN TO {}.{}{}", class.meta.name, method.name, method.descriptor);
@@ -458,8 +456,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
     }
 
     fn find_virtual_target(&mut self, method_id: MethodId, receiver: JavaStaticRef<'b>, verbose: bool) -> Result<MethodId, StaticInterpretError> {
-        let decl_class = self.env.get(method_id.0).as_user_class();
-        let decl_method = &decl_class.methods[method_id.1 as usize];
+        let decl_method = self.env.get_method(method_id).1;
 
         Result::Ok(if decl_method.virtual_slot == !0 {
             method_id
@@ -474,8 +471,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
     }
 
     fn find_receiver(&self, method_id: MethodId, verbose: bool) -> Result<Option<&JavaStaticRef<'b>>, StaticInterpretError> {
-        let decl_class = self.env.get(method_id.0).as_user_class();
-        let decl_method = &decl_class.methods[method_id.1 as usize];
+        let decl_method = self.env.get_method(method_id).1;
 
         let num_param_slots = decl_method.descriptor.param_types.iter().map(|t| {
             if t.array_dims == 0 {
@@ -495,8 +491,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
     fn enter_method(&mut self, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
         try_run_clinit_without_checkpoint(self.env, self.heap, method_id.0, verbose)?;
 
-        let class = self.env.get(method_id.0).as_user_class();
-        let method = &class.methods[method_id.1 as usize];
+        let (class, method) = self.env.get_method(method_id);
 
         if !method.flags.contains(MethodFlags::NATIVE) {
             if verbose {
@@ -572,8 +567,7 @@ fn do_compare_ref<'a>(i: Option<JavaStaticRef<'a>>, j: Option<JavaStaticRef<'a>>
 }
 
 fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
-    let class = env.get(method_id.0).as_user_class();
-    let method = &class.methods[method_id.1 as usize];
+    let (class, method) = env.get_method(method_id);
     let code = match method.code_attribute() {
         Some(code) => code,
         None => {
@@ -921,9 +915,7 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
                     eprintln!("Unimplemented bytecode {:?}", bc);
                 },
                 StaticInterpretError::UnknownNativeCall(method_id) => {
-                    let class = env.get(method_id.0).as_user_class();
-                    let method = &class.methods[method_id.1 as usize];
-
+                    let (class, method) = env.get_method(method_id);
                     eprintln!("Unknown native call to {}.{}{}", class.meta.name, method.name, method.descriptor);
                 },
                 StaticInterpretError::OutOfMemory => {
