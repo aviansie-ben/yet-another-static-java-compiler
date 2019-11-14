@@ -845,6 +845,16 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     _ => unreachable!()
                 };
             },
+            BytecodeInstruction::AThrow => {
+                let exception = state.stack.pop().into_ref().unwrap();
+                let exception_class = if let Some(exception) = exception {
+                    exception.class_id()
+                } else {
+                    ClassId::JAVA_LANG_OBJECT
+                };
+
+                return Result::Err(StaticInterpretError::WouldThrowException(exception_class));
+            },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 let result = state.stack.pop();
                 assert!(!state.exit_method(verbose)?);
