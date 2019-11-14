@@ -1,5 +1,5 @@
 [package]
-name = "mocha"
+name = "mocha-compiler"
 version = "0.1.0"
 authors = ["Benjamin Thomas <ben@benthomas.ca>"]
 edition = "2018"

@@ -22,6 +22,7 @@ fn parse_args<'a>() -> ArgMatches<'a> {
     App::new("Mocha")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Statically compiles JVM bytecode")
+        .author(env!("CARGO_PKG_AUTHORS"))
         .arg(
             Arg::with_name("classpath")
                 .value_name("CLASSPATH")

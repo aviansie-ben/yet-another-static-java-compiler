@@ -1,6 +1,7 @@
 # Rust
-/target
+/compiler/target
 **/*.rs.bk
+.llvmenv
 
 # Java
 *.class
