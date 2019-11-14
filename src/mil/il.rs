@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId};
+use crate::static_heap::JavaStaticRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MilRegister(pub u32);
@@ -130,24 +131,28 @@ impl fmt::Display for MilType {
 }
 
 #[derive(Debug, Clone)]
-pub struct MilKnownObjectMap {
-    objs: HashMap<MilKnownObjectId, ()>,
+pub struct MilKnownObjectMap<'a> {
+    objs: HashMap<MilKnownObjectId, JavaStaticRef<'a>>,
     next: MilKnownObjectId
 }
 
-impl MilKnownObjectMap {
-    pub fn new() -> MilKnownObjectMap {
+impl <'a> MilKnownObjectMap<'a> {
+    pub fn new() -> MilKnownObjectMap<'a> {
         MilKnownObjectMap {
             objs: HashMap::new(),
             next: MilKnownObjectId(0)
         }
     }
 
-    pub fn add(&mut self, obj: ()) -> MilKnownObjectId {
+    pub fn add(&mut self, obj: JavaStaticRef<'a>) -> MilKnownObjectId {
         let id = self.next;
         self.objs.insert(id, obj);
         self.next.0 += 1;
         id
+    }
+
+    pub fn get(&self, id: MilKnownObjectId) -> &JavaStaticRef<'a> {
+        &self.objs[&id]
     }
 }
 

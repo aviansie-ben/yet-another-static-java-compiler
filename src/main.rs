@@ -230,10 +230,10 @@ fn main() {
     };
 
     for class_id in has_class_object.iter().cloned() {
-        known_objects.classes.insert(class_id, known_object_map.add(()));
+        known_objects.classes.insert(class_id, known_object_map.add(heap.get_class_object(class_id)));
     };
-    for _ in 0..(constant_strings.len()) {
-        known_objects.strings.push(known_object_map.add(()));
+    for i in 0..(constant_strings.len()) {
+        known_objects.strings.push(known_object_map.add(heap.get_constant_string(i)));
     };
 
     let start_ilgen = std::time::Instant::now();
