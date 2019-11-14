@@ -217,7 +217,8 @@ pub enum StaticInterpretError {
     UnimplementedBytecode(MethodId, BytecodeInstruction),
     UnknownNativeCall(MethodId),
     OutOfMemory,
-    WouldThrowException(ClassId)
+    WouldThrowException(ClassId),
+    ExcludedClinit(ClassId)
 }
 
 impl From<AllocErr> for StaticInterpretError {
@@ -883,6 +884,10 @@ fn try_run_clinit_without_checkpoint(env: &ClassEnvironment, heap: &JavaStaticHe
 
     match **env.get(class_id) {
         ResolvedClass::User(ref class) => {
+            if &*class.meta.name == "java/lang/System" {
+                return Result::Err(StaticInterpretError::ExcludedClinit(class_id));
+            };
+
             for (i, m) in class.methods.iter().enumerate() {
                 if &*m.name == "<clinit>" {
                     try_interpret(env, heap, MethodId(class_id, i as u16), verbose)?;
@@ -923,6 +928,9 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
                 },
                 StaticInterpretError::WouldThrowException(exception_class_id) => {
                     eprintln!("Threw exception of type {}", env.get(exception_class_id).name(env));
+                },
+                StaticInterpretError::ExcludedClinit(class_id) => {
+                    eprintln!("The <clinit> method of {} is explicitly disabled", env.get(class_id).name(env));
                 }
             };
             heap.rollback();
