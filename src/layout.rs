@@ -58,7 +58,7 @@ impl ObjectLayout {
     }
 }
 
-fn get_field_size_align(env: &ClassEnvironment, class_id: ClassId) -> (u32, u32) {
+pub fn get_field_size_align(env: &ClassEnvironment, class_id: ClassId) -> (u32, u32) {
     if class_id == ClassId::UNRESOLVED {
         return (0, 1);
     };

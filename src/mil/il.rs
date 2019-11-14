@@ -202,6 +202,13 @@ impl MilOperand {
         }
     }
 
+    pub fn get_type(&self, reg_map: &MilRegisterMap) -> MilType {
+        match *self {
+            MilOperand::Register(reg) => reg_map.info[&reg].ty,
+            _ => self.get_const_type().unwrap()
+        }
+    }
+
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilOperand(self, env)
     }

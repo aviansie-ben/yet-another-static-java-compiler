@@ -2,6 +2,7 @@
 #![feature(drain_filter)]
 #![feature(try_blocks)]
 
+pub mod backend;
 pub mod bytecode;
 pub mod classfile;
 pub mod layout;
@@ -242,4 +243,10 @@ fn main() {
         };
     };
     println!("Generated MIL for {} functions in {:.3}s", program.funcs.len(), start_ilgen.elapsed().as_secs_f32());
+
+    let start_codegen = std::time::Instant::now();
+    let llvm_ctx = backend::llvm::LLVMContext::new();
+    let llvm_module = backend::llvm::emit_llvm_ir(&env, &program, &liveness, &heap, &llvm_ctx, args.is_present("verbose"));
+    llvm_module.write_bitcode_to_file("test.bc").unwrap();
+    println!("Generated LLVM bitcode in {:.3}s", start_codegen.elapsed().as_secs_f32());
 }

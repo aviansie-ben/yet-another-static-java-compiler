@@ -709,6 +709,14 @@ impl <'a> JavaStaticHeap<'a> {
         };
     }
 
+    pub fn all_objs(&self) -> Vec<JavaStaticRef<'a>> {
+        unsafe {
+            self.objs.get().as_ref().unwrap().iter().map(|o| {
+                o.as_java_ref(self.env).with_root(NonNull::new_unchecked(self.ref_root.get()))
+            }).collect()
+        }
+    }
+
     pub fn do_gc(&self) {
         // TODO
     }
