@@ -907,11 +907,13 @@ mod tests {
             constant_pool: vec![
                 ConstantPoolEntry::Class(ConstantClass {
                     name: Arc::clone(&empty_string),
-                    class_id: ClassId::UNRESOLVED
+                    class_id: ClassId::UNRESOLVED,
+                    array_class_id: ClassId::UNRESOLVED
                 }),
                 ConstantPoolEntry::Class(ConstantClass {
                     name: Arc::clone(&empty_string),
-                    class_id: ClassId::JAVA_LANG_OBJECT
+                    class_id: ClassId::JAVA_LANG_OBJECT,
+                    array_class_id: ClassId::UNRESOLVED
                 })
             ],
             flags: ClassFlags::empty(),
@@ -1259,7 +1261,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic("Attempt to rollback with live references to non-checkpointed object")]
+    #[should_panic(expected = "Attempt to rollback with live references to non-checkpointed object")]
     fn test_panic_on_rollback_with_dead_tracked_ref() {
         let heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 100) };
         heap.commit();
