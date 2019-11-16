@@ -607,12 +607,6 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::IConst(val) => {
                 state.stack.push(Value::Int(val));
             },
-            BytecodeInstruction::BIPush(val) => {
-                state.stack.push(Value::Int(val as i32));
-            },
-            BytecodeInstruction::SIPush(val) => {
-                state.stack.push(Value::Int(val as i32));
-            },
             BytecodeInstruction::Dup => {
                 let val = state.stack.peek().clone();
                 state.stack.push(val);

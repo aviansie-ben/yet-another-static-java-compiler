@@ -25,7 +25,6 @@ pub enum BytecodeInstruction {
     AThrow,
     BALoad,
     BAStore,
-    BIPush(i8),
     CALoad,
     CAStore,
     CheckCast(u16),
@@ -148,7 +147,6 @@ pub enum BytecodeInstruction {
     Return,
     SALoad,
     SAStore,
-    SIPush(i16),
     Swap,
     TableSwitch(i32, i32, Vec<i32>)
 }
@@ -208,7 +206,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
         0xbf => (BytecodeInstruction::AThrow, 1),
         0x33 => (BytecodeInstruction::BALoad, 1),
         0x54 => (BytecodeInstruction::BAStore, 1),
-        0x10 => (BytecodeInstruction::BIPush(read_u8(bytecode, off + 1)? as i8), 2),
+        0x10 => (BytecodeInstruction::IConst(read_u8(bytecode, off + 1)? as i8 as i32), 2),
         0x34 => (BytecodeInstruction::CALoad, 1),
         0x55 => (BytecodeInstruction::CAStore, 1),
         0xc0 => (BytecodeInstruction::CheckCast(read_u16(bytecode, off + 1)?), 3),
@@ -432,7 +430,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
         0xb1 => (BytecodeInstruction::Return, 1),
         0x35 => (BytecodeInstruction::SALoad, 1),
         0x56 => (BytecodeInstruction::SAStore, 1),
-        0x11 => (BytecodeInstruction::SIPush(read_u16(bytecode, off + 1)? as i16), 3),
+        0x11 => (BytecodeInstruction::IConst(read_u16(bytecode, off + 1)? as i16 as i32), 3),
         0x5f => (BytecodeInstruction::Swap, 1),
         0xaa => {
             let pad = (4 - ((off + 1) & 0x3)) & 0x3;
