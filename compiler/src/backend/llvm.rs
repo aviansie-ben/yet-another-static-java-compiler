@@ -391,6 +391,18 @@ fn register_name(reg: MilRegister) -> CString {
     }
 }
 
+unsafe fn create_meta_field_gep(builder: &LLVMBuilder, field_id: FieldId, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
+    let class_ty = &types.class_types[&field_id.0];
+    let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
+
+    LLVMBuildStructGEP(
+        builder.ptr(),
+        class_obj,
+        class_ty.meta_fields[&field_id] as u32,
+        b"\0".as_ptr() as *const c_char
+    )
+}
+
 unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
     let llvm_func = func_map[&func.id];
     let builder = ctx.create_builder();
@@ -418,8 +430,29 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                 },
                 MilInstructionKind::GetField(_, _, _, _) => unimplemented!(),
                 MilInstructionKind::PutField(_, _, _, _) => unimplemented!(),
-                MilInstructionKind::GetStatic(_, _, _) => unimplemented!(),
-                MilInstructionKind::PutStatic(_, _, _) => unimplemented!(),
+                MilInstructionKind::GetStatic(field_id, _, tgt) => {
+                    let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
+
+                    local_regs.insert(tgt, LLVMBuildLoad(
+                        builder.ptr(),
+                        create_meta_field_gep(&builder, field_id, known_objects, obj_map, types),
+                        register_name(tgt).as_ptr() as *const c_char
+                    ));
+                },
+                MilInstructionKind::PutStatic(field_id, class_id, ref src) => {
+                    let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
+
+                    LLVMBuildStore(
+                        builder.ptr(),
+                        LLVMBuildPointerCast(
+                            builder.ptr(),
+                            src,
+                            types.class_types[&class_id].field_ty,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        create_meta_field_gep(&builder, field_id, known_objects, obj_map, types)
+                    );
+                },
                 MilInstructionKind::AllocObj(_, _) => unimplemented!(),
                 MilInstructionKind::AllocArray(_, _, _) => unimplemented!()
             };

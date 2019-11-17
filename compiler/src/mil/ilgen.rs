@@ -65,11 +65,6 @@ impl MilBuilder {
     }
 }
 
-pub struct KnownObjects {
-    pub classes: HashMap<ClassId, MilKnownObjectId>,
-    pub strings: Vec<MilKnownObjectId>
-}
-
 struct MilLocals {
     locals: Vec<[MilRegister; 5]>
 }
@@ -164,7 +159,7 @@ fn pop_args(stack: &mut Vec<MilRegister>, n: usize) -> Vec<MilOperand> {
     args
 }
 
-fn constant_from_cpe(cpe: &ConstantPoolEntry, known_objects: &KnownObjects) -> MilOperand {
+fn constant_from_cpe(cpe: &ConstantPoolEntry, known_objects: &MilKnownObjectRefs) -> MilOperand {
     match *cpe {
         ConstantPoolEntry::Class(ref cpe) => MilOperand::KnownObject(
             known_objects.classes[&cpe.class_id],
@@ -214,7 +209,7 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
     };
 }
 
-fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, method_id: MethodId, known_objects: &KnownObjects) -> MilFunction {
+fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs) -> MilFunction {
     let mut builder = MilBuilder::new(method_id);
 
     let mut args = vec![];
@@ -241,7 +236,7 @@ fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, 
     builder.finish()
 }
 
-pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &KnownObjects, verbose: bool) -> Option<MilFunction> {
+pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, verbose: bool) -> Option<MilFunction> {
     let (class, method) = env.get_method(method_id);
 
     if method.flags.contains(MethodFlags::NATIVE) {

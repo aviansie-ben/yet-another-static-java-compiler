@@ -12,7 +12,7 @@ pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use clap::{App, Arg, ArgMatches};
 use itertools::Itertools;
@@ -223,23 +223,20 @@ fn main() {
         };
     };
 
-    let mut known_object_map = mil::il::MilKnownObjectMap::new();
-    let mut known_objects = mil::ilgen::KnownObjects {
-        classes: HashMap::new(),
-        strings: vec![]
-    };
-
+    let mut known_objects = mil::il::MilKnownObjectMap::new();
     for class_id in has_class_object.iter().cloned() {
-        known_objects.classes.insert(class_id, known_object_map.add(heap.get_class_object(class_id)));
+        let obj_id = known_objects.add(heap.get_class_object(class_id));
+        known_objects.refs.classes.insert(class_id, obj_id);
     };
     for i in 0..(constant_strings.len()) {
-        known_objects.strings.push(known_object_map.add(heap.get_constant_string(i)));
+        let obj_id = known_objects.add(heap.get_constant_string(i));
+        known_objects.refs.strings.push(obj_id);
     };
 
     let start_ilgen = std::time::Instant::now();
-    let mut program = mil::il::MilProgram::new(known_object_map, main_method);
+    let mut program = mil::il::MilProgram::new(known_objects, main_method);
     for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
-        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &known_objects, args.is_present("verbose")) {
+        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, args.is_present("verbose")) {
             program.funcs.insert(method_id, func);
         };
     };

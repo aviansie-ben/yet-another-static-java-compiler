@@ -148,7 +148,23 @@ impl fmt::Display for MilType {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilKnownObjectRefs {
+    pub classes: HashMap<ClassId, MilKnownObjectId>,
+    pub strings: Vec<MilKnownObjectId>
+}
+
+impl MilKnownObjectRefs {
+    pub fn new() -> MilKnownObjectRefs {
+        MilKnownObjectRefs {
+            classes: HashMap::new(),
+            strings: vec![]
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MilKnownObjectMap<'a> {
+    pub refs: MilKnownObjectRefs,
     objs: HashMap<MilKnownObjectId, JavaStaticRef<'a>>,
     next: MilKnownObjectId
 }
@@ -156,6 +172,7 @@ pub struct MilKnownObjectMap<'a> {
 impl <'a> MilKnownObjectMap<'a> {
     pub fn new() -> MilKnownObjectMap<'a> {
         MilKnownObjectMap {
+            refs: MilKnownObjectRefs::new(),
             objs: HashMap::new(),
             next: MilKnownObjectId(0)
         }
