@@ -403,6 +403,22 @@ unsafe fn create_meta_field_gep(builder: &LLVMBuilder, field_id: FieldId, known_
     )
 }
 
+unsafe fn create_instance_field_gep(builder: &LLVMBuilder, field_id: FieldId, obj: LLVMValueRef, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
+    let class_ty = &types.class_types[&field_id.0];
+
+    LLVMBuildStructGEP(
+        builder.ptr(),
+        LLVMBuildPointerCast(
+            builder.ptr(),
+            obj,
+            types.class_types[&field_id.0].field_ty,
+            b"\0".as_ptr() as *const c_char
+        ),
+        class_ty.fields[&field_id] as u32,
+        b"\0".as_ptr() as *const c_char
+    )
+}
+
 unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
     let llvm_func = func_map[&func.id];
     let builder = ctx.create_builder();
@@ -428,8 +444,30 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                 MilInstructionKind::GetParam(idx, _, tgt) => {
                     local_regs.insert(tgt, LLVMGetParam(llvm_func, idx as u32));
                 },
-                MilInstructionKind::GetField(_, _, _, _) => unimplemented!(),
-                MilInstructionKind::PutField(_, _, _, _) => unimplemented!(),
+                MilInstructionKind::GetField(field_id, _, tgt, ref obj) => {
+                    let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+
+                    local_regs.insert(tgt, LLVMBuildLoad(
+                        builder.ptr(),
+                        create_instance_field_gep(&builder, field_id, obj, known_objects, obj_map, types),
+                        register_name(tgt).as_ptr() as *const c_char
+                    ));
+                },
+                MilInstructionKind::PutField(field_id, class_id, ref obj, ref src) => {
+                    let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                    let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
+
+                    LLVMBuildStore(
+                        builder.ptr(),
+                        LLVMBuildPointerCast(
+                            builder.ptr(),
+                            src,
+                            types.class_types[&class_id].field_ty,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        create_instance_field_gep(&builder, field_id, obj, known_objects, obj_map, types)
+                    );
+                },
                 MilInstructionKind::GetStatic(field_id, _, tgt) => {
                     let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
 

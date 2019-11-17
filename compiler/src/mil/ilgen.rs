@@ -372,6 +372,34 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     stack.push(reg);
                 };
             },
+            BytecodeInstruction::GetField(idx) => {
+                let cpe = match class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::Fieldref(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let obj = MilOperand::Register(stack.pop().unwrap());
+                let ty = get_mil_type_for_descriptor(&cpe.descriptor);
+                let reg = builder.allocate_reg(ty);
+                builder.append_instruction(
+                    MilInstructionKind::GetField(cpe.field_id, cpe.type_id, reg, obj),
+                    bc
+                );
+                stack.push(reg);
+            },
+            BytecodeInstruction::PutField(idx) => {
+                let cpe = match class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::Fieldref(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let val = MilOperand::Register(stack.pop().unwrap());
+                let obj = MilOperand::Register(stack.pop().unwrap());
+                builder.append_instruction(
+                    MilInstructionKind::PutField(cpe.field_id, cpe.type_id, obj, val),
+                    bc
+                );
+            },
             BytecodeInstruction::GetStatic(idx) => {
                 let cpe = match class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,
