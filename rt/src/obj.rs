@@ -1,3 +1,4 @@
+use std::alloc::{Alloc, Global, Layout};
 use std::cell::Cell;
 
 #[repr(C)]
@@ -27,7 +28,10 @@ impl MochaObject {
 
 #[repr(C)]
 pub struct MochaClass {
-    pub obj: MochaObject
+    pub obj: MochaObject,
+    pub class_value_map: *mut MochaObject,
+    pub vtable: &'static MochaVTable,
+    pub size: i32
 }
 
 #[repr(C)]
@@ -63,4 +67,22 @@ impl MochaString {
     pub fn as_string(&self) -> String {
         String::from_utf16_lossy(unsafe { self.chars.as_ref().unwrap().data() })
     }
+}
+
+#[no_mangle]
+pub unsafe extern fn mocha_alloc_obj(class: *mut MochaClass) -> *mut MochaObject {
+    let class = class.as_ref().unwrap();
+
+    assert!(class.size > 0);
+    let ptr = match Global.alloc(Layout::from_size_align_unchecked(class.size as usize, 16)) {
+        Ok(ptr) => ptr,
+        Err(_) => panic!("Out of memory")
+    };
+
+    std::ptr::write_bytes(ptr.as_ptr(), 0, class.size as usize);
+
+    let obj = ptr.cast::<MochaObject>().as_ptr().as_mut().unwrap();
+    obj.vtable = class.vtable as *const MochaVTable as usize as u32;
+
+    obj as *mut MochaObject
 }

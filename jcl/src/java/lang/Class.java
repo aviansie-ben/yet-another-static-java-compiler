@@ -34,6 +34,8 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     transient ClassValue.ClassValueMap classValueMap;
     private transient long internalAddress;
 
+    private transient int objSize;
+
     @SuppressWarnings("unchecked")
     public <U> Class<? extends U> asSubclass(Class<U> clazz) {
         if (!clazz.isAssignableFrom(this))

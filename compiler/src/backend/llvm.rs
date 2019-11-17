@@ -15,7 +15,7 @@ use crate::layout;
 use crate::liveness::LivenessInfo;
 use crate::mil::il::*;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
-use crate::static_heap::{JavaStaticHeap, JavaStaticRef};
+use crate::static_heap::*;
 use crate::static_interp::Value;
 
 #[derive(Debug)]
@@ -347,6 +347,25 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
     }
 }
 
+struct LLVMMochaBuiltins {
+    alloc_obj: LLVMValueRef
+}
+
+unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaBuiltins {
+    LLVMMochaBuiltins {
+        alloc_obj: LLVMAddFunction(
+            module.ptr(),
+            b"mocha_alloc_obj\0".as_ptr() as *const c_char,
+            LLVMFunctionType(
+                types.any_object_pointer,
+                [types.any_object_pointer].as_mut_ptr(),
+                1,
+                0
+            )
+        )
+    }
+}
+
 unsafe fn define_function(env: &ClassEnvironment, func: &MilFunction, types: &LLVMTypes, module: &LLVMModule) -> LLVMValueRef {
     let (class, method) = env.get_method(func.id);
     let name = CString::new(format!("{}.{}{}", class.meta.name, method.name, method.descriptor)).unwrap();
@@ -419,7 +438,7 @@ unsafe fn create_instance_field_gep(builder: &LLVMBuilder, field_id: FieldId, ob
     )
 }
 
-unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
+unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, builtins: &LLVMMochaBuiltins, ctx: &LLVMContext, module: &LLVMModule) {
     let llvm_func = func_map[&func.id];
     let builder = ctx.create_builder();
 
@@ -491,7 +510,28 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                         create_meta_field_gep(&builder, field_id, known_objects, obj_map, types)
                     );
                 },
-                MilInstructionKind::AllocObj(_, _) => unimplemented!(),
+                MilInstructionKind::AllocObj(class_id, tgt) => {
+                    let obj = LLVMBuildCall(
+                        builder.ptr(),
+                        builtins.alloc_obj,
+                        [
+                            LLVMConstPointerCast(
+                                obj_map[&known_objects.get(known_objects.refs.classes[&class_id]).as_ptr()],
+                                types.any_object_pointer
+                            )
+                        ].as_mut_ptr(),
+                        1,
+                        register_name(tgt).as_ptr() as *const c_char
+                    );
+                    let obj = LLVMBuildPointerCast(
+                        builder.ptr(),
+                        obj,
+                        types.class_types[&class_id].field_ty,
+                        register_name(tgt).as_ptr() as *const c_char
+                    );
+
+                    local_regs.insert(tgt, obj);
+                },
                 MilInstructionKind::AllocArray(_, _, _) => unimplemented!()
             };
         };
@@ -652,7 +692,7 @@ unsafe fn value_to_llvm(val: Value, class_id: ClassId, types: &LLVMTypes, obj_ma
 unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRef<'a>, llvm_obj: LLVMValueRef, types: &LLVMTypes, module: &LLVMModule, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>) {
     let class_type = &types.class_types[&obj.class_id()];
     let (ty, meta_class) = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        let meta_class = &types.class_types[&ClassId(obj.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)).as_long().unwrap() as u32)];
+        let meta_class = &types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_long().unwrap() as u32)];
         (meta_class.meta_ty, Some(meta_class))
     } else {
         (class_type.value_ty, None)
@@ -709,6 +749,13 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
     assert!(!field_values.iter().any(|&val| val.is_null()));
 
     if let Some(meta_class) = meta_class {
+        let vtable_value = if meta_class.vtable.is_null() {
+            LLVMConstInt(types.long, 0, 0)
+        } else {
+            LLVMConstPointerCast(meta_class.vtable, types.long)
+        };
+        field_values[class_type.fields[&JAVA_LANG_CLASS_VTABLE_PTR_FIELD]] = vtable_value;
+
         let class = LLVMConstNamedStruct(class_type.value_ty, field_values.as_mut_ptr(), field_values.len() as u32);
         field_values = vec![std::ptr::null_mut(); meta_class.num_meta_fields];
 
@@ -741,7 +788,7 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
 
 unsafe fn define_static_heap_object<'a>(env: &ClassEnvironment, name: &CString, obj: &JavaStaticRef<'a>, types: &LLVMTypes, module: &LLVMModule) -> LLVMValueRef {
     let ty = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        types.class_types[&ClassId(obj.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)).as_long().unwrap() as u32)].meta_ty
+        types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_long().unwrap() as u32)].meta_ty
     } else {
         match **env.get(obj.class_id()) {
             ResolvedClass::Array(elem_class) => {
@@ -768,6 +815,8 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
     let types = create_types(env, liveness, ctx, &module);
 
     unsafe {
+        let builtins = declare_builtins(&module, &types);
+
         let objs = heap.all_objs();
         let mut obj_map = HashMap::new();
 
@@ -807,7 +856,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
         for method_id in liveness.may_call.iter().cloned() {
             if let Some(func) = program.funcs.get(&method_id) {
-                emit_function(env, func, &program.known_objects, &obj_map, &methods, &types, ctx, &module);
+                emit_function(env, func, &program.known_objects, &obj_map, &methods, &types, &builtins, ctx, &module);
             };
         };
 

@@ -5,7 +5,8 @@ use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
 
 pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
-pub const JAVA_LANG_CLASS_SIZE: u32 = 24;
+pub const JAVA_ARRAY_HEADER_SIZE: u32 = 12;
+pub const JAVA_LANG_CLASS_SIZE: u32 = 28;
 
 #[derive(Debug, Clone)]
 pub struct ObjectLayout {
@@ -205,4 +206,8 @@ pub fn compute_all_layouts(env: &mut ClassEnvironment, liveness: &LivenessInfo, 
             };
         };
     };
+}
+
+pub fn get_array_header_size(elem_align: u32) -> u32 {
+    (JAVA_ARRAY_HEADER_SIZE + elem_align - 1) / elem_align * elem_align
 }

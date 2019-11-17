@@ -13,7 +13,7 @@ public class Object {
         return this == o;
     }
 
-    public final Class<? extends Object> getClass() {
+    public final Class<?> getClass() {
         throw new UnsupportedOperationException();
     }
 

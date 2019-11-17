@@ -1,6 +1,7 @@
 use std::alloc::{Alloc, AllocErr, Global};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::{self, HashMap};
+use std::convert::TryInto;
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use bitflags::bitflags;
 use itertools::Itertools;
 
 use crate::classfile::{Class, ConstantPoolEntry, Field, FieldFlags, PrimitiveType};
+use crate::layout;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, ResolvedClass};
 use crate::static_interp::Value;
 
@@ -19,6 +21,11 @@ bitflags! {
         const CLINIT_DONE = 0x00000004;
     }
 }
+
+pub const JAVA_LANG_CLASS_VTABLE_PTR_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_CLASS, 1);
+pub const JAVA_LANG_CLASS_SIZE_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_CLASS, 2);
+
+pub const JAVA_LANG_STRING_DATA_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_STRING, 0);
 
 pub fn collect_constant_strings<'a>(classes: impl IntoIterator<Item=ClassId>, env: &mut ClassEnvironment) -> Vec<Arc<str>> {
     let mut strs = vec![];
@@ -161,7 +168,7 @@ impl <'a> JavaStaticRef<'a> {
 
     pub fn calculate_array_element_offset<T: Copy>(idx: i32) -> isize {
         let elem_size = std::mem::size_of::<T>();
-        let header_size = (12 + elem_size - 1) / elem_size * elem_size;
+        let header_size = layout::get_array_header_size(elem_size.try_into().unwrap()) as usize;
 
         (header_size + (idx as usize) * elem_size) as isize
     }
@@ -229,7 +236,7 @@ impl <'a> JavaStaticRef<'a> {
         let (class, field) = self.env.get_field(field_id);
 
         if field.flags.contains(FieldFlags::STATIC) {
-            let class_of = match self.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)) {
+            let class_of = match self.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD) {
                 Value::Long(val) => ClassId(val as u32),
                 _ => unreachable!()
             };
@@ -374,7 +381,7 @@ impl <'a> JavaStaticRef<'a> {
         let (class, field) = self.env.get_field(field_id);
 
         if field.flags.contains(FieldFlags::STATIC) {
-            let class_of = match self.read_field(FieldId(ClassId::JAVA_LANG_CLASS, 1)) {
+            let class_of = match self.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD) {
                 Value::Long(val) => ClassId(val as u32),
                 _ => unreachable!()
             };
@@ -491,7 +498,7 @@ impl <'a> JavaStaticRef<'a> {
         };
 
         unsafe {
-            let arr_ref = self.read_field(FieldId(ClassId::JAVA_LANG_STRING, 0)).into_ref().unwrap().unwrap();
+            let arr_ref = self.read_field(JAVA_LANG_STRING_DATA_FIELD).into_ref().unwrap().unwrap();
             let arr_data = std::slice::from_raw_parts(arr_ref.array_data().as_ptr(), arr_ref.read_array_length_unchecked() as usize);
 
             String::from_utf16_lossy(arr_data)
@@ -592,24 +599,10 @@ impl JavaStaticObject {
             _ => unimplemented!()
         };
 
-        let elem_size: usize = match **env.get(elem_class) {
-            ResolvedClass::User(_) => 8,
-            ResolvedClass::Array(_) => 8,
-            ResolvedClass::Primitive(None) => panic!("Cannot have an array of void"),
-            ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => 1,
-            ResolvedClass::Primitive(Some(PrimitiveType::Char)) => 2,
-            ResolvedClass::Primitive(Some(PrimitiveType::Double)) => 8,
-            ResolvedClass::Primitive(Some(PrimitiveType::Float)) => 4,
-            ResolvedClass::Primitive(Some(PrimitiveType::Int)) => 4,
-            ResolvedClass::Primitive(Some(PrimitiveType::Long)) => 8,
-            ResolvedClass::Primitive(Some(PrimitiveType::Short)) => 2,
-            ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => 1
-        };
+        let (elem_size, elem_align) = layout::get_field_size_align(env, elem_class);
+        let header_size = layout::get_array_header_size(elem_align);
 
-        let header_size = 12;
-        let header_size = (header_size + elem_size - 1) / elem_size * elem_size;
-
-        header_size.checked_add(elem_size.checked_mul(len as usize)?)
+        (header_size as usize).checked_add((elem_size as usize).checked_mul(len as usize)?)
     }
 
     fn allocate_array(class_id: ClassId, env: &ClassEnvironment, len: u32) -> Result<JavaStaticObject, AllocErr> {
@@ -745,7 +738,14 @@ impl <'a> JavaStaticHeap<'a> {
             }
         };
         let java_ref = obj.as_java_ref(self.env);
-        java_ref.write_field(FieldId(ClassId::JAVA_LANG_CLASS, 1), Value::Long(class_id.0 as i64));
+        java_ref.write_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD, Value::Long(class_id.0 as i64));
+        java_ref.write_field(JAVA_LANG_CLASS_SIZE_FIELD, Value::Int(match **self.env.get(class_id) {
+            ResolvedClass::User(ref class) => class.layout.size.try_into().unwrap(),
+            ResolvedClass::Array(elem_id) => layout::get_array_header_size(
+                layout::get_field_size_align(self.env, elem_id).1
+            ).try_into().unwrap(),
+            ResolvedClass::Primitive(_) => 0
+        }));
 
         self.remaining_size.set(self.remaining_size.get() - size);
 
@@ -800,7 +800,7 @@ impl <'a> JavaStaticHeap<'a> {
                 value_utf16.len()
             );
         };
-        string_ref.write_field(FieldId(ClassId::JAVA_LANG_STRING, 0), Value::Ref(Some(array_ref)));
+        string_ref.write_field(JAVA_LANG_STRING_DATA_FIELD, Value::Ref(Some(array_ref)));
 
         Result::Ok(string_ref)
     }
@@ -1117,7 +1117,7 @@ mod tests {
         let heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 100) };
 
         let string_ref = heap.allocate_string("abcd").unwrap();
-        let array_ref = string_ref.read_field(FieldId(ClassId::JAVA_LANG_STRING, 0)).as_ref().unwrap().unwrap().clone();
+        let array_ref = string_ref.read_field(JAVA_LANG_STRING_DATA_FIELD).as_ref().unwrap().unwrap().clone();
 
         assert_eq!(array_ref.read_array_length(), 4);
         assert_eq!(array_ref.read_array_element(0), Value::Int('a' as i32));
@@ -1173,13 +1173,11 @@ mod tests {
         let mut heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 1000) };
         heap.init_class_objects(TEST_ENV.class_ids()).unwrap();
 
-        let class_of_field = FieldId(ClassId::JAVA_LANG_CLASS, 1);
-
         for class_id in TEST_ENV.class_ids() {
             let class_obj = heap.get_class_object(class_id);
 
             assert_eq!(class_obj.class_id(), ClassId::JAVA_LANG_CLASS);
-            assert_eq!(class_obj.read_field(class_of_field), Value::Long(class_id.0 as i64));
+            assert_eq!(class_obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD), Value::Long(class_id.0 as i64));
         };
 
         let single_ref_static_class = TEST_ENV.try_find("mocha/$test/SingleRefStatic").unwrap();
@@ -1251,7 +1249,6 @@ mod tests {
     fn test_rollback_allocate() {
         let heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 100) };
         let single_ref_class = TEST_ENV.try_find("mocha/$test/SingleRef").unwrap();
-        let ref_field = FieldId(single_ref_class, 0);
 
         heap.commit();
         heap.allocate_object(single_ref_class).unwrap();
