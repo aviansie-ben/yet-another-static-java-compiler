@@ -151,8 +151,8 @@ unsafe fn lay_out_fields(env: &ClassEnvironment, fields: impl IntoIterator<Item=
     for (f, off) in fields {
         assert!(off >= current_size);
         if off != current_size {
-            pads.push((llvm_fields.len() as u32, current_size - off));
-            llvm_fields.push(LLVMArrayType(types.byte, current_size - off));
+            pads.push((llvm_fields.len() as u32, off - current_size));
+            llvm_fields.push(LLVMArrayType(types.byte, off - current_size));
         };
 
         let field = env.get_field(f).1;

@@ -45,7 +45,7 @@ impl ObjectLayout {
 
     fn align_static_size(&mut self, align: u32) {
         if self.static_size % align != 0 {
-            self.static_size += align - (self.size % align);
+            self.static_size += align - (self.static_size % align);
         };
     }
 
