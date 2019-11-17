@@ -372,6 +372,29 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     stack.push(reg);
                 };
             },
+            BytecodeInstruction::InvokeVirtual(idx) => {
+                let cpe = match class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::Methodref(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let ret_class = env.get_method(cpe.method_id).1.return_type;
+                let reg = builder.allocate_reg(MilType::for_class(ret_class));
+                let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::CallVirtual(
+                        ret_class,
+                        cpe.method_id,
+                        reg,
+                        args[0].clone(),
+                        args
+                    ),
+                    bc
+                );
+                if ret_class != ClassId::PRIMITIVE_VOID {
+                    stack.push(reg);
+                };
+            },
             BytecodeInstruction::GetField(idx) => {
                 let cpe = match class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,

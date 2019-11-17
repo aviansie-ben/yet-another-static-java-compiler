@@ -144,7 +144,8 @@ struct LLVMTypes {
     bool: LLVMTypeRef,
     any_function_pointer: LLVMTypeRef,
     any_object_pointer: LLVMTypeRef,
-    class_types: HashMap<ClassId, LLVMClassType>
+    class_types: HashMap<ClassId, LLVMClassType>,
+    method_types: HashMap<MethodId, LLVMTypeRef>
 }
 
 unsafe fn lay_out_fields(env: &ClassEnvironment, fields: impl IntoIterator<Item=(FieldId, u32)>, llvm_fields: &mut Vec<LLVMTypeRef>, field_map: &mut HashMap<FieldId, usize>, pads: &mut Vec<(u32, u32)>, mut current_size: u32, types: &LLVMTypes) {
@@ -336,8 +337,18 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
                         vtable: std::ptr::null_mut()
                     }
                 })
-            }).collect()
+            }).collect(),
+            method_types: HashMap::new()
         };
+
+        types.method_types = liveness.may_call.iter().cloned().map(|method_id| {
+            let (_, method) = env.get_method(method_id);
+
+            let mut param_types = method.param_types.iter().cloned().map(|class_id| types.class_types[&class_id].field_ty).collect_vec();
+            let return_type = types.class_types[&method.return_type].field_ty;
+
+            (method_id, LLVMFunctionType(return_type, param_types.as_mut_ptr(), param_types.len() as u32, 0))
+        }).collect();
 
         for class_id in env.class_ids() {
             fill_type(env, class_id, liveness, module, &mut types);
@@ -370,11 +381,7 @@ unsafe fn define_function(env: &ClassEnvironment, func: &MilFunction, types: &LL
     let (class, method) = env.get_method(func.id);
     let name = CString::new(format!("{}.{}{}", class.meta.name, method.name, method.descriptor)).unwrap();
 
-    let mut param_types = method.param_types.iter().cloned().map(|class_id| types.class_types[&class_id].field_ty).collect_vec();
-    let return_type = types.class_types[&method.return_type].field_ty;
-
-    let func_type = LLVMFunctionType(return_type, param_types.as_mut_ptr(), param_types.len() as u32, 0);
-    LLVMAddFunction(module.ptr(), name.as_ptr(), func_type)
+    LLVMAddFunction(module.ptr(), name.as_ptr(), types.method_types[&func.id])
 }
 
 unsafe fn create_value_ref(op: &MilOperand, regs: &HashMap<MilRegister, LLVMValueRef>, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
@@ -434,6 +441,19 @@ unsafe fn create_instance_field_gep(builder: &LLVMBuilder, field_id: FieldId, ob
             b"\0".as_ptr() as *const c_char
         ),
         class_ty.fields[&field_id] as u32,
+        b"\0".as_ptr() as *const c_char
+    )
+}
+
+unsafe fn create_vtable_load(builder: &LLVMBuilder, obj: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
+    LLVMBuildIntToPtr(
+        builder.ptr(),
+        LLVMBuildLoad(
+            builder.ptr(),
+            LLVMBuildStructGEP(builder.ptr(), obj, 0, b"\0".as_ptr() as *const c_char),
+            "\0".as_ptr() as *const c_char
+        ),
+        LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0),
         b"\0".as_ptr() as *const c_char
     )
 }
@@ -555,7 +575,41 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                     register_name(tgt).as_ptr() as *const c_char
                 ));
             },
-            MilEndInstructionKind::CallVirtual(_, _, _, _, _) => unimplemented!(),
+            MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
+                let (_, method) = env.get_method(method_id);
+                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                let mut args = args.iter()
+                    .map(|o| create_value_ref(o, &local_regs, known_objects, obj_map, types))
+                    .zip(env.get_method(method_id).1.param_types.iter().cloned())
+                    .map(|(val, ty)| {
+                        LLVMBuildBitCast(builder.ptr(), val, types.class_types[&ty].field_ty, b"\0".as_ptr() as *const c_char)
+                    })
+                    .collect_vec();
+
+                let vslot = LLVMBuildLoad(
+                    builder.ptr(),
+                    LLVMBuildStructGEP(
+                        builder.ptr(),
+                        create_vtable_load(&builder, obj, method_id.0, types),
+                        VTABLE_FIRST_VSLOT_FIELD as u32 + method.virtual_slot,
+                        b"\0".as_ptr() as *const c_char
+                    ),
+                    "\0".as_ptr() as *const c_char
+                );
+
+                local_regs.insert(tgt, LLVMBuildCall(
+                    builder.ptr(),
+                    LLVMBuildPointerCast(
+                        builder.ptr(),
+                        vslot,
+                        LLVMPointerType(types.method_types[&method_id], 0),
+                        "\0".as_ptr() as *const c_char
+                    ),
+                    args.as_mut_ptr(),
+                    args.len() as u32,
+                    register_name(tgt).as_ptr() as *const c_char
+                ));
+            },
             MilEndInstructionKind::CallNative(ret_ty, ref name, tgt, ref args) => {
                 let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), types)).collect_vec();
                 let mut args = args.iter()
