@@ -1,5 +1,6 @@
 # Rust
 /compiler/target
+/rt/target
 **/*.rs.bk
 .llvmenv
 
