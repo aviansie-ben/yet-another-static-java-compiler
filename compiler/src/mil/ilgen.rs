@@ -426,6 +426,13 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     bc
                 );
             },
+            BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
+                let val = MilOperand::Register(stack.pop().unwrap());
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Return(val),
+                    bc
+                );
+            },
             BytecodeInstruction::Return => {
                 builder.append_end_instruction(
                     MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
