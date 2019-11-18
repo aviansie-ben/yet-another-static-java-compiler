@@ -417,6 +417,10 @@ fn register_name(reg: MilRegister) -> CString {
     }
 }
 
+fn local_name(local_id: MilLocalId) -> CString {
+    CString::new(format!("local_{}", local_id.0)).unwrap()
+}
+
 unsafe fn create_meta_field_gep(builder: &LLVMBuilder, field_id: FieldId, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
     let class_ty = &types.class_types[&field_id.0];
     let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
@@ -482,6 +486,28 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                 },
                 MilInstructionKind::GetParam(idx, _, tgt) => {
                     local_regs.insert(tgt, LLVMGetParam(llvm_func, idx as u32));
+                },
+                MilInstructionKind::GetLocal(local_id, tgt) => {
+                    local_regs.insert(tgt, LLVMBuildLoad(
+                        builder.ptr(),
+                        locals[&local_id].0,
+                        register_name(tgt).as_ptr() as *const c_char
+                    ));
+                },
+                MilInstructionKind::SetLocal(local_id, ref src) => {
+                    let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
+                    let (local_ptr, ty) = locals[&local_id];
+
+                    LLVMBuildStore(
+                        builder.ptr(),
+                        LLVMBuildPointerCast(
+                            builder.ptr(),
+                            src,
+                            ty,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        local_ptr
+                    );
                 },
                 MilInstructionKind::GetField(field_id, _, tgt, ref obj) => {
                     let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
@@ -648,6 +674,9 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
 
         llvm_blocks.insert(block_id, (llvm_block, llvm_block));
     };
+
+    LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
+    LLVMBuildBr(builder.ptr(), llvm_blocks[&func.block_order[0]].0);
 
     for (block_id, next_block_id) in func.block_order.iter().cloned().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = &func.blocks[&block_id];

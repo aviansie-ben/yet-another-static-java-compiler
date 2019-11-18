@@ -44,6 +44,21 @@ impl MilRegisterAllocator {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MilLocalId(pub u32);
+
+impl fmt::Display for MilLocalId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "%{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MilLocalInfo {
+    pub java_local: u16,
+    pub ty: MilType
+}
+
 #[derive(Debug, Clone)]
 pub struct MilRegisterInfo {
     pub ty: MilType
@@ -51,13 +66,15 @@ pub struct MilRegisterInfo {
 
 #[derive(Debug, Clone)]
 pub struct MilRegisterMap {
-    pub info: HashMap<MilRegister, MilRegisterInfo>
+    pub info: HashMap<MilRegister, MilRegisterInfo>,
+    pub local_info: HashMap<MilLocalId, MilLocalInfo>
 }
 
 impl MilRegisterMap {
     pub fn new() -> MilRegisterMap {
         MilRegisterMap {
-            info: HashMap::new()
+            info: HashMap::new(),
+            local_info: HashMap::new()
         }
     }
 }
@@ -253,6 +270,8 @@ pub enum MilInstructionKind {
     Nop,
     Copy(MilRegister, MilOperand),
     GetParam(u16, ClassId, MilRegister),
+    GetLocal(MilLocalId, MilRegister),
+    SetLocal(MilLocalId, MilOperand),
     GetField(FieldId, ClassId, MilRegister, MilOperand),
     PutField(FieldId, ClassId, MilOperand, MilOperand),
     GetStatic(FieldId, ClassId, MilRegister),
@@ -315,6 +334,12 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             },
             MilInstructionKind::GetParam(n, class_id, tgt) => {
                 write!(f, "get_param <{} {}> {}", n, self.1.get(class_id).name(self.1), tgt)?;
+            },
+            MilInstructionKind::GetLocal(local_id, tgt) => {
+                write!(f, "get_local <{}> {}", local_id, tgt)?;
+            },
+            MilInstructionKind::SetLocal(local_id, ref src) => {
+                write!(f, "set_local <{}> {}", local_id, src.pretty(self.1))?;
             },
             MilInstructionKind::GetField(field_id, _, tgt, ref obj) => {
                 write!(f, "get_field <{}> {}, {}", FieldName(field_id, self.1), tgt, obj.pretty(self.1))?;

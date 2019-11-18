@@ -66,13 +66,15 @@ impl MilBuilder {
 }
 
 struct MilLocals {
-    locals: Vec<[MilRegister; 5]>
+    locals: Vec<[Option<MilLocalId>; 5]>,
+    next_local: MilLocalId
 }
 
 impl MilLocals {
     fn new(num_locals: u16) -> MilLocals {
         MilLocals {
-            locals: vec![[MilRegister::VOID; 5]; num_locals as usize]
+            locals: vec![[None; 5]; num_locals as usize],
+            next_local: MilLocalId(0)
         }
     }
 
@@ -87,12 +89,21 @@ impl MilLocals {
         }
     }
 
-    fn get(&self, local: u16, ty: MilType) -> MilRegister {
-        self.locals[local as usize][MilLocals::type_index(ty)]
-    }
+    fn get_or_add(&mut self, local: u16, ty: MilType, map: &mut MilRegisterMap) -> MilLocalId {
+        if let Some(id) = self.locals[local as usize][MilLocals::type_index(ty)] {
+            id
+        } else {
+            let id = self.next_local;
+            self.next_local.0 += 1;
 
-    fn set(&mut self, local: u16, ty: MilType, val: MilRegister) {
-        self.locals[local as usize][MilLocals::type_index(ty)] = val;
+            self.locals[local as usize][MilLocals::type_index(ty)] = Some(id);
+            map.local_info.insert(id, MilLocalInfo {
+                java_local: local,
+                ty
+            });
+
+            id
+        }
     }
 }
 
@@ -196,10 +207,15 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
     let mut next_param_local = 0;
 
     for (i, param_type) in method.param_types.iter().cloned().enumerate() {
-        locals.set(
+        let local_id = locals.get_or_add(
             next_param_local,
             MilType::for_class(param_type),
-            read_param(builder, i.try_into().unwrap(), param_type)
+            &mut builder.func.reg_map
+        );
+        let reg = read_param(builder, i.try_into().unwrap(), param_type);
+        builder.append_instruction(
+            MilInstructionKind::SetLocal(local_id, MilOperand::Register(reg)),
+            0
         );
 
         next_param_local += 1;
@@ -299,7 +315,13 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 stack.push(*stack.last().unwrap());
             },
             BytecodeInstruction::ALoad(idx) => {
-                stack.push(locals.get(idx, MilType::Ref));
+                let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
+                let reg = builder.allocate_reg(MilType::Ref);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, reg),
+                    bc
+                );
+                stack.push(reg);
             },
             BytecodeInstruction::New(idx) => {
                 let cpe = match class.constant_pool[idx as usize] {
