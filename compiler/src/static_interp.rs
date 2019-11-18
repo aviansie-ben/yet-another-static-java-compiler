@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeData, Class, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodFlags, MethodSummary, PrimitiveType};
-use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, ResolvedClass};
 use crate::static_heap::{ObjectFlags, JavaStaticHeap, JavaStaticRef};
 
 fn add_may_virtual_call(summary: &mut MethodSummary, method_id: MethodId) {
@@ -32,12 +32,13 @@ fn add_may_clinit(summary: &mut MethodSummary, class_id: ClassId) {
     };
 }
 
-pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) -> MethodSummary {
+pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[ConstantPoolEntry]) -> MethodSummary {
     let mut summary = MethodSummary {
         may_virtual_call: vec![],
         may_special_call: vec![],
         may_construct: vec![],
-        may_clinit: vec![]
+        may_clinit: vec![],
+        uses_strings: vec![]
     };
 
     for (_, instr) in instrs {
@@ -101,10 +102,15 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, cp: &[ConstantPoolEntry]) ->
 
                 add_may_virtual_call(&mut summary, cpe.method_id);
             },
-            BytecodeInstruction::Ldc(cpe) | BytecodeInstruction::Ldc2(cpe) => {
-                match cp[cpe as usize] {
+            BytecodeInstruction::Ldc(idx) | BytecodeInstruction::Ldc2(idx) => {
+                match cp[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => {
                         add_may_clinit(&mut summary, cpe.class_id);
+                    },
+                    ConstantPoolEntry::String(ref cpe) => {
+                        if !summary.uses_strings.contains(&ConstantId(method_id.0, idx)) {
+                            summary.uses_strings.push(ConstantId(method_id.0, idx));
+                        };
                     },
                     _ => {}
                 };

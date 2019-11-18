@@ -154,10 +154,11 @@ fn main() {
     let mut num_methods_summarized = 0;
     for id in env.class_ids() {
         if let resolve::ResolvedClass::User(ref mut class) = **env.get_mut(id) {
-            for m in class.methods.iter_mut() {
+            for (i, m) in class.methods.iter_mut().enumerate() {
                 if let Some(code) = bytecode::BytecodeIterator::for_method(m) {
                     m.summary = static_interp::summarize_bytecode(
                         code,
+                        resolve::MethodId(id, i as u16),
                         &class.constant_pool
                     );
                     num_methods_summarized += 1;
@@ -176,7 +177,7 @@ fn main() {
     println!("Computed object layouts in {:.3}s", start_layout.elapsed().as_secs_f32());
 
     let start_heap = std::time::Instant::now();
-    let constant_strings = static_heap::collect_constant_strings(liveness.needs_clinit.iter().cloned(), &mut env);
+    let constant_strings = static_heap::collect_constant_strings(liveness.may_use_strings.iter().cloned(), &mut env);
     let mut heap = unsafe { static_heap::JavaStaticHeap::new(&env, 64 * 1024 * 1024) };
     if heap.init_class_objects(liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0)).is_err() {
         eprintln!("Failed to create class objects in static heap");

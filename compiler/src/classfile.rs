@@ -6,7 +6,7 @@ use bitflags::bitflags;
 use byteorder::{BigEndian, ReadBytesExt};
 use lazy_static::lazy_static;
 
-use crate::resolve::{ClassId, FieldId, MethodId};
+use crate::resolve::{ClassId, ConstantId, FieldId, MethodId};
 use crate::layout::ObjectLayout;
 
 bitflags! {
@@ -352,7 +352,8 @@ pub struct MethodSummary {
     pub may_virtual_call: Vec<MethodId>,
     pub may_special_call: Vec<MethodId>,
     pub may_construct: Vec<ClassId>,
-    pub may_clinit: Vec<ClassId>
+    pub may_clinit: Vec<ClassId>,
+    pub uses_strings: Vec<ConstantId>
 }
 
 impl MethodSummary {
@@ -361,7 +362,8 @@ impl MethodSummary {
             may_virtual_call: vec![],
             may_special_call: vec![],
             may_construct: vec![],
-            may_clinit: vec![]
+            may_clinit: vec![],
+            uses_strings: vec![]
         }
     }
 }

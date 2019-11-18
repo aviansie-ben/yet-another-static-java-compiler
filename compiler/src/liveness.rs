@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
 use crate::classfile::Method;
-use crate::resolve::{ClassEnvironment, ClassId, MethodId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, ConstantId, MethodId, ResolvedClass};
 
 pub struct LivenessInfo {
     pub needs_clinit: HashSet<ClassId>,
     pub may_construct: HashSet<ClassId>,
     pub may_virtual_call: HashSet<MethodId>,
-    pub may_call: HashSet<MethodId>
+    pub may_call: HashSet<MethodId>,
+    pub may_use_strings: HashSet<ConstantId>
 }
 
 struct Indent(u32);
@@ -114,6 +115,10 @@ fn analyze_method(env: &ClassEnvironment, liveness: &mut LivenessInfo, method_id
             analyze_method(env, liveness, may_special_call, false, indent, verbose);
         };
 
+        for uses_string in method.summary.uses_strings.iter().cloned() {
+            liveness.may_use_strings.insert(uses_string);
+        };
+
         indent.0 -= 1;
     };
 
@@ -138,7 +143,8 @@ pub fn create_full_liveness(env: &ClassEnvironment) -> LivenessInfo {
         needs_clinit: HashSet::new(),
         may_construct: HashSet::new(),
         may_virtual_call: HashSet::new(),
-        may_call: HashSet::new()
+        may_call: HashSet::new(),
+        may_use_strings: HashSet::new()
     };
 
     for class_id in env.class_ids() {
@@ -164,7 +170,8 @@ pub fn analyze_all(env: &ClassEnvironment, main_method: MethodId, verbose: bool)
         needs_clinit: HashSet::new(),
         may_construct: HashSet::new(),
         may_virtual_call: HashSet::new(),
-        may_call: HashSet::new()
+        may_call: HashSet::new(),
+        may_use_strings: HashSet::new()
     };
 
     let mut indent = Indent(0);

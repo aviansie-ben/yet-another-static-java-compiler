@@ -103,6 +103,9 @@ impl FieldId {
     pub const UNRESOLVED: FieldId = FieldId(ClassId::UNRESOLVED, !0);
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct ConstantId(pub ClassId, pub u16);
+
 pub trait ClassLoader: Debug + Send + Sync {
     fn try_load(
         &self,
@@ -291,6 +294,14 @@ impl ResolvedClass {
 
     pub fn as_user_class(&self) -> &Class {
         if let ResolvedClass::User(ref class) = *self {
+            class
+        } else {
+            unreachable!();
+        }
+    }
+
+    pub fn as_user_class_mut(&mut self) -> &mut Class {
+        if let ResolvedClass::User(ref mut class) = *self {
             class
         } else {
             unreachable!();

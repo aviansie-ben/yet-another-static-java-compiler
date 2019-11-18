@@ -11,7 +11,7 @@ use itertools::Itertools;
 
 use crate::classfile::{Class, ConstantPoolEntry, Field, FieldFlags, PrimitiveType};
 use crate::layout;
-use crate::resolve::{ClassEnvironment, ClassId, FieldId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, ResolvedClass};
 use crate::static_interp::Value;
 
 bitflags! {
@@ -27,32 +27,25 @@ pub const JAVA_LANG_CLASS_SIZE_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_CLASS
 
 pub const JAVA_LANG_STRING_DATA_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_STRING, 0);
 
-pub fn collect_constant_strings<'a>(classes: impl IntoIterator<Item=ClassId>, env: &mut ClassEnvironment) -> Vec<Arc<str>> {
+pub fn collect_constant_strings<'a>(strings: impl IntoIterator<Item=ConstantId>, env: &mut ClassEnvironment) -> Vec<Arc<str>> {
     let mut strs = vec![];
     let mut str_map = HashMap::new();
 
-    for class in classes.into_iter() {
-        match **env.get_mut(class) {
-            ResolvedClass::User(ref mut class) => {
-                for cpe in class.constant_pool.iter_mut() {
-                    match cpe {
-                        ConstantPoolEntry::String(ref mut cpe) => {
-                            cpe.index = match str_map.entry(cpe.contents.clone()) {
-                                hash_map::Entry::Occupied(entry) => *entry.get(),
-                                hash_map::Entry::Vacant(entry) => {
-                                    let index = strs.len();
+    for string_id in strings {
+        let cpe = match env.get_mut(string_id.0).as_user_class_mut().constant_pool[string_id.1 as usize] {
+            ConstantPoolEntry::String(ref mut cpe) => cpe,
+            _ => unreachable!()
+        };
 
-                                    entry.insert(index);
-                                    strs.push(cpe.contents.clone());
-                                    index
-                                }
-                            }
-                        },
-                        _ => {}
-                    };
-                };
-            },
-            _ => {}
+        cpe.index = match str_map.entry(cpe.contents.clone()) {
+            hash_map::Entry::Occupied(entry) => *entry.get(),
+            hash_map::Entry::Vacant(entry) => {
+                let index = strs.len();
+
+                entry.insert(index);
+                strs.push(cpe.contents.clone());
+                index
+            }
         };
     };
 
