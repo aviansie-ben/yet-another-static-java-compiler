@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use smallvec::SmallVec;
+
+use crate::bytecode::BytecodeCondition;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId};
 use crate::static_heap::JavaStaticRef;
 
@@ -265,10 +268,47 @@ impl <'a> fmt::Display for PrettyMilOperand<'a> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MilComparison {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Ge,
+    Le
+}
+
+impl MilComparison {
+    pub fn from_bytecode(cond: BytecodeCondition) -> MilComparison {
+        match cond {
+            BytecodeCondition::Eq => MilComparison::Eq,
+            BytecodeCondition::Ne => MilComparison::Ne,
+            BytecodeCondition::Gt => MilComparison::Gt,
+            BytecodeCondition::Lt => MilComparison::Lt,
+            BytecodeCondition::Ge => MilComparison::Ge,
+            BytecodeCondition::Le => MilComparison::Le
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MilBinOp {
+    IAdd
+}
+
+impl fmt::Display for MilBinOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MilBinOp::IAdd => write!(f, "iadd")
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MilInstructionKind {
     Nop,
     Copy(MilRegister, MilOperand),
+    BinOp(MilBinOp, MilRegister, MilOperand, MilOperand),
     GetParam(u16, ClassId, MilRegister),
     GetLocal(MilLocalId, MilRegister),
     SetLocal(MilLocalId, MilOperand),
@@ -287,7 +327,8 @@ pub enum MilEndInstructionKind {
     CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     CallNative(ClassId, String, MilRegister, Vec<MilOperand>),
     Return(MilOperand),
-    Jump(MilBlockId)
+    Jump(MilBlockId),
+    JumpIf(MilComparison, MilBlockId, MilOperand, MilOperand)
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +373,9 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::Copy(tgt, ref src) => {
                 write!(f, "copy {}, {}", tgt, src.pretty(self.1))?;
             },
+            MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
+                write!(f, "{} {}, {}, {}", op, tgt, lhs.pretty(self.1), rhs.pretty(self.1))?;
+            },
             MilInstructionKind::GetParam(n, class_id, tgt) => {
                 write!(f, "get_param <{} {}> {}", n, self.1.get(class_id).name(self.1), tgt)?;
             },
@@ -369,6 +413,55 @@ impl MilInstruction {
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilInstruction(self, env)
     }
+
+    pub fn target(&self) -> Option<&MilRegister> {
+        match self.kind {
+            MilInstructionKind::Nop => None,
+            MilInstructionKind::Copy(ref tgt, _) => Some(tgt),
+            MilInstructionKind::BinOp(_, ref tgt, _, _) => Some(tgt),
+            MilInstructionKind::GetParam(_, _, ref tgt) => Some(tgt),
+            MilInstructionKind::GetLocal(_, ref tgt) => Some(tgt),
+            MilInstructionKind::SetLocal(_, _) => None,
+            MilInstructionKind::GetField(_, _, ref tgt, _) => Some(tgt),
+            MilInstructionKind::PutField(_, _, _, _) => None,
+            MilInstructionKind::GetStatic(_, _, ref tgt) => Some(tgt),
+            MilInstructionKind::PutStatic(_, _, _) => None,
+            MilInstructionKind::AllocObj(_, ref tgt) => Some(tgt),
+            MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt)
+        }
+    }
+
+    pub fn for_operands(&self, mut f: impl FnMut (&MilOperand) -> ()) {
+        match self.kind {
+            MilInstructionKind::Nop => {},
+            MilInstructionKind::Copy(_, ref val) => {
+                f(val);
+            },
+            MilInstructionKind::BinOp(_, _, ref lhs, ref rhs) => {
+                f(lhs);
+                f(rhs);
+            },
+            MilInstructionKind::GetParam(_, _, _) => {}
+            MilInstructionKind::GetLocal(_, _) => {},
+            MilInstructionKind::SetLocal(_, ref val) => {
+                f(val);
+            },
+            MilInstructionKind::GetField(_, _, _, ref obj) => {
+                f(obj);
+            },
+            MilInstructionKind::PutField(_, _, ref obj, ref val) => {
+                f(val);
+            },
+            MilInstructionKind::GetStatic(_, _, _) => {},
+            MilInstructionKind::PutStatic(_, _, ref val) => {
+                f(val);
+            },
+            MilInstructionKind::AllocObj(_, _) => {},
+            MilInstructionKind::AllocArray(_, _, ref len) => {
+                f(len);
+            }
+        };
+    }
 }
 
 pub struct PrettyMilEndInstruction<'a>(&'a MilEndInstruction, &'a ClassEnvironment);
@@ -402,7 +495,25 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                 write!(f, "ret {}", val.pretty(self.1))?;
             },
             MilEndInstructionKind::Jump(block) => {
-                write!(f, "jump {}", block)?;
+                write!(f, "j {}", block)?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Eq, block, ref src1, ref src2) => {
+                write!(f, "jeq {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Ne, block, ref src1, ref src2) => {
+                write!(f, "jne {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Gt, block, ref src1, ref src2) => {
+                write!(f, "jgt {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Lt, block, ref src1, ref src2) => {
+                write!(f, "jlt {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Ge, block, ref src1, ref src2) => {
+                write!(f, "jge {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Le, block, ref src1, ref src2) => {
+                write!(f, "jle {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
             }
         }
 
@@ -415,6 +526,60 @@ impl MilEndInstruction {
         PrettyMilEndInstruction(self, env)
     }
 
+    pub fn target(&self) -> Option<&MilRegister> {
+        match self.kind {
+            MilEndInstructionKind::Nop => None,
+            MilEndInstructionKind::Call(_, _, ref tgt, _) => Some(tgt),
+            MilEndInstructionKind::CallVirtual(_, _, ref tgt, _, _) => Some(tgt),
+            MilEndInstructionKind::CallNative(_, _, ref tgt, _) => Some(tgt),
+            MilEndInstructionKind::Return(_) => None,
+            MilEndInstructionKind::Jump(_) => None,
+            MilEndInstructionKind::JumpIf(_, _, _, _) => None
+        }
+    }
+
+    pub fn for_operands(&self, mut f: impl FnMut (&MilOperand) -> ()) {
+        match self.kind {
+            MilEndInstructionKind::Nop => {},
+            MilEndInstructionKind::Call(_, _, _, ref args) => {
+                for a in args.iter() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallVirtual(_, _, _, ref obj, ref args) => {
+                f(obj);
+                for a in args.iter() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallNative(_, _, _, ref args) => {
+                for a in args.iter() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::Return(ref val) => {
+                f(val);
+            },
+            MilEndInstructionKind::Jump(_) => {},
+            MilEndInstructionKind::JumpIf(_, _, ref lhs, ref rhs) => {
+                f(lhs);
+                f(rhs);
+            }
+        };
+    }
+
+    pub fn can_fall_through(&self) -> bool {
+        match self.kind {
+            MilEndInstructionKind::Nop => true,
+            MilEndInstructionKind::Call(_, _, _, _) => true,
+            MilEndInstructionKind::CallVirtual(_, _, _, _, _) => true,
+            MilEndInstructionKind::CallNative(_, _, _, _) => true,
+            MilEndInstructionKind::Return(_) => false,
+            MilEndInstructionKind::Jump(_) => false,
+            MilEndInstructionKind::JumpIf(_, _, _, _) => true
+        }
+    }
+
     pub fn is_nop(&self) -> bool {
         match self.kind {
             MilEndInstructionKind::Nop => true,
@@ -424,8 +589,27 @@ impl MilEndInstruction {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilPhiNode {
+    pub target: MilRegister,
+    pub sources: SmallVec<[(MilRegister, MilBlockId); 2]>
+}
+
+impl fmt::Display for MilPhiNode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "phi {}", self.target)?;
+
+        for (src, pred) in self.sources.iter().cloned() {
+            write!(f, ", {}:{}", pred, src)?;
+        };
+
+        Result::Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MilBlock {
     pub id: MilBlockId,
+    pub phi_nodes: Vec<MilPhiNode>,
     pub instrs: Vec<MilInstruction>,
     pub end_instr: MilEndInstruction,
     pub exception_successors: Vec<MilBlockId>
@@ -435,6 +619,7 @@ impl MilBlock {
     pub fn new() -> MilBlock {
         MilBlock {
             id: MilBlockId::ENTRY,
+            phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
                 kind: MilEndInstructionKind::Nop,
@@ -454,6 +639,10 @@ struct PrettyMilBlock<'a>(&'a MilBlock, &'a ClassEnvironment);
 impl <'a> fmt::Display for PrettyMilBlock<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}:", self.0.id)?;
+
+        for phi in self.0.phi_nodes.iter() {
+            write!(f, "\n  {}", phi)?;
+        };
 
         for instr in self.0.instrs.iter() {
             write!(f, "\n  {}", instr.pretty(self.1))?;

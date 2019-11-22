@@ -1,6 +1,7 @@
 #![feature(allocator_api)]
 #![feature(drain_filter)]
 #![feature(try_blocks)]
+#![feature(vec_remove_item)]
 
 pub mod backend;
 pub mod bytecode;

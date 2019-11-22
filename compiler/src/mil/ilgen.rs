@@ -1,9 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
+
+use itertools::Itertools;
+use smallvec::*;
 
 use super::il::*;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
+use crate::classfile::{AttributeCode, ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
 pub struct MilBuilder {
@@ -17,6 +20,29 @@ impl MilBuilder {
             func: MilFunction::new(id),
             current_block: MilBlock::new()
         }
+    }
+
+    pub fn append_phi_node(&mut self, srcs: impl IntoIterator<Item=(MilRegister, MilBlockId)>, bc: u32) -> MilRegister {
+        assert!(self.current_block.instrs.is_empty());
+
+        let mut ty = None;
+        let srcs = srcs.into_iter().map(|(reg, block)| {
+            if let Some(ty) = ty {
+                assert_eq!(self.func.reg_map.info[&reg].ty, ty);
+            } else {
+                ty = Some(self.func.reg_map.info[&reg].ty);
+            };
+
+            (reg, block)
+        }).collect();
+
+        let reg = self.allocate_reg(ty.unwrap());
+        self.current_block.phi_nodes.push(MilPhiNode {
+            target: reg,
+            sources: srcs
+        });
+
+        reg
     }
 
     pub fn allocate_reg(&mut self, ty: MilType) -> MilRegister {
@@ -50,6 +76,13 @@ impl MilBuilder {
         self.func.blocks.insert(id, std::mem::replace(&mut self.current_block, MilBlock::new()));
         self.func.block_order.push(id);
         id
+    }
+
+    pub fn end_ordered_blocks(&mut self) -> Vec<MilBlockId> {
+        assert!(self.current_block.phi_nodes.is_empty());
+        assert!(self.current_block.instrs.is_empty());
+
+        std::mem::replace(&mut self.func.block_order, vec![])
     }
 
     pub fn get_block_mut(&mut self, id: MilBlockId) -> &mut MilBlock {
@@ -105,40 +138,6 @@ impl MilLocals {
             id
         }
     }
-}
-
-fn collect_targets(instrs: BytecodeIterator) -> HashMap<usize, (MilBlockId, Option<Vec<MilRegister>>)> {
-    let mut map = HashMap::new();
-
-    for (off, instr) in instrs {
-        match instr.unwrap() {
-            BytecodeInstruction::Goto(dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::IfACmp(_, dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::IfICmp(_, dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::If(_, dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::IfNonNull(dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::IfNull(dest) => {
-                map.insert(dest, (MilBlockId::ENTRY, None));
-            },
-            BytecodeInstruction::JSR(_) => unimplemented!(),
-            BytecodeInstruction::Ret(_) => unimplemented!(),
-            BytecodeInstruction::TableSwitch(_, _, _) => unimplemented!(),
-            BytecodeInstruction::LookupSwitch(_, _) => unimplemented!(),
-            _ => {}
-        };
-    };
-
-    map
 }
 
 fn get_mil_type_for_descriptor(ty: &TypeDescriptor) -> MilType {
@@ -252,42 +251,147 @@ fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, 
     builder.finish()
 }
 
-pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, verbose: bool) -> Option<MilFunction> {
-    let (class, method) = env.get_method(method_id);
+struct GenBlockInfo {
+    preds: SmallVec<[usize; 2]>,
+    succs: SmallVec<[usize; 2]>,
+    blocks: Vec<MilBlockId>,
+    end_stack: Vec<MilRegister>
+}
 
-    if method.flags.contains(MethodFlags::NATIVE) {
-        let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
-        return Some(generate_native_thunk(env, name, method, method_id, known_objects));
-    } else if method.flags.contains(MethodFlags::ABSTRACT) {
-        return None;
+impl GenBlockInfo {
+    pub fn new() -> GenBlockInfo {
+        GenBlockInfo {
+            preds: smallvec![],
+            succs: smallvec![],
+            blocks: vec![],
+            end_stack: vec![]
+        }
+    }
+}
+
+fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
+    let mut blocks = HashMap::new();
+    let mut edges = vec![];
+
+    let mut current_block = 0;
+    let mut next_starts_block = true;
+
+    for (off, instr) in instrs {
+        if next_starts_block {
+            blocks.insert(off, GenBlockInfo::new());
+            current_block = off;
+            next_starts_block = false;
+        };
+
+        match instr.unwrap() {
+            BytecodeInstruction::Goto(dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+            },
+            BytecodeInstruction::IfACmp(_, dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+                next_starts_block = true;
+            },
+            BytecodeInstruction::IfICmp(_, dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+                next_starts_block = true;
+            },
+            BytecodeInstruction::If(_, dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+                next_starts_block = true;
+            },
+            BytecodeInstruction::IfNonNull(dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+                next_starts_block = true;
+            },
+            BytecodeInstruction::IfNull(dest) => {
+                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
+
+                edges.push((current_block, dest));
+                next_starts_block = true;
+            },
+            BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
+                next_starts_block = true;
+            },
+            BytecodeInstruction::JSR(_) => unimplemented!(),
+            BytecodeInstruction::Ret(_) => unimplemented!(),
+            BytecodeInstruction::TableSwitch(_, _, _) => unimplemented!(),
+            BytecodeInstruction::LookupSwitch(_, _) => unimplemented!(),
+            _ => {}
+        };
     };
 
-    if verbose {
-        eprintln!("===== MIL Generation for {}.{}{} =====\n", class.meta.name, method.name, method.descriptor);
+    current_block = 0;
+    for ((_, curr_instr), (next_bc, _)) in instrs.tuple_windows() {
+        match curr_instr.unwrap() {
+            BytecodeInstruction::Goto(_) => {
+                current_block = next_bc;
+            },
+            BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
+                current_block = next_bc;
+            },
+            _ => {
+                if blocks.contains_key(&next_bc) {
+                    edges.push((current_block, next_bc));
+                    current_block = next_bc;
+                };
+            }
+        };
     };
 
-    let code = method.code_attribute().unwrap();
-    let instrs = BytecodeIterator::for_code(code);
+    for (from, to) in edges {
+        blocks.get_mut(&from).unwrap().succs.push(to);
+        blocks.get_mut(&to).unwrap().preds.push(from);
+    };
 
-    let mut locals = MilLocals::new(code.max_locals);
-    let mut stack = vec![];
+    blocks
+}
 
-    let mut targets = collect_targets(instrs);
-    let mut builder = MilBuilder::new(method_id);
+fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code: &AttributeCode, off: usize, cp: &[ConstantPoolEntry], blocks: &mut HashMap<usize, GenBlockInfo>, block_worklist: &mut Vec<usize>, locals: &mut MilLocals, fixups: &mut Vec<Box<dyn FnMut (&mut MilBuilder, &HashMap<usize, GenBlockInfo>) -> ()>>, known_objects: &MilKnownObjectRefs, verbose: bool) {
+    let incoming_stacks = blocks.get(&off).unwrap().preds.iter().filter_map(|pred| {
+        let pred = blocks.get(&pred).unwrap();
 
-    get_params(&mut builder, &mut locals, method);
+        if let Some(&pred_end_block) = pred.blocks.last() {
+            Some((pred_end_block, &pred.end_stack))
+        } else {
+            None
+        }
+    }).collect_vec();
 
-    for (bc, instr) in instrs {
+    let mut stack = if !incoming_stacks.is_empty() {
+        assert!(incoming_stacks.iter().skip(1).all(|(_, s)| s.len() == incoming_stacks[0].1.len()));
+        (0..incoming_stacks[0].1.len()).map(|i| {
+            builder.append_phi_node(incoming_stacks.iter().map(|&(b, s)| (s[i], b)), off as u32)
+        }).collect_vec()
+    } else {
+        vec![]
+    };
+
+    let start_block = builder.end_block();
+    let mut end_block = None;
+
+    for (bc, instr) in BytecodeIterator(&code.code, off).take_while(|&(bc, _)| bc == off || !blocks.contains_key(&bc)) {
         let bc = bc as u32;
         let instr = instr.unwrap();
 
         if verbose {
-            eprintln!("  {:?}", instr);
+            eprintln!("  {}: {:?} {:?}", bc, instr, stack);
         };
+
+        assert!(end_block.is_none());
 
         match instr {
             BytecodeInstruction::Ldc(idx) | BytecodeInstruction::Ldc2(idx) => {
-                let val = constant_from_cpe(&class.constant_pool[idx as usize], known_objects);
+                let val = constant_from_cpe(&cp[idx as usize], known_objects);
                 let reg = builder.allocate_reg(val.get_const_type().unwrap());
                 builder.append_instruction(
                     MilInstructionKind::Copy(reg, val),
@@ -323,8 +427,58 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 );
                 stack.push(reg);
             },
+            BytecodeInstruction::ILoad(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
+                let reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, reg),
+                    bc
+                );
+                stack.push(reg);
+            },
+            BytecodeInstruction::AStore(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
+                let val = stack.pop().unwrap();
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
+                    bc
+                );
+            },
+            BytecodeInstruction::IStore(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
+                let val = stack.pop().unwrap();
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
+                    bc
+                );
+            },
+            BytecodeInstruction::IInc(idx, val) => {
+                let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
+
+                let load_reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, load_reg),
+                    bc
+                );
+
+                let result_reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::BinOp(
+                        MilBinOp::IAdd,
+                        result_reg,
+                        MilOperand::Register(load_reg),
+                        MilOperand::Int(val as i32)
+                    ),
+                    bc
+                );
+
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(result_reg)),
+                    bc
+                );
+            },
             BytecodeInstruction::New(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -337,7 +491,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 stack.push(reg);
             },
             BytecodeInstruction::ANewArray(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -351,7 +505,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 stack.push(reg);
             },
             BytecodeInstruction::InvokeStatic(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -373,7 +527,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 };
             },
             BytecodeInstruction::InvokeSpecial(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -395,7 +549,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 };
             },
             BytecodeInstruction::InvokeVirtual(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -418,7 +572,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 };
             },
             BytecodeInstruction::GetField(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -433,7 +587,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 stack.push(reg);
             },
             BytecodeInstruction::PutField(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -446,7 +600,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 );
             },
             BytecodeInstruction::GetStatic(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -460,7 +614,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                 stack.push(reg);
             },
             BytecodeInstruction::PutStatic(idx) => {
-                let cpe = match class.constant_pool[idx as usize] {
+                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -471,24 +625,193 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
                     bc
                 );
             },
+            BytecodeInstruction::If(cond, target) => {
+                let val = stack.pop().unwrap();
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::JumpIf(
+                        MilComparison::from_bytecode(cond),
+                        MilBlockId::ENTRY,
+                        MilOperand::Register(val),
+                        MilOperand::Int(0)
+                    ),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
+            BytecodeInstruction::IfICmp(cond, target) | BytecodeInstruction::IfACmp(cond, target) => {
+                let rhs = stack.pop().unwrap();
+                let lhs = stack.pop().unwrap();
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::JumpIf(
+                        MilComparison::from_bytecode(cond),
+                        MilBlockId::ENTRY,
+                        MilOperand::Register(lhs),
+                        MilOperand::Register(rhs)
+                    ),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
+            BytecodeInstruction::IfNonNull(target) => {
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::JumpIf(
+                        MilComparison::Ne,
+                        MilBlockId::ENTRY,
+                        MilOperand::Register(stack.pop().unwrap()),
+                        MilOperand::Null
+                    ),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
+            BytecodeInstruction::IfNull(target) => {
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::JumpIf(
+                        MilComparison::Eq,
+                        MilBlockId::ENTRY,
+                        MilOperand::Register(stack.pop().unwrap()),
+                        MilOperand::Null
+                    ),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
+            BytecodeInstruction::Goto(target) => {
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::Jump(MilBlockId::ENTRY),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::Jump(ref mut block) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 let val = MilOperand::Register(stack.pop().unwrap());
-                builder.append_end_instruction(
+                end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Return(val),
                     bc
-                );
+                ));
             },
             BytecodeInstruction::Return => {
-                builder.append_end_instruction(
+                end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
                     bc
-                );
+                ));
             },
             instr => {
                 panic!("Unsupported bytecode {:?} in ilgen", instr);
             }
         };
     };
+
+    let end_block = if let Some(end_block) = end_block {
+        end_block
+    } else {
+        builder.end_block()
+    };
+
+    let block_info = blocks.get_mut(&off).unwrap();
+    block_info.blocks = builder.end_ordered_blocks();
+    block_info.end_stack = stack.clone();
+
+    for succ_bc in blocks.get(&off).unwrap().succs.iter().cloned() {
+        let succ = blocks.get(&succ_bc).unwrap();
+
+        if let Some(succ_start_block) = succ.blocks.first() {
+            let start_block = builder.func.blocks.get_mut(succ_start_block).unwrap();
+
+            assert!(stack.len() == start_block.phi_nodes.len());
+
+            for (stack_elem, phi) in stack.iter().cloned().zip(start_block.phi_nodes.iter_mut()) {
+                assert!(builder.func.reg_map.info[&stack_elem].ty == builder.func.reg_map.info[&phi.sources[0].0].ty);
+                phi.sources.push((stack_elem, end_block));
+            };
+        } else if !block_worklist.contains(&succ_bc) {
+            block_worklist.push(succ_bc);
+        };
+    };
+}
+
+pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, verbose: bool) -> Option<MilFunction> {
+    let (class, method) = env.get_method(method_id);
+
+    if method.flags.contains(MethodFlags::NATIVE) {
+        let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
+        return Some(generate_native_thunk(env, name, method, method_id, known_objects));
+    } else if method.flags.contains(MethodFlags::ABSTRACT) {
+        return None;
+    };
+
+    if verbose {
+        eprintln!("===== MIL Generation for {}.{}{} =====\n", class.meta.name, method.name, method.descriptor);
+    };
+
+    let code = method.code_attribute().unwrap();
+    let instrs = BytecodeIterator::for_code(code);
+
+    let mut locals = MilLocals::new(code.max_locals);
+    let mut fixups = vec![];
+
+    let mut blocks = scan_blocks(instrs);
+    let mut block_worklist = vec![0];
+    let mut builder = MilBuilder::new(method_id);
+
+    get_params(&mut builder, &mut locals, method);
+
+    while let Some(next_block) = block_worklist.pop() {
+        generate_il_for_block(env, &mut builder, code, next_block, &class.constant_pool, &mut blocks, &mut block_worklist, &mut locals, &mut fixups, known_objects, verbose);
+    };
+
+    for mut fixup in fixups {
+        fixup(&mut builder, &blocks);
+    };
+
+    for (_, block_info) in blocks.into_iter().sorted_by_key(|&(bc, _)| bc) {
+        builder.func.block_order.extend(block_info.blocks);
+    }
 
     let func = builder.finish();
 
