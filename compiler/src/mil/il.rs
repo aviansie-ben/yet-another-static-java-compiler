@@ -292,14 +292,39 @@ impl MilComparison {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MilUnOp {
+    INeg
+}
+
+impl fmt::Display for MilUnOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MilUnOp::INeg => write!(f, "ineg")
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MilBinOp {
-    IAdd
+    IAdd,
+    ISub,
+    IMul,
+    IDivS,
+    IShrS,
+    IShrU,
+    IShl
 }
 
 impl fmt::Display for MilBinOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MilBinOp::IAdd => write!(f, "iadd")
+            MilBinOp::IAdd => write!(f, "iadd"),
+            MilBinOp::ISub => write!(f, "isub"),
+            MilBinOp::IMul => write!(f, "imul"),
+            MilBinOp::IDivS => write!(f, "idivs"),
+            MilBinOp::IShrS => write!(f, "ishrs"),
+            MilBinOp::IShrU => write!(f, "ishru"),
+            MilBinOp::IShl => write!(f, "ishl")
         }
     }
 }
@@ -308,6 +333,7 @@ impl fmt::Display for MilBinOp {
 pub enum MilInstructionKind {
     Nop,
     Copy(MilRegister, MilOperand),
+    UnOp(MilUnOp, MilRegister, MilOperand),
     BinOp(MilBinOp, MilRegister, MilOperand, MilOperand),
     GetParam(u16, ClassId, MilRegister),
     GetLocal(MilLocalId, MilRegister),
@@ -373,6 +399,9 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::Copy(tgt, ref src) => {
                 write!(f, "copy {}, {}", tgt, src.pretty(self.1))?;
             },
+            MilInstructionKind::UnOp(op, tgt, ref val) => {
+                write!(f, "{} {}, {}", op, tgt, val.pretty(self.1))?;
+            },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
                 write!(f, "{} {}, {}, {}", op, tgt, lhs.pretty(self.1), rhs.pretty(self.1))?;
             },
@@ -418,6 +447,7 @@ impl MilInstruction {
         match self.kind {
             MilInstructionKind::Nop => None,
             MilInstructionKind::Copy(ref tgt, _) => Some(tgt),
+            MilInstructionKind::UnOp(_, ref tgt, _) => Some(tgt),
             MilInstructionKind::BinOp(_, ref tgt, _, _) => Some(tgt),
             MilInstructionKind::GetParam(_, _, ref tgt) => Some(tgt),
             MilInstructionKind::GetLocal(_, ref tgt) => Some(tgt),
@@ -435,6 +465,9 @@ impl MilInstruction {
         match self.kind {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(_, ref val) => {
+                f(val);
+            },
+            MilInstructionKind::UnOp(_, _, ref val) => {
                 f(val);
             },
             MilInstructionKind::BinOp(_, _, ref lhs, ref rhs) => {

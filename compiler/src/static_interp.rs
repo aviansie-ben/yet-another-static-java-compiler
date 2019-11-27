@@ -617,6 +617,9 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.stack.peek().clone();
                 state.stack.push(val);
             },
+            BytecodeInstruction::Pop => {
+                state.stack.pop();
+            },
             BytecodeInstruction::ALoad(idx) | BytecodeInstruction::DLoad(idx) | BytecodeInstruction::FLoad(idx) |
             BytecodeInstruction::ILoad(idx) | BytecodeInstruction::LLoad(idx) => {
                 let val = state.get_local(idx as usize).clone();
@@ -627,14 +630,57 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.stack.pop();
                 state.set_local(idx as usize, val);
             },
+            BytecodeInstruction::IInc(idx, inc) => {
+                let val = state.get_local(idx as usize).as_int().unwrap() + inc as i32;
+                state.set_local(idx as usize, Value::Int(val));
+            },
             BytecodeInstruction::I2L => {
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Long(val as i64));
+            },
+            BytecodeInstruction::INeg => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(val.wrapping_neg()));
+            },
+            BytecodeInstruction::IAdd => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1.wrapping_add(o2)));
             },
             BytecodeInstruction::ISub => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(o1.wrapping_sub(o2)));
+            },
+            BytecodeInstruction::IMul => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1.wrapping_mul(o2)));
+            },
+            BytecodeInstruction::IDiv => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+
+                if o2 == 0 {
+                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                };
+
+                state.stack.push(Value::Int(o1.wrapping_div(o2)));
+            },
+            BytecodeInstruction::IShr => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1 << (o2 & 0x1f)));
+            },
+            BytecodeInstruction::IUShr => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(((o1 as u32) << ((o2 & 0x1f) as u32)) as i32));
+            },
+            BytecodeInstruction::IShl => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1 >> (o2 & 0x1f)));
             },
             BytecodeInstruction::LAdd => {
                 let o2 = state.stack.pop().as_long().unwrap();

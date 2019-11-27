@@ -571,15 +571,78 @@ unsafe fn emit_basic_block(
                 let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, src, types);
             },
-            MilInstructionKind::BinOp(MilBinOp::IAdd, tgt, ref lhs, ref rhs) => {
+            MilInstructionKind::UnOp(op, tgt, ref val) => {
+                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
+                    MilUnOp::INeg => LLVMBuildNeg(
+                        builder.ptr(),
+                        val,
+                        register_name(tgt).as_ptr()
+                    )
+                }, types);
+            },
+            MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
                 let lhs = create_value_ref(lhs, &local_regs, known_objects, obj_map, types);
                 let rhs = create_value_ref(rhs, &local_regs, known_objects, obj_map, types);
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildAdd(
-                    builder.ptr(),
-                    lhs,
-                    rhs,
-                    register_name(tgt).as_ptr()
-                ), types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
+                    MilBinOp::IAdd => LLVMBuildAdd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::ISub => LLVMBuildSub(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IMul => LLVMBuildMul(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IDivS => LLVMBuildSDiv(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IShrS => LLVMBuildAShr(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildAnd(
+                            builder.ptr(),
+                            rhs,
+                            LLVMConstInt(types.int, 0x1f, 0),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IShrU => LLVMBuildLShr(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildAnd(
+                            builder.ptr(),
+                            rhs,
+                            LLVMConstInt(types.int, 0x1f, 0),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IShl => LLVMBuildShl(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildAnd(
+                            builder.ptr(),
+                            rhs,
+                            LLVMConstInt(types.int, 0x1f, 0),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    )
+                }, types);
             },
             MilInstructionKind::GetParam(idx, _, tgt) => {
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMGetParam(llvm_func, idx as u32), types);

@@ -356,6 +356,29 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
     blocks
 }
 
+fn generate_un_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, op: MilUnOp, result_ty: MilType) {
+    let reg = builder.allocate_reg(result_ty);
+    let val = MilOperand::Register(stack.pop().unwrap());
+
+    builder.append_instruction(
+        MilInstructionKind::UnOp(op, reg, val),
+        bc
+    );
+    stack.push(reg);
+}
+
+fn generate_bin_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, op: MilBinOp, result_ty: MilType) {
+    let reg = builder.allocate_reg(result_ty);
+    let rhs = MilOperand::Register(stack.pop().unwrap());
+    let lhs = MilOperand::Register(stack.pop().unwrap());
+
+    builder.append_instruction(
+        MilInstructionKind::BinOp(op, reg, rhs, lhs),
+        bc
+    );
+    stack.push(reg);
+}
+
 fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code: &AttributeCode, off: usize, cp: &[ConstantPoolEntry], blocks: &mut HashMap<usize, GenBlockInfo>, block_worklist: &mut Vec<usize>, locals: &mut MilLocals, fixups: &mut Vec<Box<dyn FnMut (&mut MilBuilder, &HashMap<usize, GenBlockInfo>) -> ()>>, known_objects: &MilKnownObjectRefs, verbose: bool) {
     let incoming_stacks = blocks.get(&off).unwrap().preds.iter().filter_map(|pred| {
         let pred = blocks.get(&pred).unwrap();
@@ -418,6 +441,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::Dup => {
                 stack.push(*stack.last().unwrap());
             },
+            BytecodeInstruction::Pop => {
+                stack.pop();
+            },
             BytecodeInstruction::ALoad(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
                 let reg = builder.allocate_reg(MilType::Ref);
@@ -476,6 +502,30 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::SetLocal(local_id, MilOperand::Register(result_reg)),
                     bc
                 );
+            },
+            BytecodeInstruction::INeg => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int);
+            },
+            BytecodeInstruction::IAdd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAdd, MilType::Int);
+            },
+            BytecodeInstruction::ISub => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::ISub, MilType::Int);
+            },
+            BytecodeInstruction::IMul => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IMul, MilType::Int);
+            },
+            BytecodeInstruction::IDiv => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IDivS, MilType::Int);
+            },
+            BytecodeInstruction::IShr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrS, MilType::Int);
+            },
+            BytecodeInstruction::IUShr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrU, MilType::Int);
+            },
+            BytecodeInstruction::IShl => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShl, MilType::Int);
             },
             BytecodeInstruction::New(idx) => {
                 let cpe = match cp[idx as usize] {
