@@ -451,16 +451,37 @@ unsafe fn create_instance_field_gep(builder: &LLVMBuilder, field_id: FieldId, ob
     )
 }
 
-unsafe fn create_vtable_load(builder: &LLVMBuilder, obj: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
+unsafe fn create_vtable_decompress(builder: &LLVMBuilder, compressed: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
     LLVMBuildIntToPtr(
         builder.ptr(),
+        LLVMBuildNUWSub(
+            builder.ptr(),
+            compressed,
+            LLVMConstInt(types.int, 8, 0),
+            b"\0".as_ptr() as *const c_char
+        ),
+        LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0),
+        b"\0".as_ptr() as *const c_char
+    )
+}
+
+unsafe fn create_vtable_load(builder: &LLVMBuilder, obj: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
+    let obj = LLVMBuildPointerCast(
+        builder.ptr(),
+        obj,
+        types.class_types[&ClassId::JAVA_LANG_OBJECT].field_ty,
+        "\0".as_ptr() as *const c_char
+    );
+
+    create_vtable_decompress(
+        builder,
         LLVMBuildLoad(
             builder.ptr(),
             LLVMBuildStructGEP(builder.ptr(), obj, 0, b"\0".as_ptr() as *const c_char),
             "\0".as_ptr() as *const c_char
         ),
-        LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0),
-        b"\0".as_ptr() as *const c_char
+        class_id,
+        types
     )
 }
 
@@ -1060,7 +1081,10 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
         let vtable_value = if meta_class.vtable.is_null() {
             LLVMConstInt(types.long, 0, 0)
         } else {
-            LLVMConstPointerCast(meta_class.vtable, types.long)
+            LLVMConstAdd(
+                LLVMConstPointerCast(meta_class.vtable, types.long),
+                LLVMConstInt(types.long, 8, 0)
+            )
         };
         field_values[class_type.fields[&JAVA_LANG_CLASS_VTABLE_PTR_FIELD]] = vtable_value;
 
