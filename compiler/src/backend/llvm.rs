@@ -153,6 +153,7 @@ struct LLVMTypes {
     double: LLVMTypeRef,
     bool: LLVMTypeRef,
     any_function_pointer: LLVMTypeRef,
+    any_raw_pointer: LLVMTypeRef,
     any_object_pointer: LLVMTypeRef,
     class_types: HashMap<ClassId, LLVMClassType>,
     method_types: HashMap<MethodId, LLVMTypeRef>
@@ -302,6 +303,7 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
         let bool = LLVMInt1TypeInContext(ctx.ptr());
 
         let any_function_pointer = LLVMPointerType(LLVMFunctionType(void, std::ptr::null_mut(), 0, 0), 0);
+        let any_raw_pointer = LLVMPointerType(byte, 0);
         let any_object_pointer = LLVMPointerType(byte, 1);
 
         let mut types = LLVMTypes {
@@ -314,6 +316,7 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
             double,
             bool,
             any_function_pointer,
+            any_raw_pointer,
             any_object_pointer,
             class_types: env.class_ids().map(|class_id| {
                 (class_id, {
@@ -386,7 +389,7 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
             b"mocha_alloc_obj\0".as_ptr() as *const c_char,
             LLVMFunctionType(
                 types.any_object_pointer,
-                [types.any_object_pointer].as_mut_ptr(),
+                [types.any_raw_pointer].as_mut_ptr(),
                 1,
                 0
             )
@@ -758,8 +761,8 @@ unsafe fn emit_basic_block(
                     builtins.alloc_obj,
                     [
                         LLVMConstPointerCast(
-                            obj_map[&known_objects.get(known_objects.refs.classes[&class_id]).as_ptr()],
-                            types.any_object_pointer
+                            types.class_types[&class_id].vtable,
+                            types.any_raw_pointer
                         )
                     ].as_mut_ptr(),
                     1,

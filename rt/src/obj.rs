@@ -93,9 +93,8 @@ impl MochaString {
 }
 
 #[no_mangle]
-pub unsafe extern fn mocha_alloc_obj(class: *mut MochaClass) -> *mut MochaObject {
-    let class = class.as_ref().unwrap();
-    let vtable = MochaVTable::from_compressed(class.vtable);
+pub unsafe extern fn mocha_alloc_obj(vtable: *mut MochaVTable) -> *mut MochaObject {
+    let vtable = vtable.as_ref().unwrap();
 
     assert!(vtable.obj_size > 0);
     let ptr = match Global.alloc(Layout::from_size_align_unchecked(vtable.obj_size as usize, 16)) {
