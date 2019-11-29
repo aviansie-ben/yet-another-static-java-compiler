@@ -866,7 +866,14 @@ unsafe fn emit_basic_block(
             LLVMBuildRetVoid(builder.ptr());
         },
         MilEndInstructionKind::Return(ref val) => {
-            LLVMBuildRet(builder.ptr(), create_value_ref(val, &local_regs, known_objects, obj_map, types));
+            let val = LLVMBuildBitCast(
+                builder.ptr(),
+                create_value_ref(val, &local_regs, known_objects, obj_map, types),
+                LLVMGetReturnType(types.method_types[&func.id]),
+                b"\0".as_ptr() as *const c_char
+            );
+
+            LLVMBuildRet(builder.ptr(), val);
         },
         MilEndInstructionKind::Jump(_) => {},
         MilEndInstructionKind::JumpIf(cond, _, ref lhs, ref rhs) => {
