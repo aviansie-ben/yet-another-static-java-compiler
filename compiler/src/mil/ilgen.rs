@@ -604,17 +604,28 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     _ => unreachable!()
                 };
 
-                let ret_class = env.get_method(cpe.method_id).1.return_type;
+                let (class, method) = env.get_method(cpe.method_id);
+
+                let ret_class = method.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
                 builder.append_end_instruction(
-                    MilEndInstructionKind::CallVirtual(
-                        ret_class,
-                        cpe.method_id,
-                        reg,
-                        args[0].clone(),
-                        args
-                    ),
+                    if method.virtual_slot != !0 {
+                        MilEndInstructionKind::CallVirtual(
+                            ret_class,
+                            cpe.method_id,
+                            reg,
+                            args[0].clone(),
+                            args
+                        )
+                    } else {
+                        MilEndInstructionKind::Call(
+                            ret_class,
+                            cpe.method_id,
+                            reg,
+                            args
+                        )
+                    },
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
