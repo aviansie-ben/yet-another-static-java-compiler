@@ -373,7 +373,7 @@ fn generate_bin_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u
     let lhs = MilOperand::Register(stack.pop().unwrap());
 
     builder.append_instruction(
-        MilInstructionKind::BinOp(op, reg, rhs, lhs),
+        MilInstructionKind::BinOp(op, reg, lhs, rhs),
         bc
     );
     stack.push(reg);
