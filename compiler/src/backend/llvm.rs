@@ -379,7 +379,8 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
 }
 
 struct LLVMMochaBuiltins {
-    alloc_obj: LLVMValueRef
+    alloc_obj: LLVMValueRef,
+    alloc_array: LLVMValueRef
 }
 
 unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaBuiltins {
@@ -391,6 +392,16 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
                 types.any_object_pointer,
                 [types.any_raw_pointer].as_mut_ptr(),
                 1,
+                0
+            )
+        ),
+        alloc_array: LLVMAddFunction(
+            module.ptr(),
+            b"mocha_alloc_array\0".as_ptr() as *const c_char,
+            LLVMFunctionType(
+                types.any_object_pointer,
+                [types.any_raw_pointer, types.int].as_mut_ptr(),
+                2,
                 0
             )
         )
@@ -777,7 +788,30 @@ unsafe fn emit_basic_block(
 
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, types);
             },
-            MilInstructionKind::AllocArray(_, _, _) => unimplemented!()
+            MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
+                let len = create_value_ref(len, &local_regs, known_objects, obj_map, types);
+                let obj = LLVMBuildCall(
+                    builder.ptr(),
+                    builtins.alloc_array,
+                    [
+                        LLVMConstPointerCast(
+                            types.class_types[&class_id].vtable,
+                            types.any_raw_pointer
+                        ),
+                        len
+                    ].as_mut_ptr(),
+                    2,
+                    register_name(tgt).as_ptr() as *const c_char
+                );
+                let obj = LLVMBuildPointerCast(
+                    builder.ptr(),
+                    obj,
+                    types.class_types[&class_id].field_ty,
+                    register_name(tgt).as_ptr() as *const c_char
+                );
+
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, types);
+            }
         };
     };
 

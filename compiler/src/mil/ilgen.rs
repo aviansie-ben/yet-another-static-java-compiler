@@ -554,6 +554,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(reg);
             },
+            BytecodeInstruction::NewArray(ty) => {
+                let reg = builder.allocate_reg(MilType::Ref);
+                let len = MilOperand::Register(stack.pop().unwrap());
+                builder.append_instruction(
+                    MilInstructionKind::AllocArray(ClassId::for_primitive_type_array(ty), reg, len),
+                    bc
+                );
+                stack.push(reg);
+            },
             BytecodeInstruction::InvokeStatic(idx) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,

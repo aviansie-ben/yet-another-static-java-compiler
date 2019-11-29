@@ -30,6 +30,32 @@ impl MochaVTable {
 
         (self as *const MochaVTable as usize as u32) + 8
     }
+
+    pub fn field_size(&self) -> usize {
+        if (self.flags & MochaVTable::FLAG_PRIMITIVE) == MochaVTable::FLAG_PRIMITIVE {
+            match self.type_specific_info as u8 {
+                b'B' => 1,
+                b'C' => 2,
+                b'D' => 8,
+                b'F' => 4,
+                b'I' => 4,
+                b'J' => 8,
+                b'S' => 2,
+                b'Z' => 1,
+                ty => panic!("Unknown primitive type {:?}", char::from(ty))
+            }
+        } else {
+            8
+        }
+    }
+
+    pub fn array_element_size(&self) -> usize {
+        assert!((self.flags & MochaVTable::FLAG_ARRAY) == MochaVTable::FLAG_ARRAY);
+        let elem_vtable = unsafe { MochaVTable::from_compressed(self.type_specific_info) };
+
+        elem_vtable.field_size()
+
+    }
 }
 
 #[repr(C)]
@@ -48,6 +74,14 @@ impl MochaObject {
             MochaVTable::from_compressed(self.vtable)
         }
     }
+
+    pub fn as_array(&mut self) -> Option<&mut MochaAnyArray> {
+        if (self.vtable().flags & MochaVTable::FLAG_ARRAY) == MochaVTable::FLAG_ARRAY {
+            Some(unsafe { &mut *(self as *mut MochaObject as *mut MochaAnyArray) })
+        } else {
+            None
+        }
+    }
 }
 
 #[repr(C)]
@@ -55,6 +89,13 @@ pub struct MochaClass {
     pub obj: MochaObject,
     pub class_value_map: *mut MochaObject,
     pub vtable: u32
+}
+
+#[repr(C)]
+pub struct MochaAnyArray {
+    pub obj: MochaObject,
+    pub len: u32,
+    pub arr_data: [u8; 0]
 }
 
 #[repr(C)]
@@ -108,4 +149,28 @@ pub unsafe extern fn mocha_alloc_obj(vtable: *mut MochaVTable) -> *mut MochaObje
     obj.vtable = vtable.as_compressed();
 
     obj as *mut MochaObject
+}
+
+#[no_mangle]
+pub unsafe extern fn mocha_alloc_array(vtable: *mut MochaVTable, len: u32) -> *mut MochaAnyArray {
+    let vtable = vtable.as_ref().unwrap();
+
+    assert!(vtable.obj_size > 0);
+
+    let real_size = vtable.array_element_size().checked_mul(len as usize)
+        .and_then(|data_size| (vtable.obj_size as usize).checked_add(data_size))
+        .expect("Array size overflow");
+
+    let ptr = match Global.alloc(Layout::from_size_align_unchecked(real_size, 16)) {
+        Ok(ptr) => ptr,
+        Err(_) => panic!("Out of memory")
+    };
+
+    std::ptr::write_bytes(ptr.as_ptr(), 0, real_size);
+
+    let arr = ptr.cast::<MochaAnyArray>().as_ptr().as_mut().unwrap();
+    arr.obj.vtable = vtable.as_compressed();
+    arr.len = len;
+
+    arr as *mut MochaAnyArray
 }
