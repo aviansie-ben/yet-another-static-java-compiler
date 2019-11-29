@@ -3,9 +3,33 @@ use std::cell::Cell;
 
 #[repr(C)]
 pub struct MochaVTable {
+    pub obj_size: u32,
+    pub depth: u16,
+    pub flags: u16,
+    pub modifiers: u16,
+    pub num_interfaces: u16,
+    pub type_specific_info: u32,
+    pub super_vtables: *const u32,
     pub class_obj: &'static MochaClass,
     pub itable: *mut (),
     pub vslots: [fn () -> (); 0]
+}
+
+impl MochaVTable {
+    pub const FLAG_PRIMITIVE: u16 = 0x0001;
+    pub const FLAG_ARRAY: u16 = 0x0002;
+    pub const FLAG_INTERFACE: u16 = 0x0004;
+
+    pub unsafe fn from_compressed(ptr: u32) -> &'static MochaVTable {
+        assert!(ptr > 8);
+        &*((ptr - 8) as usize as *mut MochaVTable)
+    }
+
+    pub fn as_compressed(&'static self) -> u32 {
+        assert!((self as *const MochaVTable as usize) < 0xfffffff8);
+
+        (self as *const MochaVTable as usize as u32) + 8
+    }
 }
 
 #[repr(C)]
@@ -21,7 +45,7 @@ impl MochaObject {
 
     pub fn vtable(&self) -> &'static MochaVTable {
         unsafe {
-            &*(self.vtable as usize as *mut MochaVTable)
+            MochaVTable::from_compressed(self.vtable)
         }
     }
 }
@@ -30,8 +54,7 @@ impl MochaObject {
 pub struct MochaClass {
     pub obj: MochaObject,
     pub class_value_map: *mut MochaObject,
-    pub vtable: &'static MochaVTable,
-    pub size: i32
+    pub vtable: u32
 }
 
 #[repr(C)]
@@ -72,17 +95,18 @@ impl MochaString {
 #[no_mangle]
 pub unsafe extern fn mocha_alloc_obj(class: *mut MochaClass) -> *mut MochaObject {
     let class = class.as_ref().unwrap();
+    let vtable = MochaVTable::from_compressed(class.vtable);
 
-    assert!(class.size > 0);
-    let ptr = match Global.alloc(Layout::from_size_align_unchecked(class.size as usize, 16)) {
+    assert!(vtable.obj_size > 0);
+    let ptr = match Global.alloc(Layout::from_size_align_unchecked(vtable.obj_size as usize, 16)) {
         Ok(ptr) => ptr,
         Err(_) => panic!("Out of memory")
     };
 
-    std::ptr::write_bytes(ptr.as_ptr(), 0, class.size as usize);
+    std::ptr::write_bytes(ptr.as_ptr(), 0, vtable.obj_size as usize);
 
     let obj = ptr.cast::<MochaObject>().as_ptr().as_mut().unwrap();
-    obj.vtable = class.vtable as *const MochaVTable as usize as u32;
+    obj.vtable = vtable.as_compressed();
 
     obj as *mut MochaObject
 }

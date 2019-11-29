@@ -6,7 +6,7 @@ use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass
 
 pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
 pub const JAVA_ARRAY_HEADER_SIZE: u32 = 12;
-pub const JAVA_LANG_CLASS_SIZE: u32 = 28;
+pub const JAVA_LANG_CLASS_SIZE: u32 = 20;
 
 #[derive(Debug, Clone)]
 pub struct ObjectLayout {
@@ -167,6 +167,10 @@ fn compute_layout(env: &ClassEnvironment, liveness: &LivenessInfo, class_id: Cla
                 };
             };
         };
+    };
+
+    if class_id == ClassId::JAVA_LANG_CLASS {
+        assert_eq!(layout.size, JAVA_LANG_CLASS_SIZE);
     };
 
     layouts.insert(class_id, layout);

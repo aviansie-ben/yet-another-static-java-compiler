@@ -23,7 +23,6 @@ bitflags! {
 }
 
 pub const JAVA_LANG_CLASS_VTABLE_PTR_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_CLASS, 1);
-pub const JAVA_LANG_CLASS_SIZE_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_CLASS, 2);
 
 pub const JAVA_LANG_STRING_DATA_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_STRING, 0);
 
@@ -230,7 +229,7 @@ impl <'a> JavaStaticRef<'a> {
 
         if field.flags.contains(FieldFlags::STATIC) {
             let class_of = match self.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD) {
-                Value::Long(val) => ClassId(val as u32),
+                Value::Int(val) => ClassId(val as u32),
                 _ => unreachable!()
             };
 
@@ -375,7 +374,7 @@ impl <'a> JavaStaticRef<'a> {
 
         if field.flags.contains(FieldFlags::STATIC) {
             let class_of = match self.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD) {
-                Value::Long(val) => ClassId(val as u32),
+                Value::Int(val) => ClassId(val as u32),
                 _ => unreachable!()
             };
 
@@ -731,14 +730,7 @@ impl <'a> JavaStaticHeap<'a> {
             }
         };
         let java_ref = obj.as_java_ref(self.env);
-        java_ref.write_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD, Value::Long(class_id.0 as i64));
-        java_ref.write_field(JAVA_LANG_CLASS_SIZE_FIELD, Value::Int(match **self.env.get(class_id) {
-            ResolvedClass::User(ref class) => class.layout.size.try_into().unwrap(),
-            ResolvedClass::Array(elem_id) => layout::get_array_header_size(
-                layout::get_field_size_align(self.env, elem_id).1
-            ).try_into().unwrap(),
-            ResolvedClass::Primitive(_) => 0
-        }));
+        java_ref.write_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD, Value::Int(class_id.0 as i32));
 
         self.remaining_size.set(self.remaining_size.get() - size);
 
@@ -1170,7 +1162,7 @@ mod tests {
             let class_obj = heap.get_class_object(class_id);
 
             assert_eq!(class_obj.class_id(), ClassId::JAVA_LANG_CLASS);
-            assert_eq!(class_obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD), Value::Long(class_id.0 as i64));
+            assert_eq!(class_obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD), Value::Int(class_id.0 as i32));
         };
 
         let single_ref_static_class = TEST_ENV.try_find("mocha/$test/SingleRefStatic").unwrap();

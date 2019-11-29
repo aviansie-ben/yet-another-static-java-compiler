@@ -65,18 +65,24 @@ pub enum PrimitiveType {
     Boolean
 }
 
+impl PrimitiveType {
+    pub fn as_char(&self) -> u8 {
+        match *self {
+            PrimitiveType::Byte => b'B',
+            PrimitiveType::Char => b'C',
+            PrimitiveType::Double => b'D',
+            PrimitiveType::Float => b'F',
+            PrimitiveType::Int => b'I',
+            PrimitiveType::Long => b'J',
+            PrimitiveType::Short => b'S',
+            PrimitiveType::Boolean => b'Z'
+        }
+    }
+}
+
 impl fmt::Display for PrimitiveType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            PrimitiveType::Byte => write!(f, "B"),
-            PrimitiveType::Char => write!(f, "C"),
-            PrimitiveType::Double => write!(f, "D"),
-            PrimitiveType::Float => write!(f, "F"),
-            PrimitiveType::Int => write!(f, "I"),
-            PrimitiveType::Long => write!(f, "J"),
-            PrimitiveType::Short => write!(f, "S"),
-            PrimitiveType::Boolean => write!(f, "Z")
-        }
+        write!(f, "{}", char::from(self.as_char()))
     }
 }
 

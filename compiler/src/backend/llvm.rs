@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::os::raw::c_char;
@@ -115,9 +116,16 @@ impl <'a> Drop for LLVMBuilder<'a> {
     }
 }
 
-const VTABLE_CLASS_OBJECT_FIELD: usize = 0;
-const VTABLE_ITABLE_FIELD: usize = 1;
-const VTABLE_FIRST_VSLOT_FIELD: usize = 2;
+const VTABLE_OBJ_SIZE_FIELD: usize = 0;
+const VTABLE_DEPTH_FIELD: usize = 1;
+const VTABLE_FLAGS_FIELD: usize = 2;
+const VTABLE_MODIFIERS_FIELD: usize = 3;
+const VTABLE_NUM_INTERFACES_FIELD: usize = 4;
+const VTABLE_TYPE_SPECIFIC_INFO_FIELD: usize = 5;
+const VTABLE_SUPER_VTABLES_FIELD: usize = 6;
+const VTABLE_CLASS_OBJ_FIELD: usize = 7;
+const VTABLE_ITABLE_FIELD: usize = 8;
+const VTABLE_FIRST_VSLOT_FIELD: usize = 9;
 
 #[derive(Debug)]
 struct LLVMClassType {
@@ -251,20 +259,27 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
         None
     };
 
-    let vtable = if let Some(vslot_class) = vslot_class {
-        let mut vtable_fields = vec![types.any_function_pointer; vslot_class.layout.virtual_slots.len() + VTABLE_FIRST_VSLOT_FIELD];
-
-        vtable_fields[VTABLE_CLASS_OBJECT_FIELD] = LLVMPointerType(types.class_types[&class_id].meta_ty, 1);
-        vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(types.int, 0) /* TODO */;
-
-        let name = CString::new(format!("vtable_{}", env.get(class_id).name(env))).unwrap();
-        let global = LLVMAddGlobal(module.ptr(), LLVMStructType(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0), name.as_ptr());
-        LLVMSetSection(global, b".mocha_vtables\0".as_ptr() as *mut c_char);
-
-        global
+    let num_vslots = if let Some(vslot_class) = vslot_class {
+        vslot_class.layout.virtual_slots.len()
     } else {
-        std::ptr::null_mut()
+        0
     };
+
+    let mut vtable_fields = vec![types.any_function_pointer; num_vslots + VTABLE_FIRST_VSLOT_FIELD];
+
+    vtable_fields[VTABLE_OBJ_SIZE_FIELD] = types.int;
+    vtable_fields[VTABLE_DEPTH_FIELD] = types.short;
+    vtable_fields[VTABLE_FLAGS_FIELD] = types.short;
+    vtable_fields[VTABLE_MODIFIERS_FIELD] = types.short;
+    vtable_fields[VTABLE_NUM_INTERFACES_FIELD] = types.short;
+    vtable_fields[VTABLE_TYPE_SPECIFIC_INFO_FIELD] = types.int;
+    vtable_fields[VTABLE_SUPER_VTABLES_FIELD] = LLVMPointerType(types.int, 0);
+    vtable_fields[VTABLE_CLASS_OBJ_FIELD] = LLVMPointerType(types.class_types[&class_id].meta_ty, 1);
+    vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(types.int, 0) /* TODO */;
+
+    let name = CString::new(format!("vtable_{}", env.get(class_id).name(env))).unwrap();
+    let vtable = LLVMAddGlobal(module.ptr(), LLVMStructType(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0), name.as_ptr());
+    LLVMSetSection(vtable, b".mocha_vtables\0".as_ptr() as *mut c_char);
 
     let mut class_type = types.class_types.get_mut(&class_id).unwrap();
 
@@ -969,21 +984,50 @@ unsafe fn emit_main_function(env: &ClassEnvironment, main_method: MethodId, func
 
 unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
     let vslot_class = match **env.get(class_id) {
-        ResolvedClass::User(ref class) => class,
-        ResolvedClass::Array(_) => env.get(ClassId::JAVA_LANG_OBJECT).as_user_class(),
-        _ => {
-            return;
-        }
+        ResolvedClass::User(ref class) => Some(class),
+        ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
+        _ => None
     };
 
-    let vslots = vslot_class.layout.virtual_slots.iter().cloned().map(|method_id| {
-        methods.get(&method_id).cloned().map_or_else(
-            || LLVMConstNull(types.any_function_pointer),
-            |f| LLVMConstBitCast(f, types.any_function_pointer)
-        )
-    });
+    let vslots = if let Some(vslot_class) = vslot_class {
+        vslot_class.layout.virtual_slots.iter().cloned().map(|method_id| {
+            methods.get(&method_id).cloned().map_or_else(
+                || LLVMConstNull(types.any_function_pointer),
+                |f| LLVMConstBitCast(f, types.any_function_pointer)
+            )
+        }).collect_vec()
+    } else {
+        vec![]
+    };
+
+    let (flags, size, type_specific_info) = match **env.get(class_id) {
+        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(types.int, 0, 0)),
+        ResolvedClass::Array(elem_id) => (
+            0x0002,
+            layout::get_array_header_size(
+                layout::get_field_size_align(env, elem_id).1
+            ).try_into().unwrap(),
+            LLVMConstIntCast(
+                LLVMConstAdd(
+                    LLVMConstPointerCast(types.class_types[&elem_id].vtable, types.long),
+                    LLVMConstInt(types.long, 8, 0)
+                ),
+                types.int,
+                0
+            )
+        ),
+        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(types.int, b'V'.into(), 0)),
+        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(types.int, ty.as_char().into(), 0))
+    };
 
     let mut vtable_fields = [
+        LLVMConstInt(types.int, size.into(), 0),
+        LLVMConstInt(types.short, 0, 0),
+        LLVMConstInt(types.short, flags, 0),
+        LLVMConstInt(types.short, 0, 0),
+        LLVMConstInt(types.short, 0, 0),
+        type_specific_info,
+        LLVMConstNull(LLVMPointerType(types.int, 0)),
         LLVMConstNull(LLVMPointerType(types.class_types[&class_id].meta_ty, 1)),
         LLVMConstNull(LLVMPointerType(types.int, 0))
     ]
@@ -1021,7 +1065,7 @@ unsafe fn value_to_llvm(val: Value, class_id: ClassId, types: &LLVMTypes, obj_ma
 unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRef<'a>, llvm_obj: LLVMValueRef, types: &LLVMTypes, module: &LLVMModule, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>) {
     let class_type = &types.class_types[&obj.class_id()];
     let (ty, meta_class) = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        let meta_class = &types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_long().unwrap() as u32)];
+        let meta_class = &types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)];
         (meta_class.meta_ty, Some(meta_class))
     } else {
         (class_type.value_ty, None)
@@ -1079,11 +1123,15 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
 
     if let Some(meta_class) = meta_class {
         let vtable_value = if meta_class.vtable.is_null() {
-            LLVMConstInt(types.long, 0, 0)
+            LLVMConstInt(types.int, 0, 0)
         } else {
-            LLVMConstAdd(
-                LLVMConstPointerCast(meta_class.vtable, types.long),
-                LLVMConstInt(types.long, 8, 0)
+            LLVMConstIntCast(
+                LLVMConstAdd(
+                    LLVMConstPointerCast(meta_class.vtable, types.long),
+                    LLVMConstInt(types.long, 8, 0)
+                ),
+                types.int,
+                0
             )
         };
         field_values[class_type.fields[&JAVA_LANG_CLASS_VTABLE_PTR_FIELD]] = vtable_value;
@@ -1120,7 +1168,7 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
 
 unsafe fn define_static_heap_object<'a>(env: &ClassEnvironment, name: &CString, obj: &JavaStaticRef<'a>, types: &LLVMTypes, module: &LLVMModule) -> LLVMValueRef {
     let ty = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_long().unwrap() as u32)].meta_ty
+        types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)].meta_ty
     } else {
         match **env.get(obj.class_id()) {
             ResolvedClass::Array(elem_class) => {

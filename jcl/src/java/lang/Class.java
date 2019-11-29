@@ -17,6 +17,12 @@ import java.security.ProtectionDomain;
 import java.util.Map;
 
 public final class Class<T> implements Serializable, GenericDeclaration, Type, AnnotatedElement {
+    transient ClassValue.ClassValueMap classValueMap;
+
+    // These fields will be filled in by the compiler when creating static Class objects. The order of these fields is
+    // hardcoded, so the compiler will need to be updated if they're rearranged.
+    private transient final int vtableAddress = 0;
+
     public static Class<?> forName(String className) throws ClassNotFoundException {
         return forName(className, true, null);
     }
@@ -30,11 +36,6 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     static native Class<?> getPrimitiveClass(String name);
-
-    transient ClassValue.ClassValueMap classValueMap;
-    private transient long internalAddress;
-
-    private transient int objSize;
 
     @SuppressWarnings("unchecked")
     public <U> Class<? extends U> asSubclass(Class<U> clazz) {
