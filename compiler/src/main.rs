@@ -204,7 +204,6 @@ fn main() {
         };
     };
 
-    let has_class_object = liveness.needs_clinit.iter().cloned().collect_vec();
     println!(
         "Ran static class initialization for {} classes ({} failed) in {:.3}s",
         good_clinit + bad_clinit,
@@ -226,7 +225,7 @@ fn main() {
     };
 
     let mut known_objects = mil::il::MilKnownObjectMap::new();
-    for class_id in has_class_object.iter().cloned() {
+    for class_id in liveness.needs_class_object.iter().cloned() {
         let obj_id = known_objects.add(heap.get_class_object(class_id));
         known_objects.refs.classes.insert(class_id, obj_id);
     };

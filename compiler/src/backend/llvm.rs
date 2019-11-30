@@ -1327,7 +1327,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             };
         };
 
-        for class_id in liveness.may_construct.iter().cloned() {
+        for class_id in liveness.needs_class_object.iter().cloned() {
             emit_vtable(env, class_id, &methods, &types, ctx, &module);
         };
 

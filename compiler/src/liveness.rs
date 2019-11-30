@@ -5,6 +5,7 @@ use crate::resolve::{ClassEnvironment, ClassId, ConstantId, MethodId, ResolvedCl
 
 pub struct LivenessInfo {
     pub needs_clinit: HashSet<ClassId>,
+    pub needs_class_object: HashSet<ClassId>,
     pub may_construct: HashSet<ClassId>,
     pub may_virtual_call: HashSet<MethodId>,
     pub may_call: HashSet<MethodId>,
@@ -23,10 +24,16 @@ impl std::fmt::Display for Indent {
 }
 
 fn ensure_clinit_unchecked(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
-    let class = if let ResolvedClass::User(ref class) = **env.get(class_id) {
-        class
-    } else {
-        return;
+    liveness.needs_class_object.insert(class_id);
+    let class = match **env.get(class_id) {
+        ResolvedClass::User(ref class) => class,
+        ResolvedClass::Array(elem_id) => {
+            ensure_clinit(env, liveness, elem_id, indent, verbose);
+            return;
+        },
+        ResolvedClass::Primitive(_) => {
+            return;
+        }
     };
 
     if verbose {
@@ -141,6 +148,7 @@ fn analyze_method(env: &ClassEnvironment, liveness: &mut LivenessInfo, method_id
 pub fn create_full_liveness(env: &ClassEnvironment) -> LivenessInfo {
     let mut liveness = LivenessInfo {
         needs_clinit: HashSet::new(),
+        needs_class_object: HashSet::new(),
         may_construct: HashSet::new(),
         may_virtual_call: HashSet::new(),
         may_call: HashSet::new(),
@@ -149,6 +157,7 @@ pub fn create_full_liveness(env: &ClassEnvironment) -> LivenessInfo {
 
     for class_id in env.class_ids() {
         liveness.needs_clinit.insert(class_id);
+        liveness.needs_class_object.insert(class_id);
         liveness.may_construct.insert(class_id);
 
         match **env.get(class_id) {
@@ -168,6 +177,7 @@ pub fn create_full_liveness(env: &ClassEnvironment) -> LivenessInfo {
 pub fn analyze_all(env: &ClassEnvironment, main_method: MethodId, verbose: bool) -> LivenessInfo {
     let mut liveness = LivenessInfo {
         needs_clinit: HashSet::new(),
+        needs_class_object: HashSet::new(),
         may_construct: HashSet::new(),
         may_virtual_call: HashSet::new(),
         may_call: HashSet::new(),
