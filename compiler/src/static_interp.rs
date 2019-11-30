@@ -940,10 +940,6 @@ fn try_run_clinit_without_checkpoint(env: &ClassEnvironment, heap: &JavaStaticHe
 
     match **env.get(class_id) {
         ResolvedClass::User(ref class) => {
-            if &*class.meta.name == "java/lang/System" {
-                return Result::Err(StaticInterpretError::ExcludedClinit(class_id));
-            };
-
             for (i, m) in class.methods.iter().enumerate() {
                 if &*m.name == "<clinit>" {
                     try_interpret(env, heap, MethodId(class_id, i as u16), verbose)?;
