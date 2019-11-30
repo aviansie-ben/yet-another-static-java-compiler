@@ -379,6 +379,29 @@ fn generate_bin_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u
     stack.push(reg);
 }
 
+fn generate_array_load(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, elem_class: ClassId, result_ty: MilType) {
+    let reg = builder.allocate_reg(result_ty);
+    let idx = MilOperand::Register(stack.pop().unwrap());
+    let obj = MilOperand::Register(stack.pop().unwrap());
+
+    builder.append_instruction(
+        MilInstructionKind::GetArrayElement(elem_class, reg, obj, idx),
+        bc
+    );
+    stack.push(reg);
+}
+
+fn generate_array_store(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, elem_class: ClassId) {
+    let val = MilOperand::Register(stack.pop().unwrap());
+    let idx = MilOperand::Register(stack.pop().unwrap());
+    let obj = MilOperand::Register(stack.pop().unwrap());
+
+    builder.append_instruction(
+        MilInstructionKind::PutArrayElement(elem_class, obj, idx, val),
+        bc
+    );
+}
+
 fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code: &AttributeCode, off: usize, cp: &[ConstantPoolEntry], blocks: &mut HashMap<usize, GenBlockInfo>, block_worklist: &mut Vec<usize>, locals: &mut MilLocals, fixups: &mut Vec<Box<dyn FnMut (&mut MilBuilder, &HashMap<usize, GenBlockInfo>) -> ()>>, known_objects: &MilKnownObjectRefs, verbose: bool) {
     let incoming_stacks = blocks.get(&off).unwrap().preds.iter().filter_map(|pred| {
         let pred = blocks.get(&pred).unwrap();
@@ -559,6 +582,51 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let len = MilOperand::Register(stack.pop().unwrap());
                 builder.append_instruction(
                     MilInstructionKind::AllocArray(ClassId::for_primitive_type_array(ty), reg, len),
+                    bc
+                );
+                stack.push(reg);
+            },
+            BytecodeInstruction::BALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE, MilType::Int);
+            },
+            BytecodeInstruction::SALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_SHORT, MilType::Int);
+            },
+            BytecodeInstruction::CALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_CHAR, MilType::Int);
+            },
+            BytecodeInstruction::IALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_INT, MilType::Int);
+            },
+            BytecodeInstruction::LALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_LONG, MilType::Long);
+            },
+            BytecodeInstruction::AALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT, MilType::Ref);
+            }
+            BytecodeInstruction::BAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE);
+            },
+            BytecodeInstruction::SAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_SHORT);
+            },
+            BytecodeInstruction::CAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_CHAR);
+            },
+            BytecodeInstruction::IAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_INT);
+            },
+            BytecodeInstruction::LAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_LONG);
+            },
+            BytecodeInstruction::AAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT);
+            },
+            BytecodeInstruction::ArrayLength => {
+                let reg = builder.allocate_reg(MilType::Int);
+                let obj = MilOperand::Register(stack.pop().unwrap());
+                builder.append_instruction(
+                    MilInstructionKind::GetArrayLength(reg, obj),
                     bc
                 );
                 stack.push(reg);

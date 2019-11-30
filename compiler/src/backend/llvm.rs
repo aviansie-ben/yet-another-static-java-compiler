@@ -743,6 +743,70 @@ unsafe fn emit_basic_block(
                     create_instance_field_gep(&builder, field_id, obj, known_objects, obj_map, types)
                 );
             },
+            MilInstructionKind::GetArrayLength(tgt, ref obj) => {
+                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildLoad(
+                    builder.ptr(),
+                    create_instance_field_gep(&builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, known_objects, obj_map, types),
+                    register_name(tgt).as_ptr() as *const c_char
+                ), types);
+            },
+            MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
+                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                let mut idx = create_value_ref(idx, &local_regs, known_objects, obj_map, types);
+
+                let arr_data = create_instance_field_gep(&builder, FieldId(env.try_find_array(class_id).unwrap(), 1), obj, known_objects, obj_map, types);
+
+                let val = LLVMBuildLoad(
+                    builder.ptr(),
+                    LLVMBuildGEP(
+                        builder.ptr(),
+                        arr_data,
+                        [LLVMConstInt(types.int, 0, 1), idx].as_mut_ptr(),
+                        2,
+                        "\0".as_ptr() as *const c_char
+                    ),
+                    register_name(tgt).as_ptr() as *const c_char
+                );
+
+                let val = match class_id {
+                    ClassId::PRIMITIVE_BYTE | ClassId::PRIMITIVE_SHORT | ClassId::PRIMITIVE_BOOLEAN => {
+                        LLVMBuildIntCast2(builder.ptr(), val, types.int, 1, "\0".as_ptr() as *const c_char)
+                    },
+                    ClassId::PRIMITIVE_CHAR => {
+                        LLVMBuildIntCast2(builder.ptr(), val, types.int, 0, "\0".as_ptr() as *const c_char)
+                    },
+                    _ => val
+                };
+
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, types);
+            },
+            MilInstructionKind::PutArrayElement(class_id, ref obj, ref idx, ref val) => {
+                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                let mut idx = create_value_ref(idx, &local_regs, known_objects, obj_map, types);
+                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+
+                let arr_data = create_instance_field_gep(&builder, FieldId(env.try_find_array(class_id).unwrap(), 1), obj, known_objects, obj_map, types);
+                let val = match class_id {
+                    ClassId::PRIMITIVE_BYTE | ClassId::PRIMITIVE_CHAR | ClassId::PRIMITIVE_SHORT | ClassId::PRIMITIVE_BOOLEAN => {
+                        LLVMBuildIntCast(builder.ptr(), val, types.class_types[&class_id].field_ty, "\0".as_ptr() as *const c_char)
+                    },
+                    _ => val
+                };
+
+                LLVMBuildStore(
+                    builder.ptr(),
+                    val,
+                    LLVMBuildGEP(
+                        builder.ptr(),
+                        arr_data,
+                        [LLVMConstInt(types.int, 0, 1), idx].as_mut_ptr(),
+                        2,
+                        "\0".as_ptr() as *const c_char
+                    )
+                );
+            },
             MilInstructionKind::GetStatic(field_id, _, tgt) => {
                 let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
 
