@@ -88,7 +88,8 @@ impl MochaObject {
 pub struct MochaClass {
     pub obj: MochaObject,
     pub class_value_map: *mut MochaObject,
-    pub vtable: u32
+    pub vtable: u32,
+    pub canonical_name: *mut MochaString
 }
 
 #[repr(C)]

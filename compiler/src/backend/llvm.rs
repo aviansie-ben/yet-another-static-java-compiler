@@ -1091,7 +1091,7 @@ unsafe fn emit_main_function(env: &ClassEnvironment, main_method: MethodId, func
     LLVMBuildRet(builder.ptr(), LLVMConstInt(types.int, 0, 1));
 }
 
-unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
+unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, class_obj: LLVMValueRef, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
     let vslot_class = match **env.get(class_id) {
         ResolvedClass::User(ref class) => Some(class),
         ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
@@ -1137,7 +1137,7 @@ unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashM
         LLVMConstInt(types.short, 0, 0),
         type_specific_info,
         LLVMConstNull(LLVMPointerType(types.int, 0)),
-        LLVMConstNull(LLVMPointerType(types.class_types[&class_id].meta_ty, 1)),
+        class_obj,
         LLVMConstNull(LLVMPointerType(types.int, 0))
     ]
         .iter().cloned()
@@ -1329,7 +1329,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
         };
 
         for class_id in liveness.needs_class_object.iter().cloned() {
-            emit_vtable(env, class_id, &methods, &types, ctx, &module);
+            emit_vtable(env, class_id, &methods, obj_map[&program.known_objects.get(program.known_objects.refs.classes[&class_id]).as_ptr()], &types, ctx, &module);
         };
 
         for obj in objs.iter() {

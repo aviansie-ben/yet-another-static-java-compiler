@@ -6,7 +6,7 @@ use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass
 
 pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
 pub const JAVA_ARRAY_HEADER_SIZE: u32 = 12;
-pub const JAVA_LANG_CLASS_SIZE: u32 = 20;
+pub const JAVA_LANG_CLASS_SIZE: u32 = 32;
 
 #[derive(Debug, Clone)]
 pub struct ObjectLayout {

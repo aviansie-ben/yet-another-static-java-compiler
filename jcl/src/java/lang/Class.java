@@ -22,6 +22,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     // These fields will be filled in by the compiler when creating static Class objects. The order of these fields is
     // hardcoded, so the compiler will need to be updated if they're rearranged.
     private transient final int vtableAddress = 0;
+    private transient final String canonicalName = "";
 
     public static Class<?> forName(String className) throws ClassNotFoundException {
         return forName(className, true, null);
@@ -76,7 +77,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public String getCanonicalName() {
-        throw new UnsupportedOperationException();
+        return canonicalName;
     }
 
     public Class<?> getClasses() {
@@ -196,7 +197,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public String getName() {
-        return "";
+        return canonicalName.replace('/', '.');
     }
 
     public Package getPackage() {
