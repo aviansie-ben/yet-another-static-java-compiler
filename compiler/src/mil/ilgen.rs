@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 
 use itertools::Itertools;
@@ -269,54 +269,39 @@ impl GenBlockInfo {
     }
 }
 
-fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
-    let mut blocks = HashMap::new();
-    let mut edges = vec![];
-
-    let mut current_block = 0;
+fn scan_for_block_starts(instrs: BytecodeIterator) -> HashSet<usize> {
+    let mut block_starts = HashSet::new();
     let mut next_starts_block = true;
 
-    for (off, instr) in instrs {
+    for (bc, instr) in instrs {
         if next_starts_block {
-            blocks.insert(off, GenBlockInfo::new());
-            current_block = off;
             next_starts_block = false;
+            block_starts.insert(bc);
         };
 
         match instr.unwrap() {
             BytecodeInstruction::Goto(dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
+                next_starts_block = true;
             },
             BytecodeInstruction::IfACmp(_, dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
                 next_starts_block = true;
             },
             BytecodeInstruction::IfICmp(_, dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
                 next_starts_block = true;
             },
             BytecodeInstruction::If(_, dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
                 next_starts_block = true;
             },
             BytecodeInstruction::IfNonNull(dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
                 next_starts_block = true;
             },
             BytecodeInstruction::IfNull(dest) => {
-                blocks.entry(dest).or_insert_with(GenBlockInfo::new);
-
-                edges.push((current_block, dest));
+                block_starts.insert(dest);
                 next_starts_block = true;
             },
             BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
@@ -330,21 +315,56 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
         };
     };
 
-    current_block = 0;
-    for ((_, curr_instr), (next_bc, _)) in instrs.tuple_windows() {
-        match curr_instr.unwrap() {
-            BytecodeInstruction::Goto(_) => {
-                current_block = next_bc;
+    block_starts
+}
+
+fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
+    let mut current_block = 0;
+    let mut can_fall_through = false;
+
+    let mut edges = vec![];
+    let mut blocks: HashMap<_, _> = scan_for_block_starts(instrs).into_iter()
+        .map(|bc| (bc, GenBlockInfo::new()))
+        .collect();
+
+    for (bc, instr) in instrs {
+        if blocks.contains_key(&bc) {
+            if can_fall_through {
+                edges.push((current_block, bc));
+            } else {
+                can_fall_through = true;
+            };
+            current_block = bc;
+        };
+
+        match instr.unwrap() {
+            BytecodeInstruction::Goto(dest) => {
+                edges.push((current_block, dest));
+                can_fall_through = false;
+            },
+            BytecodeInstruction::IfACmp(_, dest) => {
+                edges.push((current_block, dest));
+            },
+            BytecodeInstruction::IfICmp(_, dest) => {
+                edges.push((current_block, dest));
+            },
+            BytecodeInstruction::If(_, dest) => {
+                edges.push((current_block, dest));
+            },
+            BytecodeInstruction::IfNonNull(dest) => {
+                edges.push((current_block, dest));
+            },
+            BytecodeInstruction::IfNull(dest) => {
+                edges.push((current_block, dest));
             },
             BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
-                current_block = next_bc;
+                can_fall_through = false;
             },
-            _ => {
-                if blocks.contains_key(&next_bc) {
-                    edges.push((current_block, next_bc));
-                    current_block = next_bc;
-                };
-            }
+            BytecodeInstruction::JSR(_) => unimplemented!(),
+            BytecodeInstruction::Ret(_) => unimplemented!(),
+            BytecodeInstruction::TableSwitch(_, _, _) => unimplemented!(),
+            BytecodeInstruction::LookupSwitch(_, _) => unimplemented!(),
+            _ => {}
         };
     };
 
