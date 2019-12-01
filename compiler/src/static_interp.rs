@@ -713,17 +713,17 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::IShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();
-                state.stack.push(Value::Int(o1 << (o2 & 0x1f)));
+                state.stack.push(Value::Int(o1 >> (o2 & 0x1f)));
             },
             BytecodeInstruction::IUShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();
-                state.stack.push(Value::Int(((o1 as u32) << ((o2 & 0x1f) as u32)) as i32));
+                state.stack.push(Value::Int(((o1 as u32) >> ((o2 & 0x1f) as u32)) as i32));
             },
             BytecodeInstruction::IShl => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();
-                state.stack.push(Value::Int(o1 >> (o2 & 0x1f)));
+                state.stack.push(Value::Int(o1 << (o2 & 0x1f)));
             },
             BytecodeInstruction::LAdd => {
                 let o2 = state.stack.pop().as_long().unwrap();
