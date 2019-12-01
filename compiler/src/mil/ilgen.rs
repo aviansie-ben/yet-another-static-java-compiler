@@ -490,6 +490,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::Dup => {
                 stack.push(*stack.last().unwrap());
             },
+            BytecodeInstruction::DupX1 => {
+                let val1 = stack.pop().unwrap();
+                let val2 = stack.pop().unwrap();
+
+                stack.push(val1);
+                stack.push(val2);
+                stack.push(val1);
+            },
             BytecodeInstruction::Pop => {
                 stack.pop();
             },

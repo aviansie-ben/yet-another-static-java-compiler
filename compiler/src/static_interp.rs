@@ -660,8 +660,16 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.stack.peek().clone();
                 state.stack.push(val);
             },
+            BytecodeInstruction::DupX1 => {
+                let val1 = state.stack.pop_slot();
+                let val2 = state.stack.pop_slot();
+
+                state.stack.push(val1.clone());
+                state.stack.push(val2);
+                state.stack.push(val1);
+            },
             BytecodeInstruction::Pop => {
-                state.stack.pop();
+                state.stack.pop_slot();
             },
             BytecodeInstruction::ALoad(idx) | BytecodeInstruction::DLoad(idx) | BytecodeInstruction::FLoad(idx) |
             BytecodeInstruction::ILoad(idx) | BytecodeInstruction::LLoad(idx) => {
