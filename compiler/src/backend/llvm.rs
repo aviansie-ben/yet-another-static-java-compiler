@@ -382,7 +382,8 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
 
 struct LLVMMochaBuiltins {
     alloc_obj: LLVMValueRef,
-    alloc_array: LLVMValueRef
+    alloc_array: LLVMValueRef,
+    throw: LLVMValueRef
 }
 
 unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaBuiltins {
@@ -404,6 +405,16 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
                 types.any_object_pointer,
                 [types.any_raw_pointer, types.int].as_mut_ptr(),
                 2,
+                0
+            )
+        ),
+        throw: LLVMAddFunction(
+            module.ptr(),
+            b"mocha_throw\0".as_ptr() as *const c_char,
+            LLVMFunctionType(
+                types.any_object_pointer,
+                [types.any_object_pointer].as_mut_ptr(),
+                1,
                 0
             )
         )
@@ -940,6 +951,17 @@ unsafe fn emit_basic_block(
                 args.len() as u32,
                 register_name(tgt).as_ptr() as *const c_char
             ), types);
+        },
+        MilEndInstructionKind::Throw(ref exception) => {
+            let exception = create_value_ref(exception, &local_regs, known_objects, obj_map, types);
+
+            LLVMBuildCall(
+                builder.ptr(),
+                builtins.throw,
+                [exception].as_mut_ptr(),
+                1,
+                "\0".as_ptr() as *const c_char
+            );
         },
         MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)) => {
             LLVMBuildRetVoid(builder.ptr());

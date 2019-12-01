@@ -355,6 +355,7 @@ pub enum MilEndInstructionKind {
     Call(ClassId, MethodId, MilRegister, Vec<MilOperand>),
     CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     CallNative(ClassId, String, MilRegister, Vec<MilOperand>),
+    Throw(MilOperand),
     Return(MilOperand),
     Jump(MilBlockId),
     JumpIf(MilComparison, MilBlockId, MilOperand, MilOperand)
@@ -552,6 +553,9 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
+            MilEndInstructionKind::Throw(ref val) => {
+                write!(f, "throw {}", val.pretty(self.1))?;
+            },
             MilEndInstructionKind::Return(ref val) => {
                 write!(f, "ret {}", val.pretty(self.1))?;
             },
@@ -593,6 +597,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Call(_, _, ref tgt, _) => Some(tgt),
             MilEndInstructionKind::CallVirtual(_, _, ref tgt, _, _) => Some(tgt),
             MilEndInstructionKind::CallNative(_, _, ref tgt, _) => Some(tgt),
+            MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
             MilEndInstructionKind::JumpIf(_, _, _, _) => None
@@ -618,6 +623,9 @@ impl MilEndInstruction {
                     f(a);
                 };
             },
+            MilEndInstructionKind::Throw(ref val) => {
+                f(val);
+            },
             MilEndInstructionKind::Return(ref val) => {
                 f(val);
             },
@@ -635,6 +643,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Call(_, _, _, _) => true,
             MilEndInstructionKind::CallVirtual(_, _, _, _, _) => true,
             MilEndInstructionKind::CallNative(_, _, _, _) => true,
+            MilEndInstructionKind::Throw(_) => false,
             MilEndInstructionKind::Return(_) => false,
             MilEndInstructionKind::Jump(_) => false,
             MilEndInstructionKind::JumpIf(_, _, _, _) => true

@@ -866,6 +866,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 }));
                 end_block = Some(block);
             },
+            BytecodeInstruction::AThrow => {
+                let val = MilOperand::Register(stack.pop().unwrap());
+                end_block = Some(builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(val),
+                    bc
+                ));
+            },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 let val = MilOperand::Register(stack.pop().unwrap());
                 end_block = Some(builder.append_end_instruction(
