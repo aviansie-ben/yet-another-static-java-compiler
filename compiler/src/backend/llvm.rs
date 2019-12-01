@@ -121,11 +121,12 @@ const VTABLE_DEPTH_FIELD: usize = 1;
 const VTABLE_FLAGS_FIELD: usize = 2;
 const VTABLE_MODIFIERS_FIELD: usize = 3;
 const VTABLE_NUM_INTERFACES_FIELD: usize = 4;
-const VTABLE_TYPE_SPECIFIC_INFO_FIELD: usize = 5;
-const VTABLE_SUPER_VTABLES_FIELD: usize = 6;
-const VTABLE_CLASS_OBJ_FIELD: usize = 7;
-const VTABLE_ITABLE_FIELD: usize = 8;
-const VTABLE_FIRST_VSLOT_FIELD: usize = 9;
+const VTABLE_ARRAY_VTABLE_FIELD: usize = 5;
+const VTABLE_TYPE_SPECIFIC_INFO_FIELD: usize = 6;
+const VTABLE_SUPER_VTABLES_FIELD: usize = 7;
+const VTABLE_CLASS_OBJ_FIELD: usize = 8;
+const VTABLE_ITABLE_FIELD: usize = 9;
+const VTABLE_FIRST_VSLOT_FIELD: usize = 10;
 
 #[derive(Debug)]
 struct LLVMClassType {
@@ -274,7 +275,8 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
     vtable_fields[VTABLE_FLAGS_FIELD] = types.short;
     vtable_fields[VTABLE_MODIFIERS_FIELD] = types.short;
     vtable_fields[VTABLE_NUM_INTERFACES_FIELD] = types.short;
-    vtable_fields[VTABLE_TYPE_SPECIFIC_INFO_FIELD] = types.int;
+    vtable_fields[VTABLE_ARRAY_VTABLE_FIELD] = types.int;
+    vtable_fields[VTABLE_TYPE_SPECIFIC_INFO_FIELD] = types.long;
     vtable_fields[VTABLE_SUPER_VTABLES_FIELD] = LLVMPointerType(types.int, 0);
     vtable_fields[VTABLE_CLASS_OBJ_FIELD] = LLVMPointerType(types.class_types[&class_id].meta_ty, 1);
     vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(types.int, 0) /* TODO */;
@@ -1091,7 +1093,7 @@ unsafe fn emit_main_function(env: &ClassEnvironment, main_method: MethodId, func
     LLVMBuildRet(builder.ptr(), LLVMConstInt(types.int, 0, 1));
 }
 
-unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, class_obj: LLVMValueRef, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
+unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, class_obj: LLVMValueRef, liveness: &LivenessInfo, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
     let vslot_class = match **env.get(class_id) {
         ResolvedClass::User(ref class) => Some(class),
         ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
@@ -1110,7 +1112,7 @@ unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashM
     };
 
     let (flags, size, type_specific_info) = match **env.get(class_id) {
-        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(types.int, 0, 0)),
+        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(types.long, 0, 0)),
         ResolvedClass::Array(elem_id) => (
             0x0002,
             layout::get_array_header_size(
@@ -1121,12 +1123,12 @@ unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashM
                     LLVMConstPointerCast(types.class_types[&elem_id].vtable, types.long),
                     LLVMConstInt(types.long, 8, 0)
                 ),
-                types.int,
+                types.long,
                 0
             )
         ),
-        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(types.int, b'V'.into(), 0)),
-        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(types.int, ty.as_char().into(), 0))
+        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(types.long, b'V'.into(), 0)),
+        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(types.long, ty.as_char().into(), 0))
     };
 
     let mut vtable_fields = [
@@ -1135,6 +1137,22 @@ unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashM
         LLVMConstInt(types.short, flags, 0),
         LLVMConstInt(types.short, 0, 0),
         LLVMConstInt(types.short, 0, 0),
+        if let Some(array_class_id) = env.try_find_array(class_id) {
+            if liveness.may_construct.contains(&array_class_id) {
+                LLVMConstIntCast(
+                    LLVMConstAdd(
+                        LLVMConstPointerCast(types.class_types[&array_class_id].vtable, types.long),
+                        LLVMConstInt(types.long, 8, 0)
+                    ),
+                    types.int,
+                    0
+                )
+            } else {
+                LLVMConstInt(types.int, 0, 0)
+            }
+        } else {
+            LLVMConstInt(types.int, 0, 0)
+        },
         type_specific_info,
         LLVMConstNull(LLVMPointerType(types.int, 0)),
         class_obj,
@@ -1329,7 +1347,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
         };
 
         for class_id in liveness.needs_class_object.iter().cloned() {
-            emit_vtable(env, class_id, &methods, obj_map[&program.known_objects.get(program.known_objects.refs.classes[&class_id]).as_ptr()], &types, ctx, &module);
+            emit_vtable(env, class_id, &methods, obj_map[&program.known_objects.get(program.known_objects.refs.classes[&class_id]).as_ptr()], liveness, &types, ctx, &module);
         };
 
         for obj in objs.iter() {
