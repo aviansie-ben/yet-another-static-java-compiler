@@ -13,9 +13,7 @@ public class Object {
         return this == o;
     }
 
-    public final Class<?> getClass() {
-        throw new UnsupportedOperationException();
-    }
+    public native final Class<?> getClass();
 
     public int hashCode() {
         throw new UnsupportedOperationException();

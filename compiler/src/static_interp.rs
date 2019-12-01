@@ -332,6 +332,17 @@ fn native_double_from_bits(state: &mut InterpreterState) -> Result<(), StaticInt
     Result::Ok(())
 }
 
+fn native_object_get_class(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let val = state.stack.pop().into_ref().unwrap();
+
+    if let Some(val) = val {
+        state.stack.push(Value::Ref(Some(state.heap.get_class_object(val.class_id()))));
+        Result::Ok(())
+    } else {
+        Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
+    }
+}
+
 fn native_arraycopy(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     let len = state.stack.pop().as_int().unwrap();
     let dst_off = state.stack.pop().as_int().unwrap();
@@ -379,6 +390,11 @@ lazy_static! {
         known_natives.insert("java/lang/Object.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/Thread.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/System.registerNatives()V", native_nop as StaticNative);
+
+        known_natives.insert(
+            "java/lang/Object.getClass()Ljava/lang/Class;",
+            native_object_get_class as StaticNative
+        );
 
         known_natives.insert(
             "java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V",
