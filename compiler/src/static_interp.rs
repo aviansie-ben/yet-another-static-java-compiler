@@ -332,6 +332,44 @@ fn native_double_from_bits(state: &mut InterpreterState) -> Result<(), StaticInt
     Result::Ok(())
 }
 
+fn native_arraycopy(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let len = state.stack.pop().as_int().unwrap();
+    let dst_off = state.stack.pop().as_int().unwrap();
+    let dst = if let Some(dst) = state.stack.pop().into_ref().unwrap() {
+        dst
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+    let src_off = state.stack.pop().as_int().unwrap();
+    let src = if let Some(src) = state.stack.pop().into_ref().unwrap() {
+        src
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    // TODO Check type correctness
+
+    if dst_off < 0 || dst_off > dst.read_array_length() || dst.read_array_length() - dst_off < len {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    if src_off < 0 || src_off > src.read_array_length() || src.read_array_length() - src_off < len {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    if src_off > dst_off {
+        for i in 0..len {
+            dst.write_array_element(dst_off + len - i - 1, src.read_array_element(src_off + len - i - 1));
+        };
+    } else {
+        for i in 0..len {
+            dst.write_array_element(dst_off + i, src.read_array_element(src_off + i));
+        };
+    };
+
+    Result::Ok(())
+}
+
 type StaticNative = fn (&mut InterpreterState) -> Result<(), StaticInterpretError>;
 
 lazy_static! {
@@ -341,6 +379,11 @@ lazy_static! {
         known_natives.insert("java/lang/Object.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/Thread.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/System.registerNatives()V", native_nop as StaticNative);
+
+        known_natives.insert(
+            "java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V",
+            native_arraycopy as StaticNative
+        );
 
         known_natives.insert(
             "java/lang/Class.getPrimitiveClass(Ljava/lang/String;)Ljava/lang/Class;",
