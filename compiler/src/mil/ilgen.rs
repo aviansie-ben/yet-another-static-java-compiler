@@ -304,6 +304,9 @@ fn scan_for_block_starts(instrs: BytecodeIterator) -> HashSet<usize> {
                 block_starts.insert(dest);
                 next_starts_block = true;
             },
+            BytecodeInstruction::AThrow => {
+                next_starts_block = true;
+            },
             BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 next_starts_block = true;
             },
@@ -356,6 +359,9 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
             },
             BytecodeInstruction::IfNull(dest) => {
                 edges.push((current_block, dest));
+            },
+            BytecodeInstruction::AThrow => {
+                can_fall_through = false;
             },
             BytecodeInstruction::Return | BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 can_fall_through = false;

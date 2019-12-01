@@ -962,6 +962,7 @@ unsafe fn emit_basic_block(
                 1,
                 "\0".as_ptr() as *const c_char
             );
+            LLVMBuildUnreachable(builder.ptr());
         },
         MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)) => {
             LLVMBuildRetVoid(builder.ptr());
@@ -1055,6 +1056,7 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
                 let cond = LLVMGetLastInstruction(llvm_block);
                 LLVMBuildCondBr(builder.ptr(), cond, llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
             },
+            MilEndInstructionKind::Throw(_) => {},
             MilEndInstructionKind::Return(_) => {},
             _ => {
                 LLVMBuildBr(builder.ptr(), llvm_blocks[&next_block_id].0);
