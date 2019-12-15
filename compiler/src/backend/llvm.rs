@@ -161,6 +161,28 @@ struct LLVMTypes {
     method_types: HashMap<MethodId, LLVMTypeRef>
 }
 
+struct MochaModule<'a, 'b, 'c> {
+    env: &'a ClassEnvironment,
+    ctx: &'a LLVMContext,
+    module: &'a LLVMModule<'b>,
+    types: LLVMTypes,
+    builtins: LLVMMochaBuiltins,
+    objs: Vec<JavaStaticRef<'c>>,
+    known_objs: &'a MilKnownObjectMap<'c>,
+    obj_map: HashMap<NonNull<u8>, LLVMValueRef>,
+    methods: HashMap<MethodId, LLVMValueRef>
+}
+
+impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
+    fn find_known_object(&self, id: MilKnownObjectId) -> LLVMValueRef {
+        self.obj_map[&self.known_objs.get(id).as_ptr()]
+    }
+
+    fn find_class_object(&self, class_id: ClassId) -> LLVMValueRef {
+        self.find_known_object(self.known_objs.refs.classes[&class_id])
+    }
+}
+
 unsafe fn lay_out_fields(env: &ClassEnvironment, fields: impl IntoIterator<Item=(FieldId, u32)>, llvm_fields: &mut Vec<LLVMTypeRef>, field_map: &mut HashMap<FieldId, usize>, pads: &mut Vec<(u32, u32)>, mut current_size: u32, types: &LLVMTypes) {
     for (f, off) in fields {
         assert!(off >= current_size);
@@ -423,26 +445,26 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
     }
 }
 
-unsafe fn define_function(env: &ClassEnvironment, func: &MilFunction, types: &LLVMTypes, module: &LLVMModule) -> LLVMValueRef {
-    let (class, method) = env.get_method(func.id);
+unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValueRef {
+    let (class, method) = module.env.get_method(func.id);
     let name = CString::new(format!("{}.{}{}", class.meta.name, method.name, method.descriptor)).unwrap();
 
-    LLVMAddFunction(module.ptr(), name.as_ptr(), types.method_types[&func.id])
+    LLVMAddFunction(module.module.ptr(), name.as_ptr(), module.types.method_types[&func.id])
 }
 
-unsafe fn create_value_ref(op: &MilOperand, regs: &HashMap<MilRegister, LLVMValueRef>, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
+unsafe fn create_value_ref(module: &MochaModule, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValueRef>) -> LLVMValueRef {
     match *op {
         MilOperand::Register(r) => regs[&r],
-        MilOperand::Null => LLVMConstNull(types.any_object_pointer),
+        MilOperand::Null => LLVMConstNull(module.types.any_object_pointer),
         MilOperand::KnownObject(object_id, _) => LLVMConstPointerCast(
-            obj_map[&known_objects.get(object_id).as_ptr()],
-            types.any_object_pointer
+            module.find_known_object(object_id),
+            module.types.any_object_pointer
         ),
-        MilOperand::Bool(val) => LLVMConstInt(types.bool, if val { 1 } else { 0 }, 0),
-        MilOperand::Int(val) => LLVMConstInt(types.int, val as u64, 1),
-        MilOperand::Long(val) => LLVMConstInt(types.long, val as u64, 1),
-        MilOperand::Float(val) => LLVMConstBitCast(LLVMConstInt(types.int, val as u64, 0), types.float),
-        MilOperand::Double(val) => LLVMConstBitCast(LLVMConstInt(types.long, val, 0), types.double)
+        MilOperand::Bool(val) => LLVMConstInt(module.types.bool, if val { 1 } else { 0 }, 0),
+        MilOperand::Int(val) => LLVMConstInt(module.types.int, val as u64, 1),
+        MilOperand::Long(val) => LLVMConstInt(module.types.long, val as u64, 1),
+        MilOperand::Float(val) => LLVMConstBitCast(LLVMConstInt(module.types.int, val as u64, 0), module.types.float),
+        MilOperand::Double(val) => LLVMConstBitCast(LLVMConstInt(module.types.long, val, 0), module.types.double)
     }
 }
 
@@ -600,17 +622,10 @@ unsafe fn coerce_after_load(builder: &LLVMBuilder, class_id: ClassId, val: LLVMV
 }
 
 unsafe fn emit_basic_block(
-    env: &ClassEnvironment,
+    module: &MochaModule,
     func: &MilFunction,
     cfg: &FlowGraph<MilBlockId>,
     block_id: MilBlockId,
-    known_objects: &MilKnownObjectMap,
-    obj_map: &HashMap<NonNull<u8>, LLVMValueRef>,
-    func_map: &HashMap<MethodId, LLVMValueRef>,
-    types: &LLVMTypes,
-    builtins: &LLVMMochaBuiltins,
-    ctx: &LLVMContext,
-    module: &LLVMModule,
     builder: &LLVMBuilder,
     llvm_func: LLVMValueRef,
     locals: &mut HashMap<MilLocalId, LLVMValueRef>,
@@ -622,7 +637,7 @@ unsafe fn emit_basic_block(
 
     let block = &func.blocks[&block_id];
     let block_name = CString::new(format!("{}", block.id)).unwrap();
-    let llvm_block = LLVMAppendBasicBlockInContext(ctx.ptr(), llvm_func, block_name.as_ptr());
+    let llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, block_name.as_ptr());
     let llvm_start_block = llvm_block;
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
@@ -633,7 +648,7 @@ unsafe fn emit_basic_block(
         } else {
             let phi = LLVMBuildPhi(
                 builder.ptr(),
-                native_arg_type(func.reg_map.info[&reg].ty, types),
+                native_arg_type(func.reg_map.info[&reg].ty, &module.types),
                 register_name(reg).as_ptr()
             );
 
@@ -648,11 +663,11 @@ unsafe fn emit_basic_block(
     for phi in block.phi_nodes.iter() {
         let llvm_phi = LLVMBuildPhi(
             builder.ptr(),
-            native_arg_type(func.reg_map.info[&phi.target].ty, types),
+            native_arg_type(func.reg_map.info[&phi.target].ty, &module.types),
             register_name(phi.target).as_ptr()
         );
 
-        set_register(&builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, types);
+        set_register(&builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
 
         for (src, pred) in phi.sources.iter().cloned() {
             phis_to_add.push((llvm_phi, pred, src));
@@ -663,22 +678,22 @@ unsafe fn emit_basic_block(
         match instr.kind {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(tgt, ref src) => {
-                let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, src, types);
+                let src = create_value_ref(&module, src, &local_regs);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, src, &module.types);
             },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
-                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+                let val = create_value_ref(&module, val, &local_regs);
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
                     MilUnOp::INeg => LLVMBuildNeg(
                         builder.ptr(),
                         val,
                         register_name(tgt).as_ptr()
                     )
-                }, types);
+                }, &module.types);
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
-                let lhs = create_value_ref(lhs, &local_regs, known_objects, obj_map, types);
-                let rhs = create_value_ref(rhs, &local_regs, known_objects, obj_map, types);
+                let lhs = create_value_ref(&module, lhs, &local_regs);
+                let rhs = create_value_ref(&module, rhs, &local_regs);
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
                     MilBinOp::IAdd => LLVMBuildAdd(
                         builder.ptr(),
@@ -710,7 +725,7 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(types.int, 0x1f, 0),
+                            LLVMConstInt(module.types.int, 0x1f, 0),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
@@ -721,7 +736,7 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(types.int, 0x1f, 0),
+                            LLVMConstInt(module.types.int, 0x1f, 0),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
@@ -732,25 +747,25 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(types.int, 0x1f, 0),
+                            LLVMConstInt(module.types.int, 0x1f, 0),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
                     )
-                }, types);
+                }, &module.types);
             },
             MilInstructionKind::GetParam(idx, _, tgt) => {
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMGetParam(llvm_func, idx as u32), types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMGetParam(llvm_func, idx as u32), &module.types);
             },
             MilInstructionKind::GetLocal(local_id, tgt) => {
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildLoad(
                     builder.ptr(),
                     locals[&local_id],
                     register_name(tgt).as_ptr() as *const c_char
-                ), types);
+                ), &module.types);
             },
             MilInstructionKind::SetLocal(local_id, ref src) => {
-                let src = create_value_ref(src, &local_regs, known_objects, obj_map, types);
+                let src = create_value_ref(&module, src, &local_regs);
                 let local_ptr = locals[&local_id];
 
                 LLVMBuildStore(
@@ -760,119 +775,119 @@ unsafe fn emit_basic_block(
                 );
             },
             MilInstructionKind::GetField(field_id, class_id, tgt, ref obj) => {
-                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                let obj = create_value_ref(&module, obj, &local_regs);
 
                 let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
                     builder.ptr(),
-                    create_instance_field_gep(&builder, field_id, obj, known_objects, obj_map, types),
+                    create_instance_field_gep(&builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types),
                     register_name(tgt).as_ptr() as *const c_char
-                ), types);
+                ), &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutField(field_id, class_id, ref obj, ref val) => {
-                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
-                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+                let obj = create_value_ref(&module, obj, &local_regs);
+                let val = create_value_ref(&module, val, &local_regs);
 
                 LLVMBuildStore(
                     builder.ptr(),
-                    coerce_before_store(builder, class_id, val, types),
-                    create_instance_field_gep(&builder, field_id, obj, known_objects, obj_map, types)
+                    coerce_before_store(builder, class_id, val, &module.types),
+                    create_instance_field_gep(&builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types)
                 );
             },
             MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+                let obj = create_value_ref(&module, obj, &local_regs);
 
                 set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildLoad(
                     builder.ptr(),
-                    create_instance_field_gep(&builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, known_objects, obj_map, types),
+                    create_instance_field_gep(&builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, &module.known_objs, &module.obj_map, &module.types),
                     register_name(tgt).as_ptr() as *const c_char
-                ), types);
+                ), &module.types);
             },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
-                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
-                let mut idx = create_value_ref(idx, &local_regs, known_objects, obj_map, types);
+                let obj = create_value_ref(&module, obj, &local_regs);
+                let idx = create_value_ref(&module, idx, &local_regs);
 
-                let arr_data = create_instance_field_gep(&builder, FieldId(env.try_find_array(class_id).unwrap(), 1), obj, known_objects, obj_map, types);
+                let arr_data = create_instance_field_gep(&builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
 
                 let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
                     builder.ptr(),
                     LLVMBuildGEP(
                         builder.ptr(),
                         arr_data,
-                        [LLVMConstInt(types.int, 0, 1), idx].as_mut_ptr(),
+                        [LLVMConstInt(module.types.int, 0, 1), idx].as_mut_ptr(),
                         2,
                         "\0".as_ptr() as *const c_char
                     ),
                     register_name(tgt).as_ptr() as *const c_char
-                ), types);
+                ), &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutArrayElement(class_id, ref obj, ref idx, ref val) => {
-                let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
-                let mut idx = create_value_ref(idx, &local_regs, known_objects, obj_map, types);
-                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+                let obj = create_value_ref(&module, obj, &local_regs);
+                let idx = create_value_ref(&module, idx, &local_regs);
+                let val = create_value_ref(&module, val, &local_regs);
 
-                let arr_data = create_instance_field_gep(&builder, FieldId(env.try_find_array(class_id).unwrap(), 1), obj, known_objects, obj_map, types);
+                let arr_data = create_instance_field_gep(&builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
 
                 LLVMBuildStore(
                     builder.ptr(),
-                    coerce_before_store(builder, class_id, val, types),
+                    coerce_before_store(builder, class_id, val, &module.types),
                     LLVMBuildGEP(
                         builder.ptr(),
                         arr_data,
-                        [LLVMConstInt(types.int, 0, 1), idx].as_mut_ptr(),
+                        [LLVMConstInt(module.types.int, 0, 1), idx].as_mut_ptr(),
                         2,
                         "\0".as_ptr() as *const c_char
                     )
                 );
             },
             MilInstructionKind::GetStatic(field_id, class_id, tgt) => {
-                let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
+                let class_obj = module.find_class_object(class_id);
 
                 let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
                     builder.ptr(),
-                    create_meta_field_gep(&builder, field_id, known_objects, obj_map, types),
+                    create_meta_field_gep(&builder, field_id, &module.known_objs, &module.obj_map, &module.types),
                     register_name(tgt).as_ptr() as *const c_char
-                ), types);
+                ), &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutStatic(field_id, class_id, ref val) => {
-                let val = create_value_ref(val, &local_regs, known_objects, obj_map, types);
+                let val = create_value_ref(&module, val, &local_regs);
 
                 LLVMBuildStore(
                     builder.ptr(),
-                    coerce_before_store(builder, class_id, val, types),
-                    create_meta_field_gep(&builder, field_id, known_objects, obj_map, types)
+                    coerce_before_store(builder, class_id, val, &module.types),
+                    create_meta_field_gep(&builder, field_id, &module.known_objs, &module.obj_map, &module.types)
                 );
             },
             MilInstructionKind::AllocObj(class_id, tgt) => {
                 let obj = LLVMBuildCall(
                     builder.ptr(),
-                    builtins.alloc_obj,
+                    module.builtins.alloc_obj,
                     [
                         LLVMConstPointerCast(
-                            types.class_types[&class_id].vtable,
-                            types.any_raw_pointer
+                            module.types.class_types[&class_id].vtable,
+                            module.types.any_raw_pointer
                         )
                     ].as_mut_ptr(),
                     1,
                     register_name(tgt).as_ptr() as *const c_char
                 );
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
-                let len = create_value_ref(len, &local_regs, known_objects, obj_map, types);
+                let len = create_value_ref(&module, len, &local_regs);
                 let obj = LLVMBuildCall(
                     builder.ptr(),
-                    builtins.alloc_array,
+                    module.builtins.alloc_array,
                     [
                         LLVMConstPointerCast(
-                            types.class_types[&class_id].vtable,
-                            types.any_raw_pointer
+                            module.types.class_types[&class_id].vtable,
+                            module.types.any_raw_pointer
                         ),
                         len
                     ].as_mut_ptr(),
@@ -880,7 +895,7 @@ unsafe fn emit_basic_block(
                     register_name(tgt).as_ptr() as *const c_char
                 );
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, types);
+                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             }
         };
     };
@@ -889,29 +904,29 @@ unsafe fn emit_basic_block(
         MilEndInstructionKind::Nop => {},
         MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
             let mut args = args.iter()
-                .map(|o| create_value_ref(o, &local_regs, known_objects, obj_map, types))
+                .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
             set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
                 builder.ptr(),
-                func_map[&method_id],
+                module.methods[&method_id],
                 args.as_mut_ptr(),
                 args.len() as u32,
                 register_name(tgt).as_ptr() as *const c_char
-            ), types);
+            ), &module.types);
         },
         MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
-            let (_, method) = env.get_method(method_id);
-            let obj = create_value_ref(obj, &local_regs, known_objects, obj_map, types);
+            let (_, method) = module.env.get_method(method_id);
+            let obj = create_value_ref(&module, obj, &local_regs);
             let mut args = args.iter()
-                .map(|o| create_value_ref(o, &local_regs, known_objects, obj_map, types))
+                .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
             let vslot = LLVMBuildLoad(
                 builder.ptr(),
                 LLVMBuildStructGEP(
                     builder.ptr(),
-                    create_vtable_load(&builder, obj, method_id.0, types),
+                    create_vtable_load(&builder, obj, method_id.0, &module.types),
                     VTABLE_FIRST_VSLOT_FIELD as u32 + method.virtual_slot,
                     b"\0".as_ptr() as *const c_char
                 ),
@@ -923,28 +938,28 @@ unsafe fn emit_basic_block(
                 LLVMBuildPointerCast(
                     builder.ptr(),
                     vslot,
-                    LLVMPointerType(types.method_types[&method_id], 0),
+                    LLVMPointerType(module.types.method_types[&method_id], 0),
                     "\0".as_ptr() as *const c_char
                 ),
                 args.as_mut_ptr(),
                 args.len() as u32,
                 register_name(tgt).as_ptr() as *const c_char
-            ), types);
+            ), &module.types);
         },
         MilEndInstructionKind::CallNative(ret_ty, ref name, tgt, ref args) => {
-            let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), types)).collect_vec();
+            let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), &module.types)).collect_vec();
             let mut args = args.iter()
-                .map(|o| create_value_ref(o, &local_regs, known_objects, obj_map, types))
+                .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
             let func_ty = LLVMFunctionType(
-                native_arg_type(MilType::for_class(ret_ty), types),
+                native_arg_type(MilType::for_class(ret_ty), &module.types),
                 arg_tys.as_mut_ptr(),
                 arg_tys.len() as u32,
                 0
             );
             let name = CString::new(name.as_str()).unwrap();
-            let native_func = LLVMAddFunction(module.ptr(), name.as_ptr(), func_ty);
+            let native_func = LLVMAddFunction(module.module.ptr(), name.as_ptr(), func_ty);
 
             set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
                 builder.ptr(),
@@ -952,14 +967,14 @@ unsafe fn emit_basic_block(
                 args.as_mut_ptr(),
                 args.len() as u32,
                 register_name(tgt).as_ptr() as *const c_char
-            ), types);
+            ), &module.types);
         },
         MilEndInstructionKind::Throw(ref exception) => {
-            let exception = create_value_ref(exception, &local_regs, known_objects, obj_map, types);
+            let exception = create_value_ref(&module, exception, &local_regs);
 
             LLVMBuildCall(
                 builder.ptr(),
-                builtins.throw,
+                module.builtins.throw,
                 [exception].as_mut_ptr(),
                 1,
                 "\0".as_ptr() as *const c_char
@@ -972,8 +987,8 @@ unsafe fn emit_basic_block(
         MilEndInstructionKind::Return(ref val) => {
             let val = LLVMBuildBitCast(
                 builder.ptr(),
-                create_value_ref(val, &local_regs, known_objects, obj_map, types),
-                LLVMGetReturnType(types.method_types[&func.id]),
+                create_value_ref(&module, val, &local_regs),
+                LLVMGetReturnType(module.types.method_types[&func.id]),
                 b"\0".as_ptr() as *const c_char
             );
 
@@ -981,8 +996,8 @@ unsafe fn emit_basic_block(
         },
         MilEndInstructionKind::Jump(_) => {},
         MilEndInstructionKind::JumpIf(cond, _, ref lhs, ref rhs) => {
-            let lhs = create_value_ref(lhs, &local_regs, known_objects, obj_map, types);
-            let rhs = create_value_ref(rhs, &local_regs, known_objects, obj_map, types);
+            let lhs = create_value_ref(&module, lhs, &local_regs);
+            let rhs = create_value_ref(&module, rhs, &local_regs);
 
             let cond = match cond {
                 MilComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
@@ -1002,16 +1017,16 @@ unsafe fn emit_basic_block(
     llvm_blocks.insert(block_id, (llvm_start_block, llvm_block));
 }
 
-unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, builtins: &LLVMMochaBuiltins, ctx: &LLVMContext, module: &LLVMModule) {
+unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let cfg = FlowGraph::for_function(func);
 
-    let llvm_func = func_map[&func.id];
-    let builder = ctx.create_builder();
+    let llvm_func = module.methods[&func.id];
+    let builder = module.ctx.create_builder();
 
     let mut llvm_blocks = HashMap::new();
 
     let mut locals = HashMap::new();
-    let start_block = LLVMAppendBasicBlockInContext(ctx.ptr(), llvm_func, b"start\0".as_ptr() as *const c_char);
+    let start_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"start\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
 
     for (&local_id, local) in func.reg_map.local_info.iter() {
@@ -1019,7 +1034,7 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
             local_id,
             LLVMBuildAlloca(
                 builder.ptr(),
-                native_arg_type(local.ty, types),
+                native_arg_type(local.ty, &module.types),
                 local_name(local_id).as_ptr() as *const c_char
             )
         );
@@ -1029,7 +1044,7 @@ unsafe fn emit_function(env: &ClassEnvironment, func: &MilFunction, known_object
     let mut phis_to_add = vec![];
 
     for block_id in func.block_order.iter().cloned() {
-        emit_basic_block(env, func, &cfg, block_id, known_objects, obj_map, func_map, types, builtins, ctx, module, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
+        emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
     };
 
     for (phi, pred, reg) in phis_to_add {
@@ -1093,77 +1108,78 @@ unsafe fn emit_main_function(env: &ClassEnvironment, main_method: MethodId, func
     LLVMBuildRet(builder.ptr(), LLVMConstInt(types.int, 0, 1));
 }
 
-unsafe fn emit_vtable(env: &ClassEnvironment, class_id: ClassId, methods: &HashMap<MethodId, LLVMValueRef>, class_obj: LLVMValueRef, liveness: &LivenessInfo, types: &LLVMTypes, ctx: &LLVMContext, module: &LLVMModule) {
-    let vslot_class = match **env.get(class_id) {
+unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
+    let class_obj = module.find_class_object(class_id);
+    let vslot_class = match **module.env.get(class_id) {
         ResolvedClass::User(ref class) => Some(class),
-        ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
+        ResolvedClass::Array(_) => Some(module.env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
         _ => None
     };
 
     let vslots = if let Some(vslot_class) = vslot_class {
         vslot_class.layout.virtual_slots.iter().cloned().map(|method_id| {
-            methods.get(&method_id).cloned().map_or_else(
-                || LLVMConstNull(types.any_function_pointer),
-                |f| LLVMConstBitCast(f, types.any_function_pointer)
+            module.methods.get(&method_id).cloned().map_or_else(
+                || LLVMConstNull(module.types.any_function_pointer),
+                |f| LLVMConstBitCast(f, module.types.any_function_pointer)
             )
         }).collect_vec()
     } else {
         vec![]
     };
 
-    let (flags, size, type_specific_info) = match **env.get(class_id) {
-        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(types.long, 0, 0)),
+    let (flags, size, type_specific_info) = match **module.env.get(class_id) {
+        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(module.types.long, 0, 0)),
         ResolvedClass::Array(elem_id) => (
             0x0002,
             layout::get_array_header_size(
-                layout::get_field_size_align(env, elem_id).1
+                layout::get_field_size_align(module.env, elem_id).1
             ).try_into().unwrap(),
             LLVMConstIntCast(
                 LLVMConstAdd(
-                    LLVMConstPointerCast(types.class_types[&elem_id].vtable, types.long),
-                    LLVMConstInt(types.long, 8, 0)
+                    LLVMConstPointerCast(module.types.class_types[&elem_id].vtable, module.types.long),
+                    LLVMConstInt(module.types.long, 8, 0)
                 ),
-                types.long,
+                module.types.long,
                 0
             )
         ),
-        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(types.long, b'V'.into(), 0)),
-        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(types.long, ty.as_char().into(), 0))
+        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(module.types.long, b'V'.into(), 0)),
+        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(module.types.long, ty.as_char().into(), 0))
     };
 
     let mut vtable_fields = [
-        LLVMConstInt(types.int, size.into(), 0),
-        LLVMConstInt(types.short, 0, 0),
-        LLVMConstInt(types.short, flags, 0),
-        LLVMConstInt(types.short, 0, 0),
-        LLVMConstInt(types.short, 0, 0),
-        if let Some(array_class_id) = env.try_find_array(class_id) {
+        LLVMConstInt(module.types.int, size.into(), 0),
+        LLVMConstInt(module.types.short, 0, 0),
+        LLVMConstInt(module.types.short, flags, 0),
+        LLVMConstInt(module.types.short, 0, 0),
+        LLVMConstInt(module.types.short, 0, 0),
+        if let Some(array_class_id) = module.env.try_find_array(class_id) {
             if liveness.may_construct.contains(&array_class_id) {
                 LLVMConstIntCast(
                     LLVMConstAdd(
-                        LLVMConstPointerCast(types.class_types[&array_class_id].vtable, types.long),
-                        LLVMConstInt(types.long, 8, 0)
+                        LLVMConstPointerCast(module.types.class_types[&array_class_id].vtable, module.types.long),
+                        LLVMConstInt(module.types.long, 8, 0)
                     ),
-                    types.int,
+                    module.types.int,
                     0
                 )
             } else {
-                LLVMConstInt(types.int, 0, 0)
+                LLVMConstInt(module.types.int, 0, 0)
             }
         } else {
-            LLVMConstInt(types.int, 0, 0)
+            LLVMConstInt(module.types.int, 0, 0)
         },
         type_specific_info,
-        LLVMConstNull(LLVMPointerType(types.int, 0)),
+        LLVMConstNull(LLVMPointerType(module.types.int, 0)),
         class_obj,
-        LLVMConstNull(LLVMPointerType(types.int, 0))
+        LLVMConstNull(LLVMPointerType(module.types.int, 0))
     ]
         .iter().cloned()
         .chain(vslots)
         .collect_vec();
 
     let vtable_value = LLVMConstStruct(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0);
-    LLVMSetInitializer(types.class_types[&class_id].vtable, vtable_value);
+    LLVMSetInitializer(module.types.class_types[&class_id].vtable, vtable_value);
 }
 
 unsafe fn value_to_llvm(val: Value, class_id: ClassId, types: &LLVMTypes, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>) -> LLVMValueRef {
@@ -1189,16 +1205,16 @@ unsafe fn value_to_llvm(val: Value, class_id: ClassId, types: &LLVMTypes, obj_ma
     }
 }
 
-unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRef<'a>, llvm_obj: LLVMValueRef, types: &LLVMTypes, module: &LLVMModule, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>) {
-    let class_type = &types.class_types[&obj.class_id()];
+unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<'a>) {
+    let class_type = &module.types.class_types[&obj.class_id()];
     let (ty, meta_class) = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        let meta_class = &types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)];
+        let meta_class = &module.types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)];
         (meta_class.meta_ty, Some(meta_class))
     } else {
         (class_type.value_ty, None)
     };
 
-    let elem_class = match **env.get(obj.class_id()) {
+    let elem_class = match **module.env.get(obj.class_id()) {
         ResolvedClass::Array(elem_class) => Some(elem_class),
         _ => None
     };
@@ -1211,53 +1227,53 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
     // i64, adding a constant, then converting to i32 works correctly.
     field_values[0] = LLVMConstIntCast(
         LLVMConstAdd(
-            LLVMConstPointerCast(class_type.vtable, types.long),
-            LLVMConstInt(types.long, 8, 0)
+            LLVMConstPointerCast(class_type.vtable, module.types.long),
+            LLVMConstInt(module.types.long, 8, 0)
         ),
-        types.int,
+        module.types.int,
         0
     );
-    field_values[1] = LLVMConstInt(types.int, obj.flags().bits() as u64, 0);
+    field_values[1] = LLVMConstInt(module.types.int, obj.flags().bits() as u64, 0);
 
     let array_data = if let Some(elem_class) = elem_class {
-        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = LLVMConstInt(types.int, obj.read_array_length() as u64, 0);
-        field_values[class_type.fields[&FieldId(obj.class_id(), 1)] as usize] = LLVMConstArray(types.class_types[&elem_class].field_ty, std::ptr::null_mut(), 0);
+        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = LLVMConstInt(module.types.int, obj.read_array_length() as u64, 0);
+        field_values[class_type.fields[&FieldId(obj.class_id(), 1)] as usize] = LLVMConstArray(module.types.class_types[&elem_class].field_ty, std::ptr::null_mut(), 0);
 
         let mut elements = (0..obj.read_array_length())
-            .map(|i| value_to_llvm(obj.read_array_element(i), elem_class, types, obj_map))
+            .map(|i| value_to_llvm(obj.read_array_element(i), elem_class, &module.types, &module.obj_map))
             .collect_vec();
 
         Some(LLVMConstArray(
-            types.class_types[&elem_class].field_ty,
+            module.types.class_types[&elem_class].field_ty,
             elements.as_mut_ptr(),
             elements.len() as u32
         ))
     } else {
         for (&f, &i) in class_type.fields.iter() {
-            let field_ty = env.get_field(f).1.class_id;
+            let field_ty = module.env.get_field(f).1.class_id;
 
-            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, types, obj_map);
+            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, &module.types, &module.obj_map);
         };
         None
     };
 
     for (i, size) in class_type.pads.iter().cloned() {
-        let mut data = vec![LLVMConstInt(types.byte, 0, 0); size as usize];
-        field_values[i as usize] = LLVMConstArray(types.byte, data.as_mut_ptr(), size);
+        let mut data = vec![LLVMConstInt(module.types.byte, 0, 0); size as usize];
+        field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
     };
 
     assert!(!field_values.iter().any(|&val| val.is_null()));
 
     if let Some(meta_class) = meta_class {
         let vtable_value = if meta_class.vtable.is_null() {
-            LLVMConstInt(types.int, 0, 0)
+            LLVMConstInt(module.types.int, 0, 0)
         } else {
             LLVMConstIntCast(
                 LLVMConstAdd(
-                    LLVMConstPointerCast(meta_class.vtable, types.long),
-                    LLVMConstInt(types.long, 8, 0)
+                    LLVMConstPointerCast(meta_class.vtable, module.types.long),
+                    LLVMConstInt(module.types.long, 8, 0)
                 ),
-                types.int,
+                module.types.int,
                 0
             )
         };
@@ -1269,14 +1285,14 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
         field_values[0] = class;
 
         for (&f, &i) in meta_class.meta_fields.iter() {
-            let field_ty = env.get_field(f).1.class_id;
+            let field_ty = module.env.get_field(f).1.class_id;
 
-            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, types, obj_map);
+            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, &module.types, &module.obj_map);
         };
 
         for (i, size) in meta_class.meta_pads.iter().cloned() {
-            let mut data = vec![LLVMConstInt(types.byte, 0, 0); size as usize];
-            field_values[i as usize] = LLVMConstArray(types.byte, data.as_mut_ptr(), size);
+            let mut data = vec![LLVMConstInt(module.types.byte, 0, 0); size as usize];
+            field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
         };
 
         assert!(!field_values.iter().any(|&val| val.is_null()));
@@ -1290,27 +1306,32 @@ unsafe fn emit_static_heap_object<'a>(env: &ClassEnvironment, obj: &JavaStaticRe
         value
     };
 
-    LLVMSetInitializer(llvm_obj, value);
+    LLVMSetInitializer(module.obj_map[&obj.as_ptr()], value);
 }
 
-unsafe fn define_static_heap_object<'a>(env: &ClassEnvironment, name: &CString, obj: &JavaStaticRef<'a>, types: &LLVMTypes, module: &LLVMModule) -> LLVMValueRef {
+unsafe fn define_static_heap_object<'a>(module: &MochaModule, name: &CString, obj: &JavaStaticRef<'a>) -> LLVMValueRef {
     let ty = if obj.class_id() == ClassId::JAVA_LANG_CLASS {
-        types.class_types[&ClassId(obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)].meta_ty
+        module.types.class_types[&ClassId(
+            obj.read_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32
+        )].meta_ty
     } else {
-        match **env.get(obj.class_id()) {
+        match **module.env.get(obj.class_id()) {
             ResolvedClass::Array(elem_class) => {
                 let mut fields = [
-                    types.class_types[&obj.class_id()].value_ty,
-                    LLVMArrayType(types.class_types[&elem_class].field_ty, obj.read_array_length() as u32)
+                    module.types.class_types[&obj.class_id()].value_ty,
+                    LLVMArrayType(
+                        module.types.class_types[&elem_class].field_ty,
+                        obj.read_array_length() as u32
+                    )
                 ];
 
                 LLVMStructType(fields.as_mut_ptr(), fields.len() as u32, 1)
             },
-            _ => types.class_types[&obj.class_id()].value_ty
+            _ => module.types.class_types[&obj.class_id()].value_ty
         }
     };
 
-    let global = LLVMAddGlobalInAddressSpace(module.ptr(), ty, name.as_ptr(), 1);
+    let global = LLVMAddGlobalInAddressSpace(module.module.ptr(), ty, name.as_ptr(), 1);
     LLVMSetSection(global, b".mocha_static_heap\0".as_ptr() as *const c_char);
     LLVMSetAlignment(global, 16);
 
@@ -1324,55 +1345,56 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
     unsafe {
         let builtins = declare_builtins(&module, &types);
 
-        let objs = heap.all_objs();
-        let mut obj_map = HashMap::new();
+        let mut module = MochaModule {
+            env,
+            ctx,
+            module: &module,
+            types,
+            builtins,
+            objs: heap.all_objs(),
+            known_objs: &program.known_objects,
+            obj_map: HashMap::new(),
+            methods: HashMap::new()
+        };
 
-        for (i, obj) in objs.iter().enumerate() {
+        for (i, obj) in module.objs.iter().enumerate() {
             let name = CString::new(format!("obj_{}_{}", i, obj.class().name(env))).unwrap();
 
-            obj_map.insert(
+            module.obj_map.insert(
                 obj.as_ptr(),
-                define_static_heap_object(env, &name, obj, &types, &module)
+                define_static_heap_object(&module, &name, obj)
             );
         };
 
-        let mut methods = HashMap::new();
         for method_id in liveness.may_call.iter().cloned() {
             if let Some(func) = program.funcs.get(&method_id) {
-                methods.insert(
+                module.methods.insert(
                     method_id,
-                    define_function(env, func, &types, &module)
+                    define_function(&module, func)
                 );
             };
         };
 
         for class_id in liveness.needs_class_object.iter().cloned() {
-            emit_vtable(env, class_id, &methods, obj_map[&program.known_objects.get(program.known_objects.refs.classes[&class_id]).as_ptr()], liveness, &types, ctx, &module);
+            emit_vtable(&module, class_id, liveness);
         };
 
-        for obj in objs.iter() {
-            emit_static_heap_object(
-                env,
-                obj,
-                obj_map[&obj.as_ptr()],
-                &types,
-                &module,
-                &obj_map
-            );
+        for obj in module.objs.iter() {
+            emit_static_heap_object(&module, obj);
         };
 
         for method_id in liveness.may_call.iter().cloned() {
             if let Some(func) = program.funcs.get(&method_id) {
-                emit_function(env, func, &program.known_objects, &obj_map, &methods, &types, &builtins, ctx, &module);
+                emit_function(&module, func);
             };
         };
 
-        emit_main_function(env, program.main_method, &methods, &types, &module, ctx);
+        emit_main_function(env, program.main_method, &module.methods, &module.types, &module.module, ctx);
 
         if verbose {
-            LLVMDumpModule(module.ptr());
+            LLVMDumpModule(module.module.ptr());
         };
-        LLVMVerifyModule(module.ptr(), LLVMVerifierFailureAction::LLVMAbortProcessAction, std::ptr::null_mut());
+        LLVMVerifyModule(module.module.ptr(), LLVMVerifierFailureAction::LLVMAbortProcessAction, std::ptr::null_mut());
     };
 
     module
