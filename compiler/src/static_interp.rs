@@ -791,6 +791,29 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Long(val as i64));
             },
+            BytecodeInstruction::L2I => {
+                let val = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Int(val as i32));
+            },
+            BytecodeInstruction::I2F => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Float((val as f32).to_bits()));
+            },
+            BytecodeInstruction::F2I => {
+                let val = f32::from_bits(state.stack.pop().as_float().unwrap());
+
+                state.stack.push(Value::Int(
+                    if val.is_nan() {
+                        0
+                    } else if val < (i32::min_value() as f32) {
+                        i32::min_value()
+                    } else if val > (i32::max_value() as f32) {
+                        i32::max_value()
+                    } else {
+                        val as i32
+                    }
+                ));
+            },
             BytecodeInstruction::INeg => {
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(val.wrapping_neg()));
@@ -835,20 +858,60 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(o1 << (o2 & 0x1f)));
             },
+            BytecodeInstruction::IAnd => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1 & o2));
+            },
+            BytecodeInstruction::IOr => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1 | o2));
+            },
             BytecodeInstruction::LAdd => {
                 let o2 = state.stack.pop().as_long().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1.wrapping_add(o2)));
+            },
+            BytecodeInstruction::LMul => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1.wrapping_mul(o2)));
             },
             BytecodeInstruction::LAnd => {
                 let o2 = state.stack.pop().as_long().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1 & o2));
             },
+            BytecodeInstruction::LShr => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1 >> (o2 as i64)));
+            },
+            BytecodeInstruction::LUShr => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(((o1 as u64) >> (o2 as u64)) as i64));
+            },
             BytecodeInstruction::LShl => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1 << (o2 as i64)));
+            },
+            BytecodeInstruction::FCmpG => {
+                let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                state.stack.push(Value::Int(if o1 > o2 { 1 } else { 0 }));
+            },
+            BytecodeInstruction::FCmpL => {
+                let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                state.stack.push(Value::Int(if o1 < o2 { 1 } else { 0 }));
+            },
+            BytecodeInstruction::FMul => {
+                let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                state.stack.push(Value::Float((o1 * o2).to_bits()));
             },
             BytecodeInstruction::New(idx) => {
                 match state.class.constant_pool[idx as usize] {
