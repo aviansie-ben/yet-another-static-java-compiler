@@ -6,7 +6,8 @@ use lazy_static::lazy_static;
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeData, Class, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodFlags, MethodSummary, PrimitiveType};
 use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, ResolvedClass};
-use crate::static_heap::{ObjectFlags, JavaStaticHeap, JavaStaticRef};
+use crate::layout;
+use crate::static_heap::{self, ObjectFlags, JavaStaticHeap, JavaStaticRef};
 
 fn add_may_virtual_call(summary: &mut MethodSummary, method_id: MethodId) {
     if method_id.0 != ClassId::UNRESOLVED && !summary.may_virtual_call.contains(&method_id) {
@@ -381,6 +382,65 @@ fn native_arraycopy(state: &mut InterpreterState) -> Result<(), StaticInterpretE
     Result::Ok(())
 }
 
+fn native_unsafe_get_array_base(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_obj = if let Some(class_obj) = state.stack.pop().into_ref().unwrap() {
+        class_obj
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+    let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
+
+    if state.stack.pop().into_ref().unwrap().is_none() {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    let elem_class_id = if let ResolvedClass::Array(elem_class_id) = **state.env.get(class_id) {
+        elem_class_id
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    state.stack.push(Value::Int(
+        layout::get_array_header_size(layout::get_field_size_align(state.env, elem_class_id).1) as i32
+    ));
+
+    Result::Ok(())
+}
+
+fn native_unsafe_get_array_scale(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_obj = if let Some(class_obj) = state.stack.pop().into_ref().unwrap() {
+        class_obj
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+    let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
+
+    if state.stack.pop().into_ref().unwrap().is_none() {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    let elem_class_id = if let ResolvedClass::Array(elem_class_id) = **state.env.get(class_id) {
+        elem_class_id
+    } else {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    state.stack.push(Value::Int(
+        layout::get_field_size_align(state.env, elem_class_id).0 as i32
+    ));
+
+    Result::Ok(())
+}
+
+fn native_unsafe_address_size(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    if state.stack.pop().into_ref().unwrap().is_none() {
+        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    state.stack.push(Value::Int(8));
+    Result::Ok(())
+}
+
 type StaticNative = fn (&mut InterpreterState) -> Result<(), StaticInterpretError>;
 
 lazy_static! {
@@ -390,6 +450,23 @@ lazy_static! {
         known_natives.insert("java/lang/Object.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/Thread.registerNatives()V", native_nop as StaticNative);
         known_natives.insert("java/lang/System.registerNatives()V", native_nop as StaticNative);
+        known_natives.insert("sun/misc/Unsafe.registerNatives()V", native_nop as StaticNative);
+
+        known_natives.insert("java/io/FileInputStream.initIDs()V", native_nop as StaticNative);
+        known_natives.insert("java/io/FileDescriptor.initIDs()V", native_nop as StaticNative);
+
+        known_natives.insert(
+            "sun/misc/Unsafe.arrayBaseOffset(Ljava/lang/Class;)I",
+            native_unsafe_get_array_base as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.arrayIndexScale(Ljava/lang/Class;)I",
+            native_unsafe_get_array_scale as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.addressSize()I",
+            native_unsafe_address_size as StaticNative
+        );
 
         known_natives.insert(
             "java/lang/Object.getClass()Ljava/lang/Class;",
@@ -672,6 +749,15 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::IConst(val) => {
                 state.stack.push(Value::Int(val));
             },
+            BytecodeInstruction::LConst(val) => {
+                state.stack.push(Value::Long(val));
+            },
+            BytecodeInstruction::FConst(val) => {
+                state.stack.push(Value::Float(val));
+            },
+            BytecodeInstruction::DConst(val) => {
+                state.stack.push(Value::Double(val));
+            },
             BytecodeInstruction::Dup => {
                 let val = state.stack.peek().clone();
                 state.stack.push(val);
@@ -889,6 +975,18 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     },
                     _ => unreachable!()
                 };
+            },
+            BytecodeInstruction::LCmp => {
+                let rhs = state.stack.pop().as_long().unwrap();
+                let lhs = state.stack.pop().as_long().unwrap();
+
+                state.stack.push(Value::Int(
+                    match lhs.cmp(&rhs) {
+                        std::cmp::Ordering::Equal => 0,
+                        std::cmp::Ordering::Greater => 1,
+                        std::cmp::Ordering::Less => -1
+                    }
+                ));
             },
             BytecodeInstruction::If(cond, dest) => {
                 let operand = state.stack.pop().as_int().unwrap();
