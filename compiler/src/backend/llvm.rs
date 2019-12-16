@@ -181,6 +181,38 @@ impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
     fn find_class_object(&self, class_id: ClassId) -> LLVMValueRef {
         self.find_known_object(self.known_objs.refs.classes[&class_id])
     }
+
+    fn const_obj_null(&self) -> LLVMValueRef {
+        unsafe { LLVMConstNull(self.types.any_object_pointer) }
+    }
+
+    fn const_bool(&self, val: bool) -> LLVMValueRef {
+        unsafe { LLVMConstInt(self.types.bool, if val { 1 } else { 0 }, 0) }
+    }
+
+    fn const_byte(&self, val: i8) -> LLVMValueRef {
+        unsafe { LLVMConstInt(self.types.byte, (val as u8).into(), 0) }
+    }
+
+    fn const_short(&self, val: i16) -> LLVMValueRef {
+        unsafe { LLVMConstInt(self.types.short, (val as u16).into(), 0) }
+    }
+
+    fn const_int(&self, val: i32) -> LLVMValueRef {
+        unsafe { LLVMConstInt(self.types.int, (val as u32).into(), 0) }
+    }
+
+    fn const_long(&self, val: i64) -> LLVMValueRef {
+        unsafe { LLVMConstInt(self.types.long, (val as u64).into(), 0) }
+    }
+
+    fn const_float(&self, bits: u32) -> LLVMValueRef {
+        unsafe { LLVMConstBitCast(LLVMConstInt(self.types.int, bits.into(), 0), self.types.float) }
+    }
+
+    fn const_double(&self, bits: u64) -> LLVMValueRef {
+        unsafe { LLVMConstBitCast(LLVMConstInt(self.types.long, bits.into(), 0), self.types.double) }
+    }
 }
 
 unsafe fn lay_out_fields(env: &ClassEnvironment, fields: impl IntoIterator<Item=(FieldId, u32)>, llvm_fields: &mut Vec<LLVMTypeRef>, field_map: &mut HashMap<FieldId, usize>, pads: &mut Vec<(u32, u32)>, mut current_size: u32, types: &LLVMTypes) {
@@ -455,16 +487,16 @@ unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValue
 unsafe fn create_value_ref(module: &MochaModule, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValueRef>) -> LLVMValueRef {
     match *op {
         MilOperand::Register(r) => regs[&r],
-        MilOperand::Null => LLVMConstNull(module.types.any_object_pointer),
+        MilOperand::Null => module.const_obj_null(),
         MilOperand::KnownObject(object_id, _) => LLVMConstPointerCast(
             module.find_known_object(object_id),
             module.types.any_object_pointer
         ),
-        MilOperand::Bool(val) => LLVMConstInt(module.types.bool, if val { 1 } else { 0 }, 0),
-        MilOperand::Int(val) => LLVMConstInt(module.types.int, val as u64, 1),
-        MilOperand::Long(val) => LLVMConstInt(module.types.long, val as u64, 1),
-        MilOperand::Float(val) => LLVMConstBitCast(LLVMConstInt(module.types.int, val as u64, 0), module.types.float),
-        MilOperand::Double(val) => LLVMConstBitCast(LLVMConstInt(module.types.long, val, 0), module.types.double)
+        MilOperand::Bool(val) => module.const_bool(val),
+        MilOperand::Int(val) => module.const_int(val),
+        MilOperand::Long(val) => module.const_long(val),
+        MilOperand::Float(val) => module.const_float(val),
+        MilOperand::Double(val) => module.const_double(val)
     }
 }
 
@@ -725,7 +757,7 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(module.types.int, 0x1f, 0),
+                            module.const_int(0x1f),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
@@ -736,7 +768,7 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(module.types.int, 0x1f, 0),
+                            module.const_int(0x1f),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
@@ -747,7 +779,7 @@ unsafe fn emit_basic_block(
                         LLVMBuildAnd(
                             builder.ptr(),
                             rhs,
-                            LLVMConstInt(module.types.int, 0x1f, 0),
+                            module.const_int(0x1f),
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
@@ -815,7 +847,7 @@ unsafe fn emit_basic_block(
                     LLVMBuildGEP(
                         builder.ptr(),
                         arr_data,
-                        [LLVMConstInt(module.types.int, 0, 1), idx].as_mut_ptr(),
+                        [module.const_int(0), idx].as_mut_ptr(),
                         2,
                         "\0".as_ptr() as *const c_char
                     ),
@@ -837,7 +869,7 @@ unsafe fn emit_basic_block(
                     LLVMBuildGEP(
                         builder.ptr(),
                         arr_data,
-                        [LLVMConstInt(module.types.int, 0, 1), idx].as_mut_ptr(),
+                        [module.const_int(0), idx].as_mut_ptr(),
                         2,
                         "\0".as_ptr() as *const c_char
                     )
@@ -1082,30 +1114,30 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     };
 }
 
-unsafe fn emit_main_function(env: &ClassEnvironment, main_method: MethodId, func_map: &HashMap<MethodId, LLVMValueRef>, types: &LLVMTypes, module: &LLVMModule, ctx: &LLVMContext) {
+unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
     let main_func = LLVMAddFunction(
-        module.ptr(),
+        module.module.ptr(),
         b"main\0".as_ptr() as *const c_char,
         LLVMFunctionType(
-            types.int,
-            [types.int, types.any_object_pointer].as_mut_ptr(),
+            module.types.int,
+            [module.types.int, module.types.any_raw_pointer].as_mut_ptr(),
             2,
             0
         )
     );
-    let builder = ctx.create_builder();
+    let builder = module.ctx.create_builder();
 
-    let main_block = LLVMAppendBasicBlockInContext(ctx.ptr(), main_func, b"main\0".as_ptr() as *const c_char);
+    let main_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), main_func, b"main\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), main_block);
 
     LLVMBuildCall(
         builder.ptr(),
-        func_map[&main_method],
-        [LLVMConstNull(types.any_object_pointer)].as_mut_ptr(),
+        module.methods[&main_method],
+        [module.const_obj_null()].as_mut_ptr(),
         1,
         b"\0".as_ptr() as *const c_char
     );
-    LLVMBuildRet(builder.ptr(), LLVMConstInt(types.int, 0, 1));
+    LLVMBuildRet(builder.ptr(), module.const_int(0));
 }
 
 unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
@@ -1128,7 +1160,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
     };
 
     let (flags, size, type_specific_info) = match **module.env.get(class_id) {
-        ResolvedClass::User(ref class) => (0x0000, class.layout.size, LLVMConstInt(module.types.long, 0, 0)),
+        ResolvedClass::User(ref class) => (0x0000, class.layout.size, module.const_long(0)),
         ResolvedClass::Array(elem_id) => (
             0x0002,
             layout::get_array_header_size(
@@ -1137,37 +1169,37 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
             LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(module.types.class_types[&elem_id].vtable, module.types.long),
-                    LLVMConstInt(module.types.long, 8, 0)
+                    module.const_long(8)
                 ),
                 module.types.long,
                 0
             )
         ),
-        ResolvedClass::Primitive(None) => (0x0001, 0, LLVMConstInt(module.types.long, b'V'.into(), 0)),
-        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, LLVMConstInt(module.types.long, ty.as_char().into(), 0))
+        ResolvedClass::Primitive(None) => (0x0001, 0, module.const_long(b'V'.into())),
+        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, module.const_long(ty.as_char().into()))
     };
 
     let mut vtable_fields = [
-        LLVMConstInt(module.types.int, size.into(), 0),
-        LLVMConstInt(module.types.short, 0, 0),
-        LLVMConstInt(module.types.short, flags, 0),
-        LLVMConstInt(module.types.short, 0, 0),
-        LLVMConstInt(module.types.short, 0, 0),
+        module.const_int(size as i32),
+        module.const_short(0),
+        module.const_short(flags),
+        module.const_short(0),
+        module.const_short(0),
         if let Some(array_class_id) = module.env.try_find_array(class_id) {
             if liveness.may_construct.contains(&array_class_id) {
                 LLVMConstIntCast(
                     LLVMConstAdd(
                         LLVMConstPointerCast(module.types.class_types[&array_class_id].vtable, module.types.long),
-                        LLVMConstInt(module.types.long, 8, 0)
+                        module.const_long(8)
                     ),
                     module.types.int,
                     0
                 )
             } else {
-                LLVMConstInt(module.types.int, 0, 0)
+                module.const_int(0)
             }
         } else {
-            LLVMConstInt(module.types.int, 0, 0)
+            module.const_int(0)
         },
         type_specific_info,
         LLVMConstNull(LLVMPointerType(module.types.int, 0)),
@@ -1182,25 +1214,19 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
     LLVMSetInitializer(module.types.class_types[&class_id].vtable, vtable_value);
 }
 
-unsafe fn value_to_llvm(val: Value, class_id: ClassId, types: &LLVMTypes, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>) -> LLVMValueRef {
+unsafe fn value_to_llvm(module: &MochaModule, val: Value, class_id: ClassId) -> LLVMValueRef {
     match class_id {
-        ClassId::PRIMITIVE_BYTE => LLVMConstInt(types.byte, val.as_int().unwrap() as u64, 1),
-        ClassId::PRIMITIVE_CHAR => LLVMConstInt(types.short, val.as_int().unwrap() as u64, 0),
-        ClassId::PRIMITIVE_DOUBLE => LLVMConstBitCast(
-            LLVMConstInt(types.long, val.as_double().unwrap(), 0),
-            types.double
-        ),
-        ClassId::PRIMITIVE_FLOAT => LLVMConstBitCast(
-            LLVMConstInt(types.int, val.as_float().unwrap() as u64, 0),
-            types.float
-        ),
-        ClassId::PRIMITIVE_INT => LLVMConstInt(types.int, val.as_int().unwrap() as u64, 1),
-        ClassId::PRIMITIVE_LONG => LLVMConstInt(types.long, val.as_long().unwrap() as u64, 1),
-        ClassId::PRIMITIVE_SHORT => LLVMConstInt(types.short, val.as_int().unwrap() as u64, 1),
-        ClassId::PRIMITIVE_BOOLEAN => LLVMConstInt(types.byte, val.as_int().unwrap() as u64, 0),
+        ClassId::PRIMITIVE_BYTE => module.const_byte(val.as_int().unwrap() as i8),
+        ClassId::PRIMITIVE_CHAR => module.const_short(val.as_int().unwrap() as i16),
+        ClassId::PRIMITIVE_DOUBLE => module.const_double(val.as_double().unwrap()),
+        ClassId::PRIMITIVE_FLOAT => module.const_float(val.as_float().unwrap()),
+        ClassId::PRIMITIVE_INT => module.const_int(val.as_int().unwrap()),
+        ClassId::PRIMITIVE_LONG => module.const_long(val.as_long().unwrap()),
+        ClassId::PRIMITIVE_SHORT => module.const_short(val.as_int().unwrap() as i16),
+        ClassId::PRIMITIVE_BOOLEAN => module.const_byte(val.as_int().unwrap() as i8),
         _ => val.as_ref().unwrap().map_or_else(
-            || LLVMConstNull(types.class_types[&class_id].field_ty),
-            |r| LLVMConstPointerCast(obj_map[&r.as_ptr()], types.class_types[&class_id].field_ty)
+            || LLVMConstNull(module.types.class_types[&class_id].field_ty),
+            |r| LLVMConstPointerCast(module.obj_map[&r.as_ptr()], module.types.class_types[&class_id].field_ty)
         )
     }
 }
@@ -1228,19 +1254,19 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
     field_values[0] = LLVMConstIntCast(
         LLVMConstAdd(
             LLVMConstPointerCast(class_type.vtable, module.types.long),
-            LLVMConstInt(module.types.long, 8, 0)
+            module.const_long(8)
         ),
         module.types.int,
         0
     );
-    field_values[1] = LLVMConstInt(module.types.int, obj.flags().bits() as u64, 0);
+    field_values[1] = module.const_int(obj.flags().bits() as i32);
 
     let array_data = if let Some(elem_class) = elem_class {
-        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = LLVMConstInt(module.types.int, obj.read_array_length() as u64, 0);
+        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = module.const_int(obj.read_array_length());
         field_values[class_type.fields[&FieldId(obj.class_id(), 1)] as usize] = LLVMConstArray(module.types.class_types[&elem_class].field_ty, std::ptr::null_mut(), 0);
 
         let mut elements = (0..obj.read_array_length())
-            .map(|i| value_to_llvm(obj.read_array_element(i), elem_class, &module.types, &module.obj_map))
+            .map(|i| value_to_llvm(module, obj.read_array_element(i), elem_class))
             .collect_vec();
 
         Some(LLVMConstArray(
@@ -1252,13 +1278,13 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
         for (&f, &i) in class_type.fields.iter() {
             let field_ty = module.env.get_field(f).1.class_id;
 
-            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, &module.types, &module.obj_map);
+            field_values[i] = value_to_llvm(module, obj.read_field(f), field_ty);
         };
         None
     };
 
     for (i, size) in class_type.pads.iter().cloned() {
-        let mut data = vec![LLVMConstInt(module.types.byte, 0, 0); size as usize];
+        let mut data = vec![module.const_byte(0); size as usize];
         field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
     };
 
@@ -1266,12 +1292,12 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
 
     if let Some(meta_class) = meta_class {
         let vtable_value = if meta_class.vtable.is_null() {
-            LLVMConstInt(module.types.int, 0, 0)
+            module.const_int(0)
         } else {
             LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(meta_class.vtable, module.types.long),
-                    LLVMConstInt(module.types.long, 8, 0)
+                    module.const_long(8)
                 ),
                 module.types.int,
                 0
@@ -1287,11 +1313,11 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
         for (&f, &i) in meta_class.meta_fields.iter() {
             let field_ty = module.env.get_field(f).1.class_id;
 
-            field_values[i] = value_to_llvm(obj.read_field(f), field_ty, &module.types, &module.obj_map);
+            field_values[i] = value_to_llvm(module, obj.read_field(f), field_ty);
         };
 
         for (i, size) in meta_class.meta_pads.iter().cloned() {
-            let mut data = vec![LLVMConstInt(module.types.byte, 0, 0); size as usize];
+            let mut data = vec![module.const_byte(0); size as usize];
             field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
         };
 
@@ -1389,7 +1415,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             };
         };
 
-        emit_main_function(env, program.main_method, &module.methods, &module.types, &module.module, ctx);
+        emit_main_function(&module, program.main_method);
 
         if verbose {
             LLVMDumpModule(module.module.ptr());
