@@ -453,6 +453,7 @@ pub struct ClassMeta {
     pub this_id: ClassId,
     pub super_id: ClassId,
     pub interface_ids: Vec<ClassId>,
+    pub all_interface_ids: Vec<ClassId>,
     pub clinit_method: Option<u16>,
 
     pub name: Arc<str>
@@ -491,6 +492,7 @@ impl Class {
                 this_id: ClassId::UNRESOLVED,
                 super_id: ClassId::UNRESOLVED,
                 interface_ids: vec![],
+                all_interface_ids: vec![],
                 clinit_method: None,
                 name: Arc::from(String::new().into_boxed_str())
             }
@@ -936,6 +938,7 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
             this_id: ClassId::UNRESOLVED,
             super_id: ClassId::UNRESOLVED,
             interface_ids: vec![],
+            all_interface_ids: vec![],
             clinit_method,
             name: Arc::from(String::new().into_boxed_str())
         }

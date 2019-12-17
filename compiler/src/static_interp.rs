@@ -613,6 +613,19 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         })
     }
 
+    fn find_interface_target(&mut self, method_id: MethodId, receiver: JavaStaticRef<'b>, verbose: bool) -> Result<MethodId, StaticInterpretError> {
+        let decl_method = self.env.get_method(method_id).1;
+
+        Result::Ok(match receiver.class() {
+            ResolvedClass::User(ref recv_class) => {
+                recv_class.layout.interface_slots.iter()
+                    .filter(|&&(interface_id, _)| interface_id == method_id.0)
+                    .next().unwrap().1[decl_method.virtual_slot as usize]
+            },
+            _ => method_id
+        })
+    }
+
     fn find_receiver(&self, method_id: MethodId, verbose: bool) -> Result<Option<&JavaStaticRef<'b>>, StaticInterpretError> {
         let decl_method = self.env.get_method(method_id).1;
 
@@ -1111,6 +1124,20 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                         if let Some(receiver) = state.find_receiver(cpe.method_id, verbose)? {
                             let receiver = receiver.clone();
                             let real_method_id = state.find_virtual_target(cpe.method_id, receiver, verbose)?;
+                            state.enter_method(real_method_id, verbose)?;
+                        } else {
+                            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                        };
+                    },
+                    _ => unreachable!()
+                };
+            },
+            BytecodeInstruction::InvokeInterface(idx, _) => {
+                match state.class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::InterfaceMethodref(ref cpe) => {
+                        if let Some(receiver) = state.find_receiver(cpe.method_id, verbose)? {
+                            let receiver = receiver.clone();
+                            let real_method_id = state.find_interface_target(cpe.method_id, receiver, verbose)?;
                             state.enter_method(real_method_id, verbose)?;
                         } else {
                             return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));

@@ -354,6 +354,7 @@ pub enum MilEndInstructionKind {
     Nop,
     Call(ClassId, MethodId, MilRegister, Vec<MilOperand>),
     CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
+    CallInterface(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     CallNative(ClassId, String, MilRegister, Vec<MilOperand>),
     Throw(MilOperand),
     Return(MilOperand),
@@ -547,6 +548,12 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
+            MilEndInstructionKind::CallInterface(ty, method_id, tgt, ref obj, ref args) => {
+                write!(f, "call_interface_{} <{}> {}, {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+                for a in args.iter() {
+                    write!(f, ", {}", a.pretty(self.1))?;
+                };
+            },
             MilEndInstructionKind::CallNative(ty, ref name, tgt, ref args) => {
                 write!(f, "call_native_{} <{}> {}", MilType::for_class(ty), name, tgt)?;
                 for a in args.iter() {
@@ -596,6 +603,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Nop => None,
             MilEndInstructionKind::Call(_, _, ref tgt, _) => Some(tgt),
             MilEndInstructionKind::CallVirtual(_, _, ref tgt, _, _) => Some(tgt),
+            MilEndInstructionKind::CallInterface(_, _, ref tgt, _, _) => Some(tgt),
             MilEndInstructionKind::CallNative(_, _, ref tgt, _) => Some(tgt),
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
@@ -613,6 +621,12 @@ impl MilEndInstruction {
                 };
             },
             MilEndInstructionKind::CallVirtual(_, _, _, ref obj, ref args) => {
+                f(obj);
+                for a in args.iter() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallInterface(_, _, _, ref obj, ref args) => {
                 f(obj);
                 for a in args.iter() {
                     f(a);
@@ -642,6 +656,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Nop => true,
             MilEndInstructionKind::Call(_, _, _, _) => true,
             MilEndInstructionKind::CallVirtual(_, _, _, _, _) => true,
+            MilEndInstructionKind::CallInterface(_, _, _, _, _) => true,
             MilEndInstructionKind::CallNative(_, _, _, _) => true,
             MilEndInstructionKind::Throw(_) => false,
             MilEndInstructionKind::Return(_) => false,

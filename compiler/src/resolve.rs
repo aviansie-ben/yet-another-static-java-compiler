@@ -929,6 +929,35 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
     Result::Ok(())
 }
 
+pub fn expand_interface(env: &ClassEnvironment, all_interface_ids: &mut Vec<ClassId>, interface_id: ClassId) {
+    if interface_id == ClassId::UNRESOLVED || all_interface_ids.contains(&interface_id) {
+        return;
+    };
+
+    all_interface_ids.push(interface_id);
+    for interface_id in env.get(interface_id).as_user_class().meta.interface_ids.iter().cloned() {
+        expand_interface(env, all_interface_ids, interface_id);
+    };
+}
+
+pub fn expand_super_interfaces(env: &ClassEnvironment, all_interface_ids: &mut Vec<ClassId>, super_id: ClassId) {
+    if super_id == ClassId::UNRESOLVED {
+        return;
+    };
+
+    let super_class = match **env.get(super_id) {
+        ResolvedClass::User(ref class) => class,
+        _ => {
+            return;
+        }
+    };
+
+    for interface_id in super_class.meta.interface_ids.iter().cloned() {
+        expand_interface(env, all_interface_ids, interface_id);
+    };
+    expand_super_interfaces(env, all_interface_ids, super_class.meta.super_id);
+}
+
 pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(), ClassResolveError> {
     let mut resolving_class = Box::new(Class::dummy_class());
     let mut overridden_by: HashMap<MethodId, Vec<MethodId>> = HashMap::new();
@@ -943,6 +972,11 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
         } else {
             continue;
         };
+
+        for interface_id in resolving_class.meta.interface_ids.iter().cloned() {
+            expand_interface(env, &mut resolving_class.meta.all_interface_ids, interface_id);
+        };
+        expand_super_interfaces(env, &mut resolving_class.meta.all_interface_ids, resolving_class.meta.super_id);
 
         let resolving_meta = &resolving_class.meta;
 
@@ -972,7 +1006,7 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
                 &methodref
             );
 
-            m.overrides.overrides_interface = resolving_class.meta.interface_ids.iter().cloned()
+            m.overrides.overrides_interface = resolving_class.meta.all_interface_ids.iter().cloned()
                 .filter_map(|interface| {
                     let method = find_method(env, interface, &[], resolving_meta, &methodref);
                     if method != MethodId::UNRESOLVED {

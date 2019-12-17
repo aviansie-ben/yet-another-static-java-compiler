@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::classfile::{Class, FieldFlags, PrimitiveType};
 use crate::liveness::LivenessInfo;
@@ -13,7 +14,7 @@ pub struct ObjectLayout {
     pub fields: Vec<(FieldId, u32)>,
     pub size: u32,
     pub virtual_slots: Vec<MethodId>,
-    pub interface_slots: Vec<ClassId>,
+    pub interface_slots: Vec<(ClassId, Arc<Vec<MethodId>>)>,
     pub static_fields: Vec<(FieldId, u32)>,
     pub static_size: u32
 }
@@ -105,13 +106,13 @@ fn compute_layout(env: &ClassEnvironment, liveness: &LivenessInfo, class_id: Cla
                 layout.interface_slots = super_layout.interface_slots.clone();
             };
 
-            for interface_id in class.meta.interface_ids.iter().cloned() {
-                if !layout.interface_slots.contains(&interface_id) && !layouts.get(&interface_id).unwrap().virtual_slots.is_empty() {
+            for interface_id in class.meta.all_interface_ids.iter().cloned() {
+                if !layout.interface_slots.iter().any(|&(id, _)| id == interface_id) && !layouts.get(&interface_id).unwrap().virtual_slots.is_empty() {
                     if verbose {
                         eprintln!("    Interface {} is allocated at islot {}", env.get(interface_id).name(env), layout.interface_slots.len());
                     };
 
-                    layout.interface_slots.push(interface_id);
+                    layout.interface_slots.push((interface_id, Arc::new(layouts[&interface_id].virtual_slots.clone())));
                 };
             };
         };
@@ -145,7 +146,7 @@ fn compute_layout(env: &ClassEnvironment, liveness: &LivenessInfo, class_id: Cla
                         layout.virtual_slots.iter().enumerate()
                             .filter(|(_, mid)| mid == &&m.overrides.overrides_virtual)
                             .next().map(|(i, _)| i)
-                    } else if !m.overrides.overridden_by.is_empty() {
+                    } else if !m.overrides.overridden_by.is_empty() || !m.overrides.overrides_interface.is_empty() {
                         None
                     } else {
                         continue;
@@ -163,6 +164,26 @@ fn compute_layout(env: &ClassEnvironment, liveness: &LivenessInfo, class_id: Cla
                         };
 
                         layout.virtual_slots.push(method_id);
+                    };
+
+                    for interface_method in m.overrides.overrides_interface.iter().cloned() {
+                        let islot = layout.interface_slots.iter().enumerate()
+                            .filter(|&(_, &(interface_id, _))| interface_id == interface_method.0)
+                            .next().map(|(i, _)| i);
+
+                        if let Some(islot) = islot {
+                            let vslot = layouts[&interface_method.0].virtual_slots.iter().enumerate()
+                                .filter(|&(_, &mid)| mid == interface_method)
+                                .next().map(|(i, _)| i);
+
+                            if let Some(vslot) = vslot {
+                                if verbose {
+                                    eprintln!("        Overriding interface method at islot ({}, {})", islot, vslot);
+                                };
+
+                                Arc::make_mut(&mut layout.interface_slots[islot].1)[vslot] = method_id;
+                            };
+                        };
                     };
                 };
             };

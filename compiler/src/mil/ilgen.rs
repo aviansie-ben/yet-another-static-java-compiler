@@ -743,6 +743,31 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     stack.push(reg);
                 };
             },
+            BytecodeInstruction::InvokeInterface(idx, _) => {
+                let cpe = match cp[idx as usize] {
+                    ConstantPoolEntry::InterfaceMethodref(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let (class, method) = env.get_method(cpe.method_id);
+
+                let ret_class = method.return_type;
+                let reg = builder.allocate_reg(MilType::for_class(ret_class));
+                let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::CallInterface(
+                        ret_class,
+                        cpe.method_id,
+                        reg,
+                        args[0].clone(),
+                        args
+                    ),
+                    bc
+                );
+                if ret_class != ClassId::PRIMITIVE_VOID {
+                    stack.push(reg);
+                };
+            },
             BytecodeInstruction::GetField(idx) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => cpe,

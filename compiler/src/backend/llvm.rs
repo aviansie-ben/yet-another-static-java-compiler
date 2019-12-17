@@ -141,7 +141,8 @@ struct LLVMClassType {
     num_meta_fields: usize,
     meta_fields: HashMap<FieldId, usize>,
     meta_pads: Vec<(u32, u32)>,
-    vtable: LLVMValueRef
+    vtable: LLVMValueRef,
+    itable: LLVMValueRef
 }
 
 #[derive(Debug)]
@@ -157,6 +158,7 @@ struct LLVMTypes {
     any_function_pointer: LLVMTypeRef,
     any_raw_pointer: LLVMTypeRef,
     any_object_pointer: LLVMTypeRef,
+    itable_entry: LLVMTypeRef,
     class_types: HashMap<ClassId, LLVMClassType>,
     method_types: HashMap<MethodId, LLVMTypeRef>
 }
@@ -316,10 +318,18 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
         None
     };
 
-    let num_vslots = if let Some(vslot_class) = vslot_class {
-        vslot_class.layout.virtual_slots.len()
+    let (num_vslots, num_islots) = if let Some(vslot_class) = vslot_class {
+        (vslot_class.layout.virtual_slots.len(), vslot_class.layout.interface_slots.len())
     } else {
-        0
+        (0, 0)
+    };
+
+    let itable_type = LLVMArrayType(types.itable_entry, num_islots as u32);
+    let itable = if num_islots != 0 {
+        let itable_name = CString::new(format!("itable_{}", env.get(class_id).name(env))).unwrap();
+        LLVMAddGlobal(module.ptr(), itable_type, itable_name.as_ptr())
+    } else {
+        std::ptr::null_mut()
     };
 
     let mut vtable_fields = vec![types.any_function_pointer; num_vslots + VTABLE_FIRST_VSLOT_FIELD];
@@ -333,10 +343,10 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
     vtable_fields[VTABLE_TYPE_SPECIFIC_INFO_FIELD] = types.long;
     vtable_fields[VTABLE_SUPER_VTABLES_FIELD] = LLVMPointerType(types.int, 0);
     vtable_fields[VTABLE_CLASS_OBJ_FIELD] = LLVMPointerType(types.class_types[&class_id].meta_ty, 1);
-    vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(types.int, 0) /* TODO */;
+    vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(itable_type, 0);
 
-    let name = CString::new(format!("vtable_{}", env.get(class_id).name(env))).unwrap();
-    let vtable = LLVMAddGlobal(module.ptr(), LLVMStructType(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0), name.as_ptr());
+    let vtable_name = CString::new(format!("vtable_{}", env.get(class_id).name(env))).unwrap();
+    let vtable = LLVMAddGlobal(module.ptr(), LLVMStructType(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0), vtable_name.as_ptr());
     LLVMSetSection(vtable, b".mocha_vtables\0".as_ptr() as *mut c_char);
 
     let mut class_type = types.class_types.get_mut(&class_id).unwrap();
@@ -346,6 +356,7 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
     class_type.meta_fields = meta_field_map;
     class_type.meta_pads = meta_pads;
     class_type.vtable = vtable;
+    class_type.itable = itable;
 }
 
 fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMContext, module: &LLVMModule) -> LLVMTypes {
@@ -362,6 +373,7 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
         let any_function_pointer = LLVMPointerType(LLVMFunctionType(void, std::ptr::null_mut(), 0, 0), 0);
         let any_raw_pointer = LLVMPointerType(byte, 0);
         let any_object_pointer = LLVMPointerType(byte, 1);
+        let itable_entry = LLVMStructType([int, int].as_mut_ptr(), 2, 0);
 
         let mut types = LLVMTypes {
             void,
@@ -375,6 +387,7 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
             any_function_pointer,
             any_raw_pointer,
             any_object_pointer,
+            itable_entry,
             class_types: env.class_ids().map(|class_id| {
                 (class_id, {
                     let class = env.get(class_id);
@@ -412,7 +425,8 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
                         num_meta_fields: 0,
                         meta_fields: HashMap::new(),
                         meta_pads: vec![],
-                        vtable: std::ptr::null_mut()
+                        vtable: std::ptr::null_mut(),
+                        itable: std::ptr::null_mut()
                     }
                 })
             }).collect(),
@@ -566,6 +580,20 @@ unsafe fn create_vtable_decompress(builder: &LLVMBuilder, compressed: LLVMValueR
     )
 }
 
+unsafe fn create_itable_decompress(builder: &LLVMBuilder, compressed: LLVMValueRef, types: &LLVMTypes) -> LLVMValueRef {
+    LLVMBuildIntToPtr(
+        builder.ptr(),
+        LLVMBuildNUWSub(
+            builder.ptr(),
+            compressed,
+            LLVMConstInt(types.int, 8, 0),
+            b"\0".as_ptr() as *const c_char
+        ),
+        LLVMPointerType(LLVMArrayType(types.any_function_pointer, 0), 0),
+        b"\0".as_ptr() as *const c_char
+    )
+}
+
 unsafe fn create_vtable_load(builder: &LLVMBuilder, obj: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
     let obj = LLVMBuildPointerCast(
         builder.ptr(),
@@ -669,7 +697,7 @@ unsafe fn emit_basic_block(
 
     let block = &func.blocks[&block_id];
     let block_name = CString::new(format!("{}", block.id)).unwrap();
-    let llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, block_name.as_ptr());
+    let mut llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, block_name.as_ptr());
     let llvm_start_block = llvm_block;
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
@@ -978,6 +1006,111 @@ unsafe fn emit_basic_block(
                 register_name(tgt).as_ptr() as *const c_char
             ), &module.types);
         },
+        MilEndInstructionKind::CallInterface(_, method_id, tgt, ref obj, ref args) => {
+            let interface_vtable = LLVMConstIntCast(
+                LLVMConstAdd(
+                    LLVMConstPointerCast(module.types.class_types[&method_id.0].vtable, module.types.long),
+                    module.const_long(8)
+                ),
+                module.types.int,
+                0
+            );
+
+            let (_, method) = module.env.get_method(method_id);
+            let obj = create_value_ref(&module, obj, &local_regs);
+            let mut args = args.iter()
+                .map(|o| create_value_ref(&module, o, &local_regs))
+                .collect_vec();
+
+            let first_islot = LLVMBuildStructGEP(
+                builder.ptr(),
+                LLVMBuildLoad(
+                    builder.ptr(),
+                    LLVMBuildStructGEP(
+                        builder.ptr(),
+                        create_vtable_load(&builder, obj, ClassId::JAVA_LANG_OBJECT, &module.types),
+                        VTABLE_ITABLE_FIELD as u32,
+                        b"\0".as_ptr() as *const c_char
+                    ),
+                    b"\0".as_ptr() as *const c_char
+                ),
+                0,
+                b"\0".as_ptr() as *const c_char
+            );
+
+            let loop_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"\0".as_ptr() as *const c_char);
+            LLVMBuildBr(builder.ptr(), loop_block);
+            LLVMPositionBuilderAtEnd(builder.ptr(), loop_block);
+
+            let islot = LLVMBuildPhi(builder.ptr(), LLVMPointerType(module.types.itable_entry, 0), b"\0".as_ptr() as *const c_char);
+            let islot_interface = LLVMBuildLoad(
+                builder.ptr(),
+                LLVMBuildStructGEP(
+                    builder.ptr(),
+                    islot,
+                    0,
+                    b"\0".as_ptr() as *const c_char
+                ),
+                b"\0".as_ptr() as *const c_char
+            );
+            let next_islot = LLVMBuildGEP(builder.ptr(), islot, [module.const_int(1)].as_mut_ptr(), 1, b"\0".as_ptr() as *const c_char);
+
+            LLVMAddIncoming(islot, [first_islot, next_islot].as_mut_ptr(), [llvm_block, loop_block].as_mut_ptr(), 2);
+
+            let call_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"\0".as_ptr() as *const c_char);
+            LLVMBuildCondBr(
+                builder.ptr(),
+                LLVMBuildICmp(
+                    builder.ptr(),
+                    LLVMIntPredicate::LLVMIntNE,
+                    islot_interface,
+                    interface_vtable,
+                    b"\0".as_ptr() as *const c_char
+                ),
+                loop_block,
+                call_block
+            );
+
+            llvm_block = call_block;
+            LLVMPositionBuilderAtEnd(builder.ptr(), call_block);
+
+            let islot = LLVMBuildLoad(
+                builder.ptr(),
+                LLVMBuildStructGEP(
+                    builder.ptr(),
+                    create_itable_decompress(
+                        &builder,
+                        LLVMBuildLoad(
+                            builder.ptr(),
+                            LLVMBuildStructGEP(
+                                builder.ptr(),
+                                islot,
+                                1,
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        &module.types
+                    ),
+                    method.virtual_slot,
+                    b"\0".as_ptr() as *const c_char
+                ),
+                b"\0".as_ptr() as *const c_char
+            );
+
+            set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
+                builder.ptr(),
+                LLVMBuildPointerCast(
+                    builder.ptr(),
+                    islot,
+                    LLVMPointerType(module.types.method_types[&method_id], 0),
+                    "\0".as_ptr() as *const c_char
+                ),
+                args.as_mut_ptr(),
+                args.len() as u32,
+                register_name(tgt).as_ptr() as *const c_char
+            ), &module.types);
+        },
         MilEndInstructionKind::CallNative(ret_ty, ref name, tgt, ref args) => {
             let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), &module.types)).collect_vec();
             let mut args = args.iter()
@@ -1140,6 +1273,66 @@ unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
     LLVMBuildRet(builder.ptr(), module.const_int(0));
 }
 
+unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
+    let islot_class = match **module.env.get(class_id) {
+        ResolvedClass::User(ref class) => Some(class),
+        ResolvedClass::Array(_) => Some(module.env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
+        _ => None
+    };
+
+    let mut islots = if let Some(islot_class) = islot_class {
+        islot_class.layout.interface_slots.iter().map(|&(interface_id, ref islots)| {
+            let itable_entry = if !islots.is_empty() {
+                let itable_entry_name = CString::new(format!("itable_{}_{}", module.env.get(class_id).name(module.env), module.env.get(interface_id).name(module.env))).unwrap();
+                let itable_entry = LLVMAddGlobal(module.module.ptr(), LLVMArrayType(module.types.any_function_pointer, islots.len() as u32), itable_entry_name.as_ptr());
+
+                let mut islots = islots.iter().cloned().map(|method_id| {
+                    module.methods.get(&method_id).cloned().map_or_else(
+                        || LLVMConstNull(module.types.any_function_pointer),
+                        |f| LLVMConstBitCast(f, module.types.any_function_pointer)
+                    )
+                }).collect_vec();
+
+                LLVMSetInitializer(itable_entry, LLVMConstArray(module.types.any_function_pointer, islots.as_mut_ptr(), islots.len() as u32));
+                LLVMConstIntCast(
+                    LLVMConstAdd(
+                        LLVMConstPointerCast(itable_entry, module.types.long),
+                        module.const_long(8)
+                    ),
+                    module.types.int,
+                    0
+                )
+            } else {
+                module.const_int(16)
+            };
+
+            LLVMConstStruct(
+                [
+                    LLVMConstIntCast(
+                        LLVMConstAdd(
+                            LLVMConstPointerCast(module.types.class_types[&interface_id].vtable, module.types.long),
+                            module.const_long(8)
+                        ),
+                        module.types.int,
+                        0
+                    ),
+                    itable_entry
+                ].as_mut_ptr(),
+                2,
+                0
+            )
+        }).collect_vec()
+    } else {
+        vec![]
+    };
+
+    if !islots.is_empty() {
+        let ty = &module.types.class_types[&class_id];
+
+        LLVMSetInitializer(ty.itable, LLVMConstArray(module.types.itable_entry, islots.as_mut_ptr(), islots.len() as u32));
+    };
+}
+
 unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
     let class_obj = module.find_class_object(class_id);
     let vslot_class = match **module.env.get(class_id) {
@@ -1179,6 +1372,8 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
         ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, module.const_long(ty.as_char().into()))
     };
 
+    let ty = &module.types.class_types[&class_id];
+
     let mut vtable_fields = [
         module.const_int(size as i32),
         module.const_short(0),
@@ -1204,14 +1399,18 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
         type_specific_info,
         LLVMConstNull(LLVMPointerType(module.types.int, 0)),
         class_obj,
-        LLVMConstNull(LLVMPointerType(module.types.int, 0))
+        if ty.itable.is_null() {
+            LLVMConstNull(LLVMStructGetTypeAtIndex(LLVMGlobalGetValueType(ty.vtable), VTABLE_ITABLE_FIELD as u32))
+        } else {
+            ty.itable
+        }
     ]
         .iter().cloned()
         .chain(vslots)
         .collect_vec();
 
     let vtable_value = LLVMConstStruct(vtable_fields.as_mut_ptr(), vtable_fields.len() as u32, 0);
-    LLVMSetInitializer(module.types.class_types[&class_id].vtable, vtable_value);
+    LLVMSetInitializer(ty.vtable, vtable_value);
 }
 
 unsafe fn value_to_llvm(module: &MochaModule, val: Value, class_id: ClassId) -> LLVMValueRef {
@@ -1402,6 +1601,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
         };
 
         for class_id in liveness.needs_class_object.iter().cloned() {
+            emit_itable(&module, class_id, liveness);
             emit_vtable(&module, class_id, liveness);
         };
 
