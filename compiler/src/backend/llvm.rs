@@ -689,7 +689,7 @@ unsafe fn emit_basic_block(
     builder: &LLVMBuilder,
     llvm_func: LLVMValueRef,
     locals: &mut HashMap<MilLocalId, LLVMValueRef>,
-    llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef)>,
+    llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, LLVMValueRef)>,
     all_regs: &mut HashMap<MilRegister, LLVMValueRef>,
     phis_to_add: &mut Vec<(LLVMValueRef, MilBlockId, MilRegister)>
 ) {
@@ -699,6 +699,7 @@ unsafe fn emit_basic_block(
     let block_name = CString::new(format!("{}", block.id)).unwrap();
     let mut llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, block_name.as_ptr());
     let llvm_start_block = llvm_block;
+    let mut cond_out = std::ptr::null_mut();
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
@@ -1173,13 +1174,11 @@ unsafe fn emit_basic_block(
                 MilComparison::Le => LLVMIntPredicate::LLVMIntSLE
             };
 
-            // This value is retrieved when constructing the conditional branch later by looking at
-            // the last instruction in the basic block.
-            LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
+            cond_out = LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
         }
     };
 
-    llvm_blocks.insert(block_id, (llvm_start_block, llvm_block));
+    llvm_blocks.insert(block_id, (llvm_start_block, llvm_block, cond_out));
 }
 
 unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
@@ -1226,7 +1225,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
     for (block_id, next_block_id) in func.block_order.iter().cloned().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = &func.blocks[&block_id];
-        let llvm_block = llvm_blocks[&block_id].1;
+        let (_, llvm_block, cond) = llvm_blocks[&block_id];
 
         LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
@@ -1235,7 +1234,6 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
                 LLVMBuildBr(builder.ptr(), llvm_blocks[&tgt].0);
             },
             MilEndInstructionKind::JumpIf(_, tgt, _, _) => {
-                let cond = LLVMGetLastInstruction(llvm_block);
                 LLVMBuildCondBr(builder.ptr(), cond, llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
             },
             MilEndInstructionKind::Throw(_) => {},
