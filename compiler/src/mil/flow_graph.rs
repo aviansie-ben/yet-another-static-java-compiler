@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::Hash;
 
 use itertools::Itertools;
@@ -6,7 +7,7 @@ use smallvec::SmallVec;
 
 use super::il::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FlowGraphNode<T: Copy + PartialEq + Eq + Hash> {
     pub id: T,
     pub incoming: Vec<T>,
@@ -23,7 +24,7 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraphNode<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FlowGraph<T: Copy + PartialEq + Eq + Hash> {
     nodes: HashMap<T, FlowGraphNode<T>>
 }
@@ -127,5 +128,33 @@ impl FlowGraph<MilBlockId> {
 
     pub fn get_exit_mut(&mut self) -> &mut FlowGraphNode<MilBlockId> {
         self.get_mut(MilBlockId::EXIT)
+    }
+}
+
+impl <T: Copy + PartialEq + Eq + Hash + fmt::Debug> fmt::Debug for FlowGraphNode<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{{")?;
+        if let Some(first_incoming) = self.incoming.first() {
+            write!(f, "{:?}", first_incoming)?;
+            for incoming in self.incoming[1..].iter() {
+                write!(f, ", {:?}", incoming)?;
+            };
+        };
+        write!(f, "}} -> {:?} -> {{", self.id)?;
+        if let Some(first_outgoing) = self.outgoing.first() {
+            write!(f, "{:?}", first_outgoing)?;
+            for outgoing in self.outgoing[1..].iter() {
+                write!(f, ", {:?}", outgoing)?;
+            };
+        };
+        write!(f, "}}")?;
+        Ok(())
+    }
+}
+
+impl <T: Copy + PartialEq + Eq + Hash + fmt::Debug> fmt::Debug for FlowGraph<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FlowGraph ")?;
+        f.debug_set().entries(self.nodes.values()).finish()
     }
 }

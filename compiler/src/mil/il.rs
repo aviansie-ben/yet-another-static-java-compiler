@@ -105,12 +105,18 @@ impl MilBlockIdAllocator {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MilBlockId(pub u32);
 
 impl MilBlockId {
     pub const ENTRY: MilBlockId = MilBlockId(!0);
     pub const EXIT: MilBlockId = MilBlockId(!0 - 1);
+}
+
+impl fmt::Debug for MilBlockId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl fmt::Display for MilBlockId {
