@@ -681,6 +681,18 @@ unsafe fn coerce_after_load(builder: &LLVMBuilder, class_id: ClassId, val: LLVMV
     }
 }
 
+unsafe fn undefined_register_value(module: &MochaModule, ty: MilType) -> LLVMValueRef {
+    match ty {
+        MilType::Void => std::ptr::null_mut(),
+        MilType::Ref => module.const_obj_null(),
+        MilType::Bool => module.const_bool(false),
+        MilType::Int => module.const_int(0),
+        MilType::Long => module.const_long(0),
+        MilType::Float => module.const_float(0),
+        MilType::Double => module.const_double(0)
+    }
+}
+
 unsafe fn emit_basic_block(
     module: &MochaModule,
     func: &MilFunction,
@@ -703,35 +715,46 @@ unsafe fn emit_basic_block(
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
-    for reg in find_used_before_def(block) {
-        if let Some(&val) = all_regs.get(&reg) {
-            local_regs.insert(reg, val);
-        } else {
-            let phi = LLVMBuildPhi(
-                builder.ptr(),
-                native_arg_type(func.reg_map.info[&reg].ty, &module.types),
-                register_name(reg).as_ptr()
-            );
+    if !cfg.get(block_id).incoming.is_empty() {
+        for reg in find_used_before_def(block) {
+            if let Some(&val) = all_regs.get(&reg) {
+                local_regs.insert(reg, val);
+            } else {
+                let phi = LLVMBuildPhi(
+                    builder.ptr(),
+                    native_arg_type(func.reg_map.info[&reg].ty, &module.types),
+                    register_name(reg).as_ptr()
+                );
 
-            local_regs.insert(reg, phi);
+                local_regs.insert(reg, phi);
 
-            for pred in cfg.get(block_id).incoming.iter().cloned() {
-                phis_to_add.push((phi, pred, reg));
+                for pred in cfg.get(block_id).incoming.iter().cloned() {
+                    phis_to_add.push((phi, pred, reg));
+                };
             };
+        };
+    } else {
+        for reg in find_used_before_def(block) {
+            local_regs.insert(reg, undefined_register_value(module, func.reg_map.info[&reg].ty));
         };
     };
 
     for phi in block.phi_nodes.iter() {
-        let llvm_phi = LLVMBuildPhi(
-            builder.ptr(),
-            native_arg_type(func.reg_map.info[&phi.target].ty, &module.types),
-            register_name(phi.target).as_ptr()
-        );
+        if !phi.sources.is_empty() {
+            let llvm_phi = LLVMBuildPhi(
+                builder.ptr(),
+                native_arg_type(func.reg_map.info[&phi.target].ty, &module.types),
+                register_name(phi.target).as_ptr()
+            );
 
-        set_register(&builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
+            set_register(&builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
 
-        for (src, pred) in phi.sources.iter().cloned() {
-            phis_to_add.push((llvm_phi, pred, src));
+            for (src, pred) in phi.sources.iter().cloned() {
+                phis_to_add.push((llvm_phi, pred, src));
+            };
+        } else {
+            let val = undefined_register_value(module, func.reg_map.info[&phi.target].ty);
+            set_register(&builder, func, &mut local_regs, all_regs, phi.target, val, &module.types);
         };
     };
 
@@ -1209,7 +1232,14 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let mut phis_to_add = vec![];
 
     for block_id in func.block_order.iter().cloned() {
+        eprintln!("{}:", block_id);
         emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
+    };
+
+    for (&reg, info) in func.reg_map.info.iter() {
+        if !all_regs.contains_key(&reg) && info.ty != MilType::Void {
+            all_regs.insert(reg, undefined_register_value(module, info.ty));
+        };
     };
 
     for (phi, pred, reg) in phis_to_add {
