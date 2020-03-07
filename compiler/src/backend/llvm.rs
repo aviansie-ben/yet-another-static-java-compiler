@@ -961,6 +961,9 @@ unsafe fn emit_basic_block(
 
     match block.end_instr.kind {
         MilEndInstructionKind::Nop => {},
+        MilEndInstructionKind::Unreachable => {
+            LLVMBuildUnreachable(builder.ptr());
+        },
         MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
             let mut args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
@@ -1228,6 +1231,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
         match block.end_instr.kind {
+            MilEndInstructionKind::Unreachable => {},
             MilEndInstructionKind::Jump(tgt) => {
                 LLVMBuildBr(builder.ptr(), llvm_blocks[&tgt].0);
             },

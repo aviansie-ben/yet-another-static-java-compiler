@@ -352,6 +352,7 @@ pub enum MilInstructionKind {
 #[derive(Debug, Clone)]
 pub enum MilEndInstructionKind {
     Nop,
+    Unreachable,
     Call(ClassId, MethodId, MilRegister, Vec<MilOperand>),
     CallVirtual(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     CallInterface(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
@@ -535,6 +536,9 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Nop => {
                 write!(f, "nop")?;
             },
+            MilEndInstructionKind::Unreachable => {
+                write!(f, "unreachable")?;
+            },
             MilEndInstructionKind::Call(ty, method_id, tgt, ref args) => {
                 write!(f, "call_{} <{}> {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt)?;
 
@@ -601,6 +605,7 @@ impl MilEndInstruction {
     pub fn target(&self) -> Option<&MilRegister> {
         match self.kind {
             MilEndInstructionKind::Nop => None,
+            MilEndInstructionKind::Unreachable => None,
             MilEndInstructionKind::Call(_, _, ref tgt, _) => Some(tgt),
             MilEndInstructionKind::CallVirtual(_, _, ref tgt, _, _) => Some(tgt),
             MilEndInstructionKind::CallInterface(_, _, ref tgt, _, _) => Some(tgt),
@@ -615,6 +620,7 @@ impl MilEndInstruction {
     pub fn for_operands(&self, mut f: impl FnMut (&MilOperand) -> ()) {
         match self.kind {
             MilEndInstructionKind::Nop => {},
+            MilEndInstructionKind::Unreachable => {},
             MilEndInstructionKind::Call(_, _, _, ref args) => {
                 for a in args.iter() {
                     f(a);
@@ -654,6 +660,7 @@ impl MilEndInstruction {
     pub fn can_fall_through(&self) -> bool {
         match self.kind {
             MilEndInstructionKind::Nop => true,
+            MilEndInstructionKind::Unreachable => false,
             MilEndInstructionKind::Call(_, _, _, _) => true,
             MilEndInstructionKind::CallVirtual(_, _, _, _, _) => true,
             MilEndInstructionKind::CallInterface(_, _, _, _, _) => true,

@@ -4,9 +4,12 @@ use std::convert::TryInto;
 use itertools::Itertools;
 use smallvec::*;
 
+use super::flow_graph::*;
 use super::il::*;
+use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeCode, ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
+use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
 pub struct MilBuilder {
@@ -754,22 +757,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
-                    if method.virtual_slot != !0 {
-                        MilEndInstructionKind::CallVirtual(
-                            ret_class,
-                            cpe.method_id,
-                            reg,
-                            args[0].clone(),
-                            args
-                        )
-                    } else {
-                        MilEndInstructionKind::Call(
-                            ret_class,
-                            cpe.method_id,
-                            reg,
-                            args
-                        )
-                    },
+                    MilEndInstructionKind::CallVirtual(
+                        ret_class,
+                        cpe.method_id,
+                        reg,
+                        args[0].clone(),
+                        args
+                    ),
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
@@ -1019,7 +1013,73 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
     };
 }
 
-pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, verbose: bool) -> Option<MilFunction> {
+fn lower_il_in_method(env: &ClassEnvironment, func: &mut MilFunction, liveness: &LivenessInfo) {
+    let cfg = FlowGraph::for_function(func);
+    let mut truncated_blocks = vec![];
+
+    for block_id in func.block_order.iter().cloned() {
+        let block = func.blocks.get_mut(&block_id).unwrap();
+
+        for (i, instr) in block.instrs.iter().enumerate() {
+            let bc = instr.bytecode;
+
+            match instr.kind {
+                MilInstructionKind::GetField(field_id, _, _, _) | MilInstructionKind::PutField(field_id, _, _, _)
+                    if !liveness.may_construct.contains(&field_id.0) => {
+                    block.instrs.truncate(i);
+                    block.end_instr = MilEndInstruction {
+                        kind: MilEndInstructionKind::Unreachable,
+                        bytecode: bc
+                    };
+
+                    break;
+                },
+                _ => {}
+            };
+        };
+
+        match block.end_instr.kind {
+            MilEndInstructionKind::CallVirtual(return_ty, method_id, result_reg, _, ref mut args) => {
+                let (_, method) = env.get_method(method_id);
+
+                if !liveness.may_construct.contains(&method_id.0) {
+                    block.end_instr.kind = MilEndInstructionKind::Unreachable;
+                    truncated_blocks.push(block_id);
+                } else if method.virtual_slot == !0 {
+                    let args = std::mem::replace(args, vec![]);
+                    block.end_instr.kind = MilEndInstructionKind::Call(return_ty, method_id, result_reg, args);
+                };
+            },
+            MilEndInstructionKind::CallInterface(return_ty, method_id, result_reg, _, _) => {
+                if !liveness.may_construct.contains(&method_id.0) {
+                    block.end_instr.kind = MilEndInstructionKind::Unreachable;
+                    truncated_blocks.push(block_id);
+                };
+            },
+            _ => {}
+        };
+
+        match block.end_instr.kind {
+            MilEndInstructionKind::Call(_, method_id, _, _) => {
+                let (_, method) = env.get_method(method_id);
+
+                if method.flags.contains(MethodFlags::ABSTRACT) {
+                    block.end_instr.kind = MilEndInstructionKind::Unreachable;
+                    truncated_blocks.push(block_id);
+                };
+            },
+            _ => {}
+        }
+    };
+
+    for block_id in truncated_blocks {
+        for succ in cfg.get(block_id).outgoing.iter().copied() {
+            transform::remove_incoming_phis(func.blocks.get_mut(&succ).unwrap(), block_id);
+        };
+    };
+}
+
+pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, liveness: &LivenessInfo, verbose: bool) -> Option<MilFunction> {
     let (class, method) = env.get_method(method_id);
 
     if method.flags.contains(MethodFlags::NATIVE) {
@@ -1057,7 +1117,8 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
         builder.func.block_order.extend(block_info.blocks);
     }
 
-    let func = builder.finish();
+    let mut func = builder.finish();
+    lower_il_in_method(env, &mut func, liveness);
 
     if verbose {
         eprintln!("{}", func.pretty(env));
