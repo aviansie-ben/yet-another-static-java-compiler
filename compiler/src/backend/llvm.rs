@@ -803,6 +803,24 @@ unsafe fn emit_basic_block(
                         rhs,
                         register_name(tgt).as_ptr()
                     ),
+                    MilBinOp::IAnd => LLVMBuildAnd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IOr => LLVMBuildOr(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::IXor => LLVMBuildXor(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
                     MilBinOp::IShrS => LLVMBuildAShr(
                         builder.ptr(),
                         lhs,

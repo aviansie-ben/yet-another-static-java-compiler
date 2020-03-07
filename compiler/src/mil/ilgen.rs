@@ -592,6 +592,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
             },
+            BytecodeInstruction::I2C => {
+                let val = stack.pop().unwrap();
+                let result_reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::BinOp(
+                        MilBinOp::IAnd,
+                        result_reg,
+                        MilOperand::Register(val),
+                        MilOperand::Int(0xffff)
+                    ),
+                    bc
+                );
+
+                stack.push(result_reg);
+            },
             BytecodeInstruction::INeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int);
             },
@@ -615,6 +630,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::IShl => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::IShl, MilType::Int);
+            },
+            BytecodeInstruction::IAnd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAnd, MilType::Int);
+            },
+            BytecodeInstruction::IOr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IOr, MilType::Int);
+            },
+            BytecodeInstruction::IXor => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IXor, MilType::Int);
             },
             BytecodeInstruction::New(idx) => {
                 let cpe = match cp[idx as usize] {

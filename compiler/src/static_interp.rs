@@ -800,6 +800,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.get_local(idx as usize).as_int().unwrap() + inc as i32;
                 state.set_local(idx as usize, Value::Int(val));
             },
+            BytecodeInstruction::I2C => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(val & 0xffff));
+            }
             BytecodeInstruction::I2L => {
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Long(val as i64));
@@ -880,6 +884,11 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(o1 | o2));
+            },
+            BytecodeInstruction::IXor => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(o1 ^ o2));
             },
             BytecodeInstruction::LAdd => {
                 let o2 = state.stack.pop().as_long().unwrap();

@@ -316,6 +316,9 @@ pub enum MilBinOp {
     ISub,
     IMul,
     IDivS,
+    IAnd,
+    IOr,
+    IXor,
     IShrS,
     IShrU,
     IShl
@@ -328,6 +331,9 @@ impl fmt::Display for MilBinOp {
             MilBinOp::ISub => write!(f, "isub"),
             MilBinOp::IMul => write!(f, "imul"),
             MilBinOp::IDivS => write!(f, "idivs"),
+            MilBinOp::IAnd => write!(f, "iand"),
+            MilBinOp::IOr => write!(f, "ior"),
+            MilBinOp::IXor => write!(f, "ixor"),
             MilBinOp::IShrS => write!(f, "ishrs"),
             MilBinOp::IShrU => write!(f, "ishru"),
             MilBinOp::IShl => write!(f, "ishl")
