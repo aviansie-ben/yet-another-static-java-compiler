@@ -1605,7 +1605,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             emit_static_heap_object(&module, obj);
         };
 
-        for method_id in liveness.may_call.iter().cloned() {
+        for method_id in liveness.may_call.iter().sorted_by_key(|m| ((m.0).0, m.1)).cloned() {
             if let Some(func) = program.funcs.get(&method_id) {
                 emit_function(&module, func);
             };
