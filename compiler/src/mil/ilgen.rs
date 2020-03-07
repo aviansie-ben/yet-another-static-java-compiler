@@ -70,6 +70,15 @@ impl MilBuilder {
         self.end_block()
     }
 
+    pub fn insert_end_instruction(&mut self, block: MilBlockId, kind: MilEndInstructionKind, bc: u32) {
+        let block = self.func.blocks.get_mut(&block).unwrap();
+
+        block.end_instr = MilEndInstruction {
+            kind,
+            bytecode: (!0, bc)
+        };
+    }
+
     pub fn end_block(&mut self) -> MilBlockId {
         let id = self.func.block_alloc.allocate_one();
         self.current_block.id = id;
@@ -380,6 +389,26 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
     };
 
     blocks
+}
+
+fn emit_npe_throw(builder: &mut MilBuilder, bc: u32) {
+    // TODO Create an actual exception
+    builder.append_end_instruction(
+        MilEndInstructionKind::Throw(MilOperand::Null),
+        bc
+    );
+}
+
+fn emit_null_check(builder: &mut MilBuilder, val: MilOperand, bc: u32) {
+    let check_block = builder.end_block();
+    emit_npe_throw(builder, bc);
+
+    let not_null_block = builder.end_block();
+    builder.insert_end_instruction(
+        check_block,
+        MilEndInstructionKind::JumpIf(MilComparison::Ne, not_null_block, val, MilOperand::Null),
+        bc
+    );
 }
 
 fn generate_un_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, op: MilUnOp, result_ty: MilType) {
@@ -696,6 +725,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let ret_class = env.get_method(cpe.method_id).1.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+
+                emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
                     MilEndInstructionKind::Call(
                         ret_class,
@@ -720,6 +751,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let ret_class = method.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+
+                emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
                     if method.virtual_slot != !0 {
                         MilEndInstructionKind::CallVirtual(
@@ -754,6 +787,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let ret_class = method.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
                 let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+
+                emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
                     MilEndInstructionKind::CallInterface(
                         ret_class,
@@ -777,10 +812,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let obj = MilOperand::Register(stack.pop().unwrap());
                 let ty = get_mil_type_for_descriptor(&cpe.descriptor);
                 let reg = builder.allocate_reg(ty);
+
+                emit_null_check(builder, obj.clone(), bc);
                 builder.append_instruction(
                     MilInstructionKind::GetField(cpe.field_id, cpe.type_id, reg, obj),
                     bc
                 );
+
                 stack.push(reg);
             },
             BytecodeInstruction::PutField(idx) => {
@@ -791,6 +829,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let val = MilOperand::Register(stack.pop().unwrap());
                 let obj = MilOperand::Register(stack.pop().unwrap());
+
+                emit_null_check(builder, obj.clone(), bc);
                 builder.append_instruction(
                     MilInstructionKind::PutField(cpe.field_id, cpe.type_id, obj, val),
                     bc
