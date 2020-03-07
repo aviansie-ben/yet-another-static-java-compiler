@@ -905,8 +905,6 @@ unsafe fn emit_basic_block(
                 );
             },
             MilInstructionKind::GetStatic(field_id, class_id, tgt) => {
-                let class_obj = module.find_class_object(class_id);
-
                 let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
                     builder.ptr(),
                     create_meta_field_gep(&builder, field_id, &module.known_objs, &module.obj_map, &module.types),
