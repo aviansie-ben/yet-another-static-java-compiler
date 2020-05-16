@@ -929,6 +929,7 @@ mod tests {
                 this_id: ClassId::UNRESOLVED,
                 super_id: ClassId::UNRESOLVED,
                 interface_ids: vec![],
+                all_interface_ids: vec![],
                 clinit_method: None,
                 name: Arc::clone(&empty_string)
             }
@@ -943,7 +944,8 @@ mod tests {
             if name == "java/lang/Class" {
                 Some(Result::Ok(ResolvedClass::User(create_mock_class(&[
                     (FieldFlags::empty(), ClassId::JAVA_LANG_OBJECT),
-                    (FieldFlags::empty(), ClassId::PRIMITIVE_LONG)
+                    (FieldFlags::empty(), ClassId::PRIMITIVE_INT),
+                    (FieldFlags::empty(), ClassId::JAVA_LANG_OBJECT)
                 ]))))
             } else if name == "java/lang/String" {
                 Some(Result::Ok(ResolvedClass::User(create_mock_class(&[
@@ -1118,7 +1120,7 @@ mod tests {
 
     #[test]
     fn test_objects_do_not_overlap() {
-        let mut heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 3000) };
+        let mut heap = unsafe { JavaStaticHeap::new(&TEST_ENV, !0) };
         heap.init_class_objects(TEST_ENV.class_ids()).unwrap();
 
         let single_ref_class = TEST_ENV.try_find("mocha/$test/SingleRef").unwrap();
@@ -1160,7 +1162,7 @@ mod tests {
 
     #[test]
     fn test_class_objects() {
-        let mut heap = unsafe { JavaStaticHeap::new(&TEST_ENV, 1000) };
+        let mut heap = unsafe { JavaStaticHeap::new(&TEST_ENV, !0) };
         heap.init_class_objects(TEST_ENV.class_ids()).unwrap();
 
         for class_id in TEST_ENV.class_ids() {
