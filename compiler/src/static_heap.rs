@@ -730,14 +730,14 @@ impl <'a> JavaStaticHeap<'a> {
                 JavaStaticObject::allocate_object_sized(class_class, self.env, real_size)?
             }
         };
+        self.remaining_size.set(self.remaining_size.get() - size);
+
         let java_ref = obj.as_java_ref(self.env);
         java_ref.write_field(JAVA_LANG_CLASS_VTABLE_PTR_FIELD, Value::Int(class_id.0 as i32));
         java_ref.write_field(
             JAVA_LANG_CLASS_CANONICAL_NAME_FIELD,
             Value::Ref(Some(self.allocate_string_untracked(&self.env.get(class_id).name(self.env))?))
         );
-
-        self.remaining_size.set(self.remaining_size.get() - size);
 
         self.objs.get().as_mut().unwrap().push(obj);
         Result::Ok(java_ref)
