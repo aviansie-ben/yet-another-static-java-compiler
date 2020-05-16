@@ -6,6 +6,7 @@
 
 # Java
 *.class
+*.kotlin_module
 
 # Test output
 /test/out
