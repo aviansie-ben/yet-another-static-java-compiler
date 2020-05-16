@@ -7,5 +7,5 @@ pub unsafe extern fn org_mocha_test_Output_writeString(_: *mut MochaClass, msg: 
 
 #[no_mangle]
 pub unsafe extern fn org_mocha_test_Output_writeInt(_: *mut MochaClass, val: i32) {
-    print!("{}\n", val);
+    print!("{}", val);
 }
