@@ -1,4 +1,4 @@
-use std::alloc::{Alloc, AllocErr, Global};
+use std::alloc::{AllocErr, AllocInit, AllocRef, Global, Layout};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::{self, HashMap};
 use std::convert::TryInto;
@@ -547,11 +547,11 @@ struct JavaStaticObject {
 
 impl JavaStaticObject {
     unsafe fn allocate_uninit(size: usize) -> Result<JavaStaticObject, AllocErr> {
-        let bytes = Global.alloc_array::<u8>(size)?;
-        let checkpoint = match Global.alloc_array::<u8>(size) {
-            Result::Ok(checkpoint_ptr) => checkpoint_ptr,
+        let bytes = Global.alloc(Layout::from_size_align(size, 16).unwrap(), AllocInit::Uninitialized)?.ptr;
+        let checkpoint = match Global.alloc(Layout::from_size_align(size, 16).unwrap(), AllocInit::Uninitialized) {
+            Result::Ok(checkpoint_block) => checkpoint_block.ptr,
             Result::Err(err) => {
-                Global.dealloc_array::<u8>(bytes, size).unwrap();
+                Global.dealloc(bytes, Layout::from_size_align(size, 16).unwrap());
                 return Result::Err(err);
             }
         };
@@ -622,8 +622,8 @@ impl JavaStaticObject {
 impl Drop for JavaStaticObject {
     fn drop(&mut self) {
         unsafe {
-            Global.dealloc_array(self.bytes, self.size).unwrap();
-            Global.dealloc_array(self.checkpoint, self.size).unwrap();
+            Global.dealloc(self.bytes, Layout::from_size_align(self.size, 16).unwrap());
+            Global.dealloc(self.checkpoint, Layout::from_size_align(self.size, 16).unwrap());
         }
     }
 }
