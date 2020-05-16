@@ -505,6 +505,28 @@ impl ClassEnvironment {
         (class, &class.fields[id.1 as usize])
     }
 
+    pub fn can_convert(&self, from: ClassId, to: ClassId) -> bool {
+        if from == to {
+            return true;
+        };
+
+        match (&**self.get(from), &**self.get(to)) {
+            (&ResolvedClass::Array(_), _) if to == ClassId::JAVA_LANG_OBJECT => true,
+            // TODO Array interfaces?
+            (&ResolvedClass::Array(from_component), &ResolvedClass::Array(to_component)) => self.can_convert(from_component, to_component),
+            (&ResolvedClass::User(ref from_class), &ResolvedClass::User(_)) => {
+                if from_class.meta.all_interface_ids.contains(&to) {
+                    true
+                } else if from_class.meta.super_id != ClassId::UNRESOLVED {
+                    self.can_convert(from_class.meta.super_id, to)
+                } else {
+                    false
+                }
+            },
+            _ => false
+        }
+    }
+
     pub fn try_find(&self, name: &str) -> Option<ClassId> {
         self.internals.class_names.get(name).map(|&id| id)
     }

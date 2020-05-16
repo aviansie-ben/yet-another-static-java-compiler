@@ -1109,12 +1109,33 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 state.instrs.1 = dest;
             },
             BytecodeInstruction::InstanceOf(idx) => {
-                // TODO Perform the actual check
-                state.stack.pop();
-                state.stack.push(Value::Int(1));
+                let val = state.stack.pop().into_ref().unwrap();
+                let class_id = match state.class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe.class_id,
+                    _ => unreachable!()
+                };
+
+                state.stack.push(Value::Int(if let Some(val) = val {
+                    if state.env.can_convert(val.class_id(), class_id) {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }));
             },
             BytecodeInstruction::CheckCast(idx) => {
-                // TODO Perform the actual check
+                let class_id = match state.class.constant_pool[idx as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe.class_id,
+                    _ => unreachable!()
+                };
+
+                if let Some(val) = state.stack.peek().as_ref().unwrap() {
+                    if !state.env.can_convert(val.class_id(), class_id) {
+                        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    };
+                };
             },
             BytecodeInstruction::InvokeStatic(idx) | BytecodeInstruction::InvokeSpecial(idx) => {
                 match state.class.constant_pool[idx as usize] {
