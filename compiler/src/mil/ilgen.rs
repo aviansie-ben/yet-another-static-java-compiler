@@ -619,6 +619,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(builder, reg, MilType::Int);
             },
+            BytecodeInstruction::FConst(val) => {
+                let reg = builder.allocate_reg(MilType::Float);
+                builder.append_instruction(
+                    MilInstructionKind::Copy(reg, MilOperand::Float(val)),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Float);
+            },
             BytecodeInstruction::Dup => {
                 stack.push_slot(stack.peek());
             },
