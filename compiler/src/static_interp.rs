@@ -627,6 +627,12 @@ lazy_static! {
             native_double_from_bits as StaticNative
         );
 
+        known_natives.insert(
+            "java/lang/String.intern()Ljava/lang/String;",
+            // TODO Actually implement this
+            native_nop as StaticNative
+        );
+
         known_natives
     };
 }
