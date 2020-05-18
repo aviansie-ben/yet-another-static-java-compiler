@@ -384,7 +384,7 @@ pub struct MilInstructionWrapper<T> {
 pub type MilInstruction = MilInstructionWrapper<MilInstructionKind>;
 pub type MilEndInstruction = MilInstructionWrapper<MilEndInstructionKind>;
 
-struct FieldName<'a>(FieldId, &'a ClassEnvironment);
+pub struct FieldName<'a>(pub FieldId, pub &'a ClassEnvironment);
 
 impl <'a> fmt::Display for FieldName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -395,7 +395,7 @@ impl <'a> fmt::Display for FieldName<'a> {
     }
 }
 
-struct MethodName<'a>(MethodId, &'a ClassEnvironment);
+pub struct MethodName<'a>(pub MethodId, pub &'a ClassEnvironment);
 
 impl <'a> fmt::Display for MethodName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

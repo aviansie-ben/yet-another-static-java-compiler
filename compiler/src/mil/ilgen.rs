@@ -324,8 +324,20 @@ fn scan_for_block_starts(instrs: BytecodeIterator) -> HashSet<usize> {
             },
             BytecodeInstruction::JSR(_) => unimplemented!(),
             BytecodeInstruction::Ret(_) => unimplemented!(),
-            BytecodeInstruction::TableSwitch(_, _, _) => unimplemented!(),
-            BytecodeInstruction::LookupSwitch(_, _) => unimplemented!(),
+            BytecodeInstruction::TableSwitch(_, default_dest, ref table) => {
+                block_starts.insert(default_dest);
+                for dest in table.iter().copied() {
+                    block_starts.insert(dest);
+                };
+                next_starts_block = true;
+            },
+            BytecodeInstruction::LookupSwitch(default_dest, ref cases) => {
+                block_starts.insert(default_dest);
+                for (_, dest) in cases.iter().copied() {
+                    block_starts.insert(dest);
+                };
+                next_starts_block = true;
+            },
             _ => {}
         };
     };
@@ -380,13 +392,25 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
             },
             BytecodeInstruction::JSR(_) => unimplemented!(),
             BytecodeInstruction::Ret(_) => unimplemented!(),
-            BytecodeInstruction::TableSwitch(_, _, _) => unimplemented!(),
-            BytecodeInstruction::LookupSwitch(_, _) => unimplemented!(),
+            BytecodeInstruction::TableSwitch(_, default_dest, ref table) => {
+                can_fall_through = false;
+                edges.push((current_block, default_dest));
+                for dest in table.iter().copied() {
+                    edges.push((current_block, dest));
+                };
+            },
+            BytecodeInstruction::LookupSwitch(default_dest, ref cases) => {
+                can_fall_through = false;
+                edges.push((current_block, default_dest));
+                for (_, dest) in cases.iter().copied() {
+                    edges.push((current_block, dest));
+                };
+            },
             _ => {}
         };
     };
 
-    for (from, to) in edges {
+    for (from, to) in edges.into_iter().sorted().dedup() {
         blocks.get_mut(&from).unwrap().succs.push(to);
         blocks.get_mut(&to).unwrap().preds.push(from);
     };
@@ -1000,6 +1024,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::Return => {
                 end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
+                    bc
+                ));
+            },
+            BytecodeInstruction::TableSwitch(_, _, _) | BytecodeInstruction::LookupSwitch(_, _) => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                stack.pop();
+                end_block = Some(builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
                     bc
                 ));
             },

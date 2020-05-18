@@ -1108,6 +1108,14 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::Goto(dest) => {
                 state.instrs.1 = dest;
             },
+            BytecodeInstruction::LookupSwitch(default_dest, ref cases) => {
+                let selector = state.stack.pop().as_int().unwrap();
+                state.instrs.1 = cases.iter().find(|&&(key, _)| key == selector).map_or(default_dest, |&(_, dest)| dest);
+            },
+            BytecodeInstruction::TableSwitch(lo, default_dest, ref table) => {
+                let index = state.stack.pop().as_int().unwrap().wrapping_sub(lo);
+                state.instrs.1 = table.get(index as usize).map_or(default_dest, |&dest| dest);
+            },
             BytecodeInstruction::InstanceOf(idx) => {
                 let val = state.stack.pop().into_ref().unwrap();
                 let class_id = match state.class.constant_pool[idx as usize] {

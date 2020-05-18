@@ -123,7 +123,7 @@ pub enum BytecodeInstruction {
     LLoad(u16),
     LMul,
     LNeg,
-    LookupSwitch(i32, Vec<(i32, i32)>),
+    LookupSwitch(usize, Vec<(i32, usize)>),
     LOr,
     LRem,
     LReturn,
@@ -148,7 +148,7 @@ pub enum BytecodeInstruction {
     SALoad,
     SAStore,
     Swap,
-    TableSwitch(i32, i32, Vec<i32>)
+    TableSwitch(i32, usize, Vec<usize>)
 }
 
 fn read_u8(bytecode: &[u8], off: usize) -> Result<u8, usize> {
@@ -378,14 +378,14 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
                 return Result::Err(bytecode.len());
             };
 
-            let default = read_u32(bytecode, off + pad + 1)? as i32;
+            let default = off.wrapping_add(read_u32(bytecode, off + pad + 1)? as i32 as isize as usize);
             let len = read_u32(bytecode, off + pad + 5)? as usize;
 
             let mut lookup = vec![];
             for i in 0..len {
                 lookup.push((
                     read_u32(bytecode, off + pad + 9 + (i * 8))? as i32,
-                    read_u32(bytecode, off + pad + 13 + (i * 8))? as i32
+                    off.wrapping_add(read_u32(bytecode, off + pad + 13 + (i * 8))? as i32 as isize as usize)
                 ));
             };
 
@@ -438,7 +438,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
                 return Result::Err(bytecode.len());
             };
 
-            let default = read_u32(bytecode, off + pad + 1)? as i32;
+            let default = off.wrapping_add(read_u32(bytecode, off + pad + 1)? as i32 as isize as usize);
             let lo = read_u32(bytecode, off + pad + 5)? as i32;
             let hi = read_u32(bytecode, off + pad + 9)? as i32;
             let len = (hi - lo + 1) as usize;
@@ -446,7 +446,7 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
             let mut table = vec![];
             for i in 0..len {
                 table.push(
-                    read_u32(bytecode, off + pad + 13 + (i * 4))? as i32,
+                    off.wrapping_add(read_u32(bytecode, off + pad + 13 + (i * 4))? as i32 as isize as usize),
                 );
             };
 
