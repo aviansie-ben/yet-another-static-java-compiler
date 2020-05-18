@@ -227,9 +227,11 @@ unsafe fn lay_out_fields(env: &ClassEnvironment, fields: impl IntoIterator<Item=
 
         let field = env.get_field(f).1;
 
-        field_map.insert(f, llvm_fields.len());
-        llvm_fields.push(types.class_types[&field.class_id].field_ty);
-        current_size = off + layout::get_field_size_align(env, field.class_id).0;
+        if field.class_id != ClassId::UNRESOLVED {
+            field_map.insert(f, llvm_fields.len());
+            llvm_fields.push(types.class_types[&field.class_id].field_ty);
+            current_size = off + layout::get_field_size_align(env, field.class_id).0;
+        };
     };
 }
 
