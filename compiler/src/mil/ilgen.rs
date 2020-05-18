@@ -1171,6 +1171,65 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 ));
             },
+            BytecodeInstruction::FStore(_) => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                stack.pop(builder, MilType::Float);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
+            BytecodeInstruction::FLoad(_) => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let reg = builder.allocate_reg(MilType::Float);
+                stack.push(builder, reg, MilType::Float);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
+            BytecodeInstruction::I2F => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let reg = builder.allocate_reg(MilType::Float);
+                stack.pop(builder, MilType::Int);
+                stack.push(builder, reg, MilType::Float);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
+            BytecodeInstruction::F2I => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let reg = builder.allocate_reg(MilType::Int);
+                stack.pop(builder, MilType::Float);
+                stack.push(builder, reg, MilType::Int);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
+            BytecodeInstruction::FMul => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let reg = builder.allocate_reg(MilType::Float);
+                stack.pop(builder, MilType::Float);
+                stack.pop(builder, MilType::Float);
+                stack.push(builder, reg, MilType::Float);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
+            BytecodeInstruction::FCmpG | BytecodeInstruction::FCmpL => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let reg = builder.allocate_reg(MilType::Int);
+                stack.pop(builder, MilType::Float);
+                stack.pop(builder, MilType::Float);
+                stack.push(builder, reg, MilType::Int);
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
             BytecodeInstruction::TableSwitch(_, _, _) | BytecodeInstruction::LookupSwitch(_, _) => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
                 stack.pop(builder, MilType::Int);
