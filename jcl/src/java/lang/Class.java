@@ -21,8 +21,16 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
 
     // These fields will be filled in by the compiler when creating static Class objects. The order of these fields is
     // hardcoded, so the compiler will need to be updated if they're rearranged.
-    private transient final int vtableAddress = 0;
-    private transient final String canonicalName = "";
+
+    // WARNING: The meaning of a "vtable address" is different between the static interpreter and the runtime. As a
+    // result, this is the *only* field that should ever hold a vtable address. Caching this value in a location that
+    // might be populated by the static interpreter then read at runtime will cause undefined behaviour.
+    private transient final int vtableAddress;
+    private transient final String canonicalName;
+
+    private Class() {
+        throw new UnsupportedOperationException();
+    }
 
     public static Class<?> forName(String className) throws ClassNotFoundException {
         return forName(className, true, null);
