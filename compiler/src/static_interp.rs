@@ -1,5 +1,6 @@
 use std::alloc::AllocErr;
 use std::collections::HashMap;
+use std::fmt;
 
 use lazy_static::lazy_static;
 
@@ -216,6 +217,38 @@ impl <'a> Value<'a> {
             Value::Double(_) => true,
             _ => false
         }
+    }
+}
+
+impl <'a> fmt::Display for Value<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Value::Int(val) => {
+                write!(f, "Int({} [0x{:08x}])", val, val)?;
+            },
+            Value::Long(val) => {
+                write!(f, "Long({} [0x{:016x}])", val, val)?;
+            },
+            Value::Float(val) => {
+                write!(f, "Float({} [0x{:08x}])", f32::from_bits(val), val)?;
+            },
+            Value::Double(val) => {
+                write!(f, "Double({} [0x{:016x}])", f64::from_bits(val), val)?;
+            },
+            Value::Ref(None) => {
+                write!(f, "Ref(null)")?;
+            },
+            Value::Ref(Some(ref val)) => {
+                write!(f, "Ref({})", val)?;
+            },
+            Value::ReturnAddress(method_id, off, drop_locals) => {
+                write!(f, "ReturnAddress({:?}, {}, {})", method_id, off, drop_locals)?;
+            },
+            Value::Empty => {
+                write!(f, "Empty")?;
+            }
+        };
+        Ok(())
     }
 }
 
@@ -762,6 +795,12 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
 
             if !method.flags.contains(MethodFlags::STATIC) {
                 num_param_slots += 1;
+            };
+
+            if verbose {
+                for i in 0..num_param_slots {
+                    eprintln!("      {}", self.stack.read(i));
+                };
             };
 
             for _ in num_param_slots..(code.max_locals as usize) {

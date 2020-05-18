@@ -509,6 +509,33 @@ impl <'a> fmt::Debug for JavaStaticRef<'a> {
     }
 }
 
+impl <'a> fmt::Display for JavaStaticRef<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{}@{:?}", self.class().name(self.env), self.ptr)?;
+        match self.class_id() {
+            ClassId::JAVA_LANG_CLASS => {
+                write!(f, " (class: {})", self.read_field(JAVA_LANG_CLASS_CANONICAL_NAME_FIELD).as_ref().unwrap().unwrap().read_string())?;
+            },
+            ClassId::JAVA_LANG_STRING => {
+                if self.read_field(JAVA_LANG_STRING_DATA_FIELD) == Value::Ref(None) {
+                    write!(f, " (uninit)")?;
+                } else {
+                    write!(f, " {:?}", self.read_string())?;
+                };
+            },
+            _ => match self.class() {
+                ResolvedClass::Array(_) => {
+                    write!(f, " (len: {})", self.read_array_length())?;
+                },
+                _ => {}
+            }
+        };
+        write!(f, ">")?;
+
+        Ok(())
+    }
+}
+
 impl <'a> Clone for JavaStaticRef<'a> {
     fn clone(&self) -> Self {
         let java_ref = unsafe { self.clone_untracked() };
