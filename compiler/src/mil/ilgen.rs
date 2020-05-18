@@ -1121,6 +1121,18 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 }));
                 end_block = Some(block);
             },
+            BytecodeInstruction::CheckCast(_) => {
+                // TODO
+            },
+            BytecodeInstruction::InstanceOf(_) => {
+                stack.pop(builder, MilType::Ref);
+                let reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::Copy(reg, MilOperand::Int(1)),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Int);
+            },
             BytecodeInstruction::AThrow => {
                 let val = MilOperand::Register(stack.pop(builder, MilType::Ref));
                 end_block = Some(builder.append_end_instruction(
@@ -1150,7 +1162,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 ));
             },
             instr => {
-                panic!("Unsupported bytecode {:?} in ilgen", instr);
+                panic!("Unsupported bytecode {:?} in ilgen of method {}", instr, MethodName(builder.func.id, env));
             }
         };
     };
