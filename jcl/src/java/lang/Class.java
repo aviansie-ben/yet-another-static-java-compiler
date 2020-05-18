@@ -38,6 +38,13 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
 
     static native Class<?> getPrimitiveClass(String name);
 
+    private static native Class<?> getClassForVTable(int vtable);
+
+    private static native boolean isArray0(int vtable);
+    private static native boolean isPrimitive0(int vtable);
+
+    private static native int getComponentType0(int vtable);
+
     @SuppressWarnings("unchecked")
     public <U> Class<? extends U> asSubclass(Class<U> clazz) {
         if (!clazz.isAssignableFrom(this))
@@ -93,7 +100,10 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public Class<?> getComponentType() {
-        throw new UnsupportedOperationException();
+        if (isArray())
+            return getClassForVTable(getComponentType0(vtableAddress));
+        else
+            return null;
     }
 
     public Constructor<T> getConstructor(Class<?>... paramClasses) {
@@ -249,7 +259,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public boolean isArray() {
-        throw new UnsupportedOperationException();
+        return isArray0(vtableAddress);
     }
 
     public boolean isAssignableFrom(Class<?> clazz) {
@@ -277,7 +287,7 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public boolean isPrimitive() {
-        throw new UnsupportedOperationException();
+        return isPrimitive0(vtableAddress);
     }
 
     public boolean isSynthetic() {

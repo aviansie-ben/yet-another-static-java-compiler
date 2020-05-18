@@ -297,7 +297,7 @@ fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), Static
             "short" => state.heap.get_class_object(ClassId::PRIMITIVE_SHORT),
             "boolean" => state.heap.get_class_object(ClassId::PRIMITIVE_BOOLEAN),
             _ => {
-                eprintln!("WARNING: Bad primitive type {}", name);
+                eprintln!("WARNING: Call to Class.getPrimitiveClass with unknown type {:?}", name);
                 return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
             }
         };
@@ -307,6 +307,53 @@ fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), Static
     } else {
         Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
     }
+}
+
+fn native_class_get_component_type(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    state.stack.push(Value::Int(match **state.env.get(class_id) {
+        ResolvedClass::Array(class_id) => class_id.0 as i32,
+        ref class => {
+            eprintln!("WARNING: Call to Class.getComponentType0 with non array type {}", class.name(state.env));
+            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        }
+    }));
+    Result::Ok(())
+}
+
+fn native_class_is_array(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    state.stack.push(Value::Int(match **state.env.get(class_id) {
+        ResolvedClass::Array(_) => 1,
+        _ => 0
+    }));
+    Result::Ok(())
+}
+
+fn native_class_is_primitive(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    state.stack.push(Value::Int(match **state.env.get(class_id) {
+        ResolvedClass::Primitive(_) => 1,
+        _ => 0
+    }));
+    Result::Ok(())
+}
+
+fn native_class_from_vtable(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    if class_id != ClassId::UNRESOLVED {
+        state.stack.push(Value::Ref(Some(
+            state.heap.get_class_object(class_id)
+        )));
+    } else {
+        state.stack.push(Value::Ref(None));
+    };
+
+    Result::Ok(())
 }
 
 fn native_get_raw_float_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
@@ -441,6 +488,30 @@ fn native_unsafe_address_size(state: &mut InterpreterState) -> Result<(), Static
     Result::Ok(())
 }
 
+fn native_new_array(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let len = state.stack.pop().as_int().unwrap();
+    let class_obj = state.stack.pop().into_ref().unwrap();
+
+    if len < 0 {
+        return Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    let class_obj = if let Some(class_obj) = class_obj {
+        class_obj
+    } else {
+        return Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+    };
+
+    let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
+
+    if let Some(class_id) = state.env.try_find_array(class_id) {
+        state.stack.push(Value::Ref(Some(state.heap.allocate_array(class_id, len as u32)?)));
+        Ok(())
+    } else {
+        Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
+    }
+}
+
 type StaticNative = fn (&mut InterpreterState) -> Result<(), StaticInterpretError>;
 
 lazy_static! {
@@ -481,6 +552,27 @@ lazy_static! {
         known_natives.insert(
             "java/lang/Class.getPrimitiveClass(Ljava/lang/String;)Ljava/lang/Class;",
             native_get_primitive_class as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.getClassForVTable(I)Ljava/lang/Class;",
+            native_class_from_vtable as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.getComponentType0(I)I",
+            native_class_get_component_type as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.isArray0(I)Z",
+            native_class_is_array as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.isPrimitive0(I)Z",
+            native_class_is_primitive as StaticNative
+        );
+
+        known_natives.insert(
+            "java/lang/reflect/Array.newArray(Ljava/lang/Class;I)Ljava/lang/Object;",
+            native_new_array as StaticNative
         );
 
         known_natives.insert(

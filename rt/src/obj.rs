@@ -32,8 +32,12 @@ impl MochaVTable {
         (self as *const MochaVTable as usize as u32) + 8
     }
 
+    pub fn is_primitive(&self) -> bool {
+        (self.flags & MochaVTable::FLAG_PRIMITIVE) == MochaVTable::FLAG_PRIMITIVE
+    }
+
     pub fn field_size(&self) -> usize {
-        if (self.flags & MochaVTable::FLAG_PRIMITIVE) == MochaVTable::FLAG_PRIMITIVE {
+        if self.is_primitive() {
             match self.type_specific_info as u8 {
                 b'B' => 1,
                 b'C' => 2,
@@ -50,12 +54,17 @@ impl MochaVTable {
         }
     }
 
+    pub fn is_array(&self) -> bool {
+        (self.flags & MochaVTable::FLAG_ARRAY) == MochaVTable::FLAG_ARRAY
+    }
+
+    pub fn array_component_type(&self) -> &'static MochaVTable {
+        assert!(self.is_array());
+        unsafe { MochaVTable::from_compressed(self.type_specific_info as u32) }
+    }
+
     pub fn array_element_size(&self) -> usize {
-        assert!((self.flags & MochaVTable::FLAG_ARRAY) == MochaVTable::FLAG_ARRAY);
-        let elem_vtable = unsafe { MochaVTable::from_compressed(self.type_specific_info as u32) };
-
-        elem_vtable.field_size()
-
+        self.array_component_type().field_size()
     }
 }
 
