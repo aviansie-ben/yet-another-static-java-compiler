@@ -44,7 +44,11 @@ public class System {
     public static native long nanoTime();
 
     public static native void arraycopy(Object src, int srcPos, Object dst, int dstPos, int len);
-    public static native int identityHashCode(Object o);
+
+    public static int identityHashCode(Object o) {
+        // TODO This is technically correct, but very bad for performance
+        return 0;
+    }
 
     public static Properties getProperties() {
         return props;

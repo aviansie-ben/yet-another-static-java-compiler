@@ -16,7 +16,7 @@ public class Object {
     public native final Class<?> getClass();
 
     public int hashCode() {
-        throw new UnsupportedOperationException();
+        return System.identityHashCode(this);
     }
 
     public void notify() {
