@@ -807,10 +807,18 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val = state.get_local(idx as usize).as_int().unwrap() + inc as i32;
                 state.set_local(idx as usize, Value::Int(val));
             },
+            BytecodeInstruction::I2B => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(val as i8 as i32));
+            },
             BytecodeInstruction::I2C => {
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(val & 0xffff));
-            }
+            },
+            BytecodeInstruction::I2S => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Int(val as i16 as i32));
+            },
             BytecodeInstruction::I2L => {
                 let val = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Long(val as i64));
