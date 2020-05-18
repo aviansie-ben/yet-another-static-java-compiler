@@ -1274,7 +1274,6 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let mut phis_to_add = vec![];
 
     for block_id in func.block_order.iter().cloned() {
-        eprintln!("{}:", block_id);
         emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
     };
 
