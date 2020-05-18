@@ -1472,9 +1472,11 @@ fn try_run_clinit_without_checkpoint(env: &ClassEnvironment, heap: &JavaStaticHe
 
     match **env.get(class_id) {
         ResolvedClass::User(ref class) => {
-            for (i, m) in class.methods.iter().enumerate() {
-                if &*m.name == "<clinit>" {
-                    try_interpret(env, heap, MethodId(class_id, i as u16), verbose)?;
+            if &*class.meta.name != "java/nio/charset/Charset$ExtendedProviderHolder" {
+                for (i, m) in class.methods.iter().enumerate() {
+                    if &*m.name == "<clinit>" {
+                        try_interpret(env, heap, MethodId(class_id, i as u16), verbose)?;
+                    };
                 };
             };
         },
