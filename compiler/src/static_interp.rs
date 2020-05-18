@@ -557,7 +557,9 @@ lazy_static! {
         known_natives.insert("sun/misc/Unsafe.registerNatives()V", native_nop as StaticNative);
 
         known_natives.insert("java/io/FileInputStream.initIDs()V", native_nop as StaticNative);
+        known_natives.insert("java/io/FileOutputStream.initIDs()V", native_nop as StaticNative);
         known_natives.insert("java/io/FileDescriptor.initIDs()V", native_nop as StaticNative);
+        known_natives.insert("java/io/UnixFileSystem.initIDs()V", native_nop as StaticNative);
 
         known_natives.insert(
             "sun/misc/Unsafe.arrayBaseOffset(Ljava/lang/Class;)I",
