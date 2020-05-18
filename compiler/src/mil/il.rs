@@ -299,13 +299,17 @@ impl MilComparison {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MilUnOp {
-    INeg
+    INeg,
+    IExtB,
+    IExtS
 }
 
 impl fmt::Display for MilUnOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MilUnOp::INeg => write!(f, "ineg")
+            MilUnOp::INeg => write!(f, "ineg"),
+            MilUnOp::IExtB => write!(f, "iextb"),
+            MilUnOp::IExtS => write!(f, "iexts")
         }
     }
 }

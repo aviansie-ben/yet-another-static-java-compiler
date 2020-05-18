@@ -772,6 +772,28 @@ unsafe fn emit_basic_block(
                         builder.ptr(),
                         val,
                         register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::IExtB => LLVMBuildSExt(
+                        builder.ptr(),
+                        LLVMBuildTrunc(
+                            builder.ptr(),
+                            val,
+                            module.types.byte,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.types.int,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::IExtS => LLVMBuildSExt(
+                        builder.ptr(),
+                        LLVMBuildTrunc(
+                            builder.ptr(),
+                            val,
+                            module.types.short,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.types.int,
+                        register_name(tgt).as_ptr()
                     )
                 }, &module.types);
             },

@@ -616,6 +616,12 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
             },
+            BytecodeInstruction::I2B => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtB, MilType::Int);
+            },
+            BytecodeInstruction::I2S => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtS, MilType::Int);
+            }
             BytecodeInstruction::I2C => {
                 let val = stack.pop().unwrap();
                 let result_reg = builder.allocate_reg(MilType::Int);
