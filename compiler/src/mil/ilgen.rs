@@ -746,6 +746,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::IXor => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::IXor, MilType::Int, MilType::Int, MilType::Int);
             },
+            // TODO Support multithreading
+            BytecodeInstruction::MonitorEnter => {
+                stack.pop(builder, MilType::Ref);
+            },
+            BytecodeInstruction::MonitorExit => {
+                stack.pop(builder, MilType::Ref);
+            },
             BytecodeInstruction::New(idx) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => cpe,

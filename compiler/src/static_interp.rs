@@ -1121,6 +1121,12 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
                 state.stack.push(Value::Float((o1 * o2).to_bits()));
             },
+            BytecodeInstruction::MonitorEnter => {
+                state.stack.pop();
+            },
+            BytecodeInstruction::MonitorExit => {
+                state.stack.pop();
+            },
             BytecodeInstruction::New(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => {
