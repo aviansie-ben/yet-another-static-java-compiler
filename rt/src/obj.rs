@@ -176,6 +176,29 @@ impl MochaCharArray {
 }
 
 #[repr(C)]
+pub struct MochaByteArray {
+    pub obj: MochaObject,
+    pub len: u32,
+    pub arr_data: [u8; 0]
+}
+
+impl MochaByteArray {
+    pub fn data_cell(&self) -> &[Cell<u8>] {
+        unsafe {
+            std::slice::from_raw_parts(self.arr_data.as_ptr() as *const Cell<u8>, self.len as usize)
+        }
+    }
+
+    pub unsafe fn data(&self) -> &[u8] {
+        std::slice::from_raw_parts(self.arr_data.as_ptr(), self.len as usize)
+    }
+
+    pub unsafe fn data_mut(&self) -> &mut [u8] {
+        std::slice::from_raw_parts_mut(self.arr_data.as_ptr() as *mut u8, self.len as usize)
+    }
+}
+
+#[repr(C)]
 pub struct MochaString {
     pub obj: MochaObject,
     pub chars: *mut MochaCharArray
