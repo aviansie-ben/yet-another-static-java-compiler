@@ -55,11 +55,22 @@ public class System {
     }
 
     public static String getProperty(String prop) {
-        return props.getProperty(prop);
+        return getProperty(prop, null);
     }
 
     public static String getProperty(String prop, String defaultValue) {
-        return props.getProperty(prop, defaultValue);
+        if (prop.equals("file.encoding"))
+            return "us-ascii";
+        else if (prop.equals("file.separator"))
+            return "/";
+        else if (prop.equals("path.separator"))
+            return ":";
+        else if (prop.equals("line.separator"))
+            return "\n";
+        else if (prop.equals("java.home"))
+            return "/root";
+        else
+            return defaultValue;
     }
 
     public static String setProperty(String prop, String val) {
