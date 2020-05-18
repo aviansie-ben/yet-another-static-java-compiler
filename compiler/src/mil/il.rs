@@ -67,9 +67,13 @@ pub struct MilRegisterInfo {
     pub ty: MilType
 }
 
+impl MilRegisterInfo {
+    pub const VOID_INFO: MilRegisterInfo = MilRegisterInfo { ty: MilType::Void };
+}
+
 #[derive(Debug, Clone)]
 pub struct MilRegisterMap {
-    pub info: HashMap<MilRegister, MilRegisterInfo>,
+    info: HashMap<MilRegister, MilRegisterInfo>,
     pub local_info: HashMap<MilLocalId, MilLocalInfo>
 }
 
@@ -79,6 +83,23 @@ impl MilRegisterMap {
             info: HashMap::new(),
             local_info: HashMap::new()
         }
+    }
+
+    pub fn get_reg_info(&self, r: MilRegister) -> &MilRegisterInfo {
+        if r != MilRegister::VOID {
+            &self.info[&r]
+        } else {
+            &MilRegisterInfo::VOID_INFO
+        }
+    }
+
+    pub fn add_reg_info(&mut self, r: MilRegister, info: MilRegisterInfo) {
+        assert_ne!(r, MilRegister::VOID);
+        assert!(self.info.insert(r, info).is_none());
+    }
+
+    pub fn all_regs(&self) -> impl Iterator<Item=(MilRegister, &MilRegisterInfo)> {
+        self.info.iter().map(|(&r, i)| (r, i)).chain(itertools::repeat_n((MilRegister::VOID, &MilRegisterInfo::VOID_INFO), 1))
     }
 }
 
@@ -247,7 +268,7 @@ impl MilOperand {
 
     pub fn get_type(&self, reg_map: &MilRegisterMap) -> MilType {
         match *self {
-            MilOperand::Register(reg) => reg_map.info[&reg].ty,
+            MilOperand::Register(reg) => reg_map.get_reg_info(reg).ty,
             _ => self.get_const_type().unwrap()
         }
     }

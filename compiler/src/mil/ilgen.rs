@@ -30,10 +30,11 @@ impl MilBuilder {
 
         let mut ty = None;
         let srcs = srcs.into_iter().map(|(reg, block)| {
+            let new_ty = self.func.reg_map.get_reg_info(reg).ty;
             if let Some(ty) = ty {
-                assert_eq!(self.func.reg_map.info[&reg].ty, ty);
+                assert_eq!(new_ty, ty);
             } else {
-                ty = Some(self.func.reg_map.info[&reg].ty);
+                ty = Some(new_ty);
             };
 
             (reg, block)
@@ -53,7 +54,7 @@ impl MilBuilder {
             MilRegister::VOID
         } else {
             let r = self.func.reg_alloc.allocate_one();
-            self.func.reg_map.info.insert(r, MilRegisterInfo { ty });
+            self.func.reg_map.add_reg_info(r, MilRegisterInfo { ty });
             r
         }
     }
@@ -1066,7 +1067,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             assert!(stack.len() == start_block.phi_nodes.len());
 
             for (stack_elem, phi) in stack.iter().cloned().zip(start_block.phi_nodes.iter_mut()) {
-                assert!(builder.func.reg_map.info[&stack_elem].ty == builder.func.reg_map.info[&phi.sources[0].0].ty);
+                assert_eq!(builder.func.reg_map.get_reg_info(stack_elem).ty, builder.func.reg_map.get_reg_info(phi.sources[0].0).ty);
                 phi.sources.push((stack_elem, end_block));
             };
         } else if !block_worklist.contains(&succ_bc) {

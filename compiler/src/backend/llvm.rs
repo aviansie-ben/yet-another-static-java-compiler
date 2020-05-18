@@ -650,7 +650,7 @@ unsafe fn set_register(builder: &LLVMBuilder, func: &MilFunction, local_regs: &m
 
     local_regs.insert(reg, val);
 
-    let val = LLVMBuildBitCast(builder.ptr(), val, native_arg_type(func.reg_map.info[&reg].ty, types), b"\0".as_ptr() as *const c_char);
+    let val = LLVMBuildBitCast(builder.ptr(), val, native_arg_type(func.reg_map.get_reg_info(reg).ty, types), b"\0".as_ptr() as *const c_char);
     assert!(all_regs.insert(reg, val).is_none());
 }
 
@@ -722,7 +722,7 @@ unsafe fn emit_basic_block(
             } else {
                 let phi = LLVMBuildPhi(
                     builder.ptr(),
-                    native_arg_type(func.reg_map.info[&reg].ty, &module.types),
+                    native_arg_type(func.reg_map.get_reg_info(reg).ty, &module.types),
                     register_name(reg).as_ptr()
                 );
 
@@ -735,7 +735,7 @@ unsafe fn emit_basic_block(
         };
     } else {
         for reg in find_used_before_def(block) {
-            local_regs.insert(reg, undefined_register_value(module, func.reg_map.info[&reg].ty));
+            local_regs.insert(reg, undefined_register_value(module, func.reg_map.get_reg_info(reg).ty));
         };
     };
 
@@ -743,7 +743,7 @@ unsafe fn emit_basic_block(
         if !phi.sources.is_empty() {
             let llvm_phi = LLVMBuildPhi(
                 builder.ptr(),
-                native_arg_type(func.reg_map.info[&phi.target].ty, &module.types),
+                native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types),
                 register_name(phi.target).as_ptr()
             );
 
@@ -753,7 +753,7 @@ unsafe fn emit_basic_block(
                 phis_to_add.push((llvm_phi, pred, src));
             };
         } else {
-            let val = undefined_register_value(module, func.reg_map.info[&phi.target].ty);
+            let val = undefined_register_value(module, func.reg_map.get_reg_info(phi.target).ty);
             set_register(&builder, func, &mut local_regs, all_regs, phi.target, val, &module.types);
         };
     };
@@ -1276,7 +1276,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
     };
 
-    for (&reg, info) in func.reg_map.info.iter() {
+    for (reg, info) in func.reg_map.all_regs() {
         if !all_regs.contains_key(&reg) && info.ty != MilType::Void {
             all_regs.insert(reg, undefined_register_value(module, info.ty));
         };
