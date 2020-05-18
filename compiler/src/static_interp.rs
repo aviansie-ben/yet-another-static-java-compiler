@@ -779,9 +779,16 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let val1 = state.stack.pop_slot();
                 let val2 = state.stack.pop_slot();
 
-                state.stack.push(val1.clone());
-                state.stack.push(val2);
-                state.stack.push(val1);
+                state.stack.push_slot(val1.clone());
+                state.stack.push_slot(val2);
+                state.stack.push_slot(val1);
+            },
+            BytecodeInstruction::Dup2 => {
+                let val1 = state.stack.read(0).clone();
+                let val2 = state.stack.read(1).clone();
+
+                state.stack.push_slot(val2);
+                state.stack.push_slot(val1);
             },
             BytecodeInstruction::Pop => {
                 state.stack.pop_slot();
