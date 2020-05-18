@@ -638,6 +638,16 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 stack.push_slot(val2);
                 stack.push_slot(val1);
             },
+            BytecodeInstruction::DupX2 => {
+                let val1 = stack.pop_slot();
+                let val2 = stack.pop_slot();
+                let val3 = stack.pop_slot();
+
+                stack.push_slot(val1);
+                stack.push_slot(val3);
+                stack.push_slot(val2);
+                stack.push_slot(val1);
+            },
             BytecodeInstruction::Pop => {
                 stack.pop_slot();
             },
