@@ -929,14 +929,79 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 state.stack.push(Value::Int(
                     if val.is_nan() {
                         0
-                    } else if val < (i32::min_value() as f32) {
+                    } else if val <= (i32::min_value() as f32) {
                         i32::min_value()
-                    } else if val > (i32::max_value() as f32) {
+                    } else if val >= (i32::max_value() as f32) {
                         i32::max_value()
                     } else {
                         val as i32
                     }
                 ));
+            },
+            BytecodeInstruction::I2D => {
+                let val = state.stack.pop().as_int().unwrap();
+                state.stack.push(Value::Double((val as f64).to_bits()));
+            },
+            BytecodeInstruction::D2I => {
+                let val = f64::from_bits(state.stack.pop().as_double().unwrap());
+
+                state.stack.push(Value::Int(
+                    if val.is_nan() {
+                        0
+                    } else if val <= (i32::min_value() as f64) {
+                        i32::min_value()
+                    } else if val >= (i32::max_value() as f64) {
+                        i32::max_value()
+                    } else {
+                        val as i32
+                    }
+                ));
+            },
+            BytecodeInstruction::L2F => {
+                let val = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Float((val as f32).to_bits()));
+            },
+            BytecodeInstruction::F2L => {
+                let val = f32::from_bits(state.stack.pop().as_float().unwrap());
+
+                state.stack.push(Value::Long(
+                    if val.is_nan() {
+                        0
+                    } else if val <= (i64::min_value() as f32) {
+                        i64::min_value()
+                    } else if val >= (i64::max_value() as f32) {
+                        i64::max_value()
+                    } else {
+                        val as i64
+                    }
+                ));
+            },
+            BytecodeInstruction::L2D => {
+                let val = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Double((val as f64).to_bits()));
+            },
+            BytecodeInstruction::D2L => {
+                let val = f64::from_bits(state.stack.pop().as_double().unwrap());
+
+                state.stack.push(Value::Long(
+                    if val.is_nan() {
+                        0
+                    } else if val <= (i64::min_value() as f64) {
+                        i64::min_value()
+                    } else if val >= (i64::max_value() as f64) {
+                        i64::max_value()
+                    } else {
+                        val as i64
+                    }
+                ));
+            },
+            BytecodeInstruction::F2D => {
+                let val = f32::from_bits(state.stack.pop().as_float().unwrap());
+                state.stack.push(Value::Double((val as f64).to_bits()));
+            },
+            BytecodeInstruction::D2F => {
+                let val = f64::from_bits(state.stack.pop().as_double().unwrap());
+                state.stack.push(Value::Float((val as f32).to_bits()));
             },
             BytecodeInstruction::INeg => {
                 let val = state.stack.pop().as_int().unwrap();
