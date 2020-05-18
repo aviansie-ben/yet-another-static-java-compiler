@@ -930,12 +930,26 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::FCmpG => {
                 let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
                 let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
-                state.stack.push(Value::Int(if o1 > o2 { 1 } else { 0 }));
+                state.stack.push(Value::Int(
+                    match o1.partial_cmp(&o2) {
+                        Some(std::cmp::Ordering::Equal) => 0,
+                        Some(std::cmp::Ordering::Greater) => 1,
+                        Some(std::cmp::Ordering::Less) => -1,
+                        None => 1
+                    }
+                ));
             },
             BytecodeInstruction::FCmpL => {
                 let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
                 let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
-                state.stack.push(Value::Int(if o1 < o2 { 1 } else { 0 }));
+                state.stack.push(Value::Int(
+                    match o1.partial_cmp(&o2) {
+                        Some(std::cmp::Ordering::Equal) => 0,
+                        Some(std::cmp::Ordering::Greater) => 1,
+                        Some(std::cmp::Ordering::Less) => -1,
+                        None => -1
+                    }
+                ));
             },
             BytecodeInstruction::FMul => {
                 let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
