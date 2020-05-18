@@ -41,10 +41,12 @@ impl MilBuilder {
         }).collect();
 
         let reg = self.allocate_reg(ty.unwrap());
-        self.current_block.phi_nodes.push(MilPhiNode {
-            target: reg,
-            sources: srcs
-        });
+        if reg != MilRegister::VOID {
+            self.current_block.phi_nodes.push(MilPhiNode {
+                target: reg,
+                sources: srcs
+            });
+        };
 
         reg
     }
@@ -153,6 +155,74 @@ impl MilLocals {
     }
 }
 
+struct MilVirtualStack {
+    stack: Vec<MilRegister>
+}
+
+impl MilVirtualStack {
+    fn new(stack: Vec<MilRegister>) -> MilVirtualStack {
+        MilVirtualStack { stack }
+    }
+
+    fn push(&mut self, builder: &MilBuilder, r: MilRegister, ty: MilType) {
+        assert_eq!(builder.func.reg_map.get_reg_info(r).ty, ty);
+
+        self.push_slot(r);
+        if ty == MilType::Double || ty == MilType::Long {
+            self.push_slot(MilRegister::VOID);
+        };
+    }
+
+    fn push_slot(&mut self, r: MilRegister) {
+        self.stack.push(r);
+    }
+
+    fn pop(&mut self, builder: &MilBuilder, ty: MilType) -> MilRegister {
+        if ty == MilType::Double || ty == MilType::Long {
+            assert_eq!(self.pop_slot(), MilRegister::VOID);
+        };
+
+        let r = self.pop_slot();
+        assert_eq!(builder.func.reg_map.get_reg_info(r).ty, ty);
+        r
+    }
+
+    fn pop_any(&mut self, builder: &MilBuilder) -> MilRegister {
+        if self.peek() == MilRegister::VOID && self.len() > 1 {
+            let ty = builder.func.reg_map.get_reg_info(self.read(1)).ty;
+            if ty == MilType::Long || ty == MilType::Double {
+                self.pop_slot();
+            };
+        };
+
+        self.pop_slot()
+    }
+
+    fn pop_slot(&mut self) -> MilRegister {
+        self.stack.pop().unwrap()
+    }
+
+    fn peek(&self) -> MilRegister {
+        self.read(0)
+    }
+
+    fn read(&self, depth: usize) -> MilRegister {
+        self.stack[self.stack.len() - 1 - depth]
+    }
+
+    fn as_slice(&self) -> &[MilRegister] {
+        &self.stack
+    }
+
+    fn non_void_slots<'a>(&'a self) -> impl Iterator<Item=MilRegister> + 'a {
+        self.stack.iter().copied().filter(|&r| r != MilRegister::VOID)
+    }
+
+    fn len(&self) -> usize {
+        self.stack.len()
+    }
+}
+
 fn get_mil_type_for_descriptor(ty: &TypeDescriptor) -> MilType {
     if ty.array_dims > 0 {
         MilType::Ref
@@ -171,11 +241,15 @@ fn get_mil_type_for_descriptor(ty: &TypeDescriptor) -> MilType {
     }
 }
 
-fn pop_args(stack: &mut Vec<MilRegister>, n: usize) -> Vec<MilOperand> {
+fn pop_args(stack: &mut MilVirtualStack, builder: &MilBuilder, tys: &[TypeDescriptor], has_receiver: bool) -> Vec<MilOperand> {
     let mut args = vec![];
 
-    for _ in 0..n {
-        args.push(MilOperand::Register(stack.pop().unwrap()));
+    for ty in tys.iter().rev() {
+        args.push(MilOperand::Register(stack.pop(builder, get_mil_type_for_descriptor(ty))));
+    };
+
+    if has_receiver {
+        args.push(MilOperand::Register(stack.pop(builder, MilType::Ref)));
     };
 
     args.reverse();
@@ -439,45 +513,45 @@ fn emit_null_check(builder: &mut MilBuilder, val: MilOperand, bc: u32) {
     );
 }
 
-fn generate_un_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, op: MilUnOp, result_ty: MilType) {
+fn generate_un_op(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32, op: MilUnOp, op_ty: MilType, result_ty: MilType) {
     let reg = builder.allocate_reg(result_ty);
-    let val = MilOperand::Register(stack.pop().unwrap());
+    let val = MilOperand::Register(stack.pop(builder, op_ty));
 
     builder.append_instruction(
         MilInstructionKind::UnOp(op, reg, val),
         bc
     );
-    stack.push(reg);
+    stack.push(builder, reg, result_ty);
 }
 
-fn generate_bin_op(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, op: MilBinOp, result_ty: MilType) {
+fn generate_bin_op(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32, op: MilBinOp, op1_ty: MilType, op2_ty: MilType, result_ty: MilType) {
     let reg = builder.allocate_reg(result_ty);
-    let rhs = MilOperand::Register(stack.pop().unwrap());
-    let lhs = MilOperand::Register(stack.pop().unwrap());
+    let rhs = MilOperand::Register(stack.pop(builder, op1_ty));
+    let lhs = MilOperand::Register(stack.pop(builder, op2_ty));
 
     builder.append_instruction(
         MilInstructionKind::BinOp(op, reg, lhs, rhs),
         bc
     );
-    stack.push(reg);
+    stack.push(builder, reg, result_ty);
 }
 
-fn generate_array_load(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, elem_class: ClassId, result_ty: MilType) {
-    let reg = builder.allocate_reg(result_ty);
-    let idx = MilOperand::Register(stack.pop().unwrap());
-    let obj = MilOperand::Register(stack.pop().unwrap());
+fn generate_array_load(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32, elem_class: ClassId, elem_ty: MilType) {
+    let reg = builder.allocate_reg(elem_ty);
+    let idx = MilOperand::Register(stack.pop(builder, MilType::Int));
+    let obj = MilOperand::Register(stack.pop(builder, MilType::Ref));
 
     builder.append_instruction(
         MilInstructionKind::GetArrayElement(elem_class, reg, obj, idx),
         bc
     );
-    stack.push(reg);
+    stack.push(builder, reg, elem_ty);
 }
 
-fn generate_array_store(builder: &mut MilBuilder, stack: &mut Vec<MilRegister>, bc: u32, elem_class: ClassId) {
-    let val = MilOperand::Register(stack.pop().unwrap());
-    let idx = MilOperand::Register(stack.pop().unwrap());
-    let obj = MilOperand::Register(stack.pop().unwrap());
+fn generate_array_store(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32, elem_class: ClassId, elem_ty: MilType) {
+    let val = MilOperand::Register(stack.pop(builder, elem_ty));
+    let idx = MilOperand::Register(stack.pop(builder, MilType::Int));
+    let obj = MilOperand::Register(stack.pop(builder, MilType::Ref));
 
     builder.append_instruction(
         MilInstructionKind::PutArrayElement(elem_class, obj, idx, val),
@@ -496,14 +570,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         }
     }).collect_vec();
 
-    let mut stack = if !incoming_stacks.is_empty() {
+    let mut stack = MilVirtualStack::new(if !incoming_stacks.is_empty() {
         assert!(incoming_stacks.iter().skip(1).all(|(_, s)| s.len() == incoming_stacks[0].1.len()));
         (0..incoming_stacks[0].1.len()).map(|i| {
             builder.append_phi_node(incoming_stacks.iter().map(|&(b, s)| (s[i], b)), off as u32)
         }).collect_vec()
     } else {
         vec![]
-    };
+    });
 
     let start_block = builder.end_block();
     let mut end_block = None;
@@ -513,7 +587,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         let instr = instr.unwrap();
 
         if verbose {
-            eprintln!("  {}: {:?} {:?}", bc, instr, stack);
+            eprintln!("  {}: {:?} {:?}", bc, instr, stack.as_slice());
         };
 
         assert!(end_block.is_none());
@@ -521,12 +595,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         match instr {
             BytecodeInstruction::Ldc(idx) | BytecodeInstruction::Ldc2(idx) => {
                 let val = constant_from_cpe(&cp[idx as usize], known_objects);
-                let reg = builder.allocate_reg(val.get_const_type().unwrap());
+                let ty = val.get_const_type().unwrap();
+                let reg = builder.allocate_reg(ty);
                 builder.append_instruction(
                     MilInstructionKind::Copy(reg, val),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, ty);
             },
             BytecodeInstruction::AConstNull => {
                 let reg = builder.allocate_reg(MilType::Ref);
@@ -534,7 +609,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::Copy(reg, MilOperand::Null),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Ref);
             },
             BytecodeInstruction::IConst(val) => {
                 let reg = builder.allocate_reg(MilType::Int);
@@ -542,21 +617,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::Copy(reg, MilOperand::Int(val)),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Int);
             },
             BytecodeInstruction::Dup => {
-                stack.push(*stack.last().unwrap());
+                stack.push_slot(stack.peek());
             },
             BytecodeInstruction::DupX1 => {
-                let val1 = stack.pop().unwrap();
-                let val2 = stack.pop().unwrap();
+                let val1 = stack.pop_slot();
+                let val2 = stack.pop_slot();
 
-                stack.push(val1);
-                stack.push(val2);
-                stack.push(val1);
+                stack.push_slot(val1);
+                stack.push_slot(val2);
+                stack.push_slot(val1);
             },
             BytecodeInstruction::Pop => {
-                stack.pop();
+                stack.pop_slot();
             },
             BytecodeInstruction::ALoad(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
@@ -565,7 +640,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::GetLocal(local_id, reg),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Ref);
             },
             BytecodeInstruction::ILoad(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
@@ -574,11 +649,11 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::GetLocal(local_id, reg),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Int);
             },
             BytecodeInstruction::AStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
-                let val = stack.pop().unwrap();
+                let val = stack.pop(builder, MilType::Ref);
                 builder.append_instruction(
                     MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
                     bc
@@ -586,7 +661,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::IStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
-                let val = stack.pop().unwrap();
+                let val = stack.pop(builder, MilType::Int);
                 builder.append_instruction(
                     MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
                     bc
@@ -618,13 +693,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
             },
             BytecodeInstruction::I2B => {
-                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtB, MilType::Int);
+                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtB, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::I2S => {
-                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtS, MilType::Int);
+                generate_un_op(builder, &mut stack, bc, MilUnOp::IExtS, MilType::Int, MilType::Int);
             }
             BytecodeInstruction::I2C => {
-                let val = stack.pop().unwrap();
+                let val = stack.pop(builder, MilType::Int);
                 let result_reg = builder.allocate_reg(MilType::Int);
                 builder.append_instruction(
                     MilInstructionKind::BinOp(
@@ -636,40 +711,40 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
 
-                stack.push(result_reg);
+                stack.push(builder, result_reg, MilType::Int);
             },
             BytecodeInstruction::INeg => {
-                generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int);
+                generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IAdd => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAdd, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAdd, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::ISub => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::ISub, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::ISub, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IMul => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IMul, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IMul, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IDiv => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IDivS, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IDivS, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IShr => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrS, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrS, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IUShr => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrU, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrU, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IShl => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShl, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IShl, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IAnd => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAnd, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IAnd, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IOr => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IOr, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IOr, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::IXor => {
-                generate_bin_op(builder, &mut stack, bc, MilBinOp::IXor, MilType::Int);
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IXor, MilType::Int, MilType::Int, MilType::Int);
             },
             BytecodeInstruction::New(idx) => {
                 let cpe = match cp[idx as usize] {
@@ -682,7 +757,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::AllocObj(cpe.class_id, reg),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Ref);
             },
             BytecodeInstruction::ANewArray(idx) => {
                 let cpe = match cp[idx as usize] {
@@ -691,21 +766,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 };
 
                 let reg = builder.allocate_reg(MilType::Ref);
-                let len = MilOperand::Register(stack.pop().unwrap());
+                let len = MilOperand::Register(stack.pop(builder, MilType::Int));
                 builder.append_instruction(
                     MilInstructionKind::AllocArray(cpe.array_class_id, reg, len),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Ref);
             },
             BytecodeInstruction::NewArray(ty) => {
                 let reg = builder.allocate_reg(MilType::Ref);
-                let len = MilOperand::Register(stack.pop().unwrap());
+                let len = MilOperand::Register(stack.pop(builder, MilType::Int));
                 builder.append_instruction(
                     MilInstructionKind::AllocArray(ClassId::for_primitive_type_array(ty), reg, len),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Ref);
             },
             BytecodeInstruction::BALoad => {
                 generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE, MilType::Int);
@@ -726,31 +801,31 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 generate_array_load(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT, MilType::Ref);
             }
             BytecodeInstruction::BAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE);
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE, MilType::Int);
             },
             BytecodeInstruction::SAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_SHORT);
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_SHORT, MilType::Int);
             },
             BytecodeInstruction::CAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_CHAR);
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_CHAR, MilType::Int);
             },
             BytecodeInstruction::IAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_INT);
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_INT, MilType::Int);
             },
             BytecodeInstruction::LAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_LONG);
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_LONG, MilType::Long);
             },
             BytecodeInstruction::AAStore => {
-                generate_array_store(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT);
+                generate_array_store(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT, MilType::Ref);
             },
             BytecodeInstruction::ArrayLength => {
                 let reg = builder.allocate_reg(MilType::Int);
-                let obj = MilOperand::Register(stack.pop().unwrap());
+                let obj = MilOperand::Register(stack.pop(builder, MilType::Ref));
                 builder.append_instruction(
                     MilInstructionKind::GetArrayLength(reg, obj),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, MilType::Int);
             },
             BytecodeInstruction::InvokeStatic(idx) => {
                 let cpe = match cp[idx as usize] {
@@ -760,7 +835,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let ret_class = env.get_method(cpe.method_id).1.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
-                let args = pop_args(&mut stack, cpe.descriptor.param_types.len());
+                let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, false);
                 builder.append_end_instruction(
                     MilEndInstructionKind::Call(
                         ret_class,
@@ -771,7 +846,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
-                    stack.push(reg);
+                    stack.push(builder, reg, MilType::for_class(ret_class));
                 };
             },
             BytecodeInstruction::InvokeSpecial(idx) => {
@@ -782,7 +857,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let ret_class = env.get_method(cpe.method_id).1.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
-                let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+                let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
 
                 emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
@@ -795,7 +870,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
-                    stack.push(reg);
+                    stack.push(builder, reg, MilType::for_class(ret_class));
                 };
             },
             BytecodeInstruction::InvokeVirtual(idx) => {
@@ -808,7 +883,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let ret_class = method.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
-                let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+                let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
 
                 emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
@@ -822,7 +897,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
-                    stack.push(reg);
+                    stack.push(builder, reg, MilType::for_class(ret_class));
                 };
             },
             BytecodeInstruction::InvokeInterface(idx, _) => {
@@ -835,7 +910,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let ret_class = method.return_type;
                 let reg = builder.allocate_reg(MilType::for_class(ret_class));
-                let args = pop_args(&mut stack, cpe.descriptor.param_types.len() + 1);
+                let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
 
                 emit_null_check(builder, args[0].clone(), bc);
                 builder.append_end_instruction(
@@ -849,7 +924,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
                 if ret_class != ClassId::PRIMITIVE_VOID {
-                    stack.push(reg);
+                    stack.push(builder, reg, MilType::for_class(ret_class));
                 };
             },
             BytecodeInstruction::GetField(idx) => {
@@ -858,8 +933,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     _ => unreachable!()
                 };
 
-                let obj = MilOperand::Register(stack.pop().unwrap());
                 let ty = get_mil_type_for_descriptor(&cpe.descriptor);
+                let obj = MilOperand::Register(stack.pop(builder, MilType::Ref));
                 let reg = builder.allocate_reg(ty);
 
                 emit_null_check(builder, obj.clone(), bc);
@@ -868,7 +943,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
 
-                stack.push(reg);
+                stack.push(builder, reg, ty);
             },
             BytecodeInstruction::PutField(idx) => {
                 let cpe = match cp[idx as usize] {
@@ -876,8 +951,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     _ => unreachable!()
                 };
 
-                let val = MilOperand::Register(stack.pop().unwrap());
-                let obj = MilOperand::Register(stack.pop().unwrap());
+                let ty = get_mil_type_for_descriptor(&cpe.descriptor);
+                let val = MilOperand::Register(stack.pop(builder, ty));
+                let obj = MilOperand::Register(stack.pop(builder, MilType::Ref));
 
                 emit_null_check(builder, obj.clone(), bc);
                 builder.append_instruction(
@@ -897,7 +973,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilInstructionKind::GetStatic(cpe.field_id, cpe.type_id, reg),
                     bc
                 );
-                stack.push(reg);
+                stack.push(builder, reg, ty);
             },
             BytecodeInstruction::PutStatic(idx) => {
                 let cpe = match cp[idx as usize] {
@@ -905,14 +981,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     _ => unreachable!()
                 };
 
-                let val = MilOperand::Register(stack.pop().unwrap());
+                let ty = get_mil_type_for_descriptor(&cpe.descriptor);
+                let val = MilOperand::Register(stack.pop(builder, ty));
                 builder.append_instruction(
                     MilInstructionKind::PutStatic(cpe.field_id, cpe.type_id, val),
                     bc
                 );
             },
             BytecodeInstruction::If(cond, target) => {
-                let val = stack.pop().unwrap();
+                let val = stack.pop(builder, MilType::Int);
                 let block = builder.append_end_instruction(
                     MilEndInstructionKind::JumpIf(
                         MilComparison::from_bytecode(cond),
@@ -933,9 +1010,32 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 }));
                 end_block = Some(block);
             },
-            BytecodeInstruction::IfICmp(cond, target) | BytecodeInstruction::IfACmp(cond, target) => {
-                let rhs = stack.pop().unwrap();
-                let lhs = stack.pop().unwrap();
+            BytecodeInstruction::IfICmp(cond, target) => {
+                let rhs = stack.pop(builder, MilType::Int);
+                let lhs = stack.pop(builder, MilType::Int);
+                let block = builder.append_end_instruction(
+                    MilEndInstructionKind::JumpIf(
+                        MilComparison::from_bytecode(cond),
+                        MilBlockId::ENTRY,
+                        MilOperand::Register(lhs),
+                        MilOperand::Register(rhs)
+                    ),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                            *block = blocks[&target].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(block);
+            },
+            BytecodeInstruction::IfACmp(cond, target) => {
+                let rhs = stack.pop(builder, MilType::Ref);
+                let lhs = stack.pop(builder, MilType::Ref);
                 let block = builder.append_end_instruction(
                     MilEndInstructionKind::JumpIf(
                         MilComparison::from_bytecode(cond),
@@ -961,7 +1061,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilEndInstructionKind::JumpIf(
                         MilComparison::Ne,
                         MilBlockId::ENTRY,
-                        MilOperand::Register(stack.pop().unwrap()),
+                        MilOperand::Register(stack.pop(builder, MilType::Ref)),
                         MilOperand::Null
                     ),
                     bc
@@ -982,7 +1082,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilEndInstructionKind::JumpIf(
                         MilComparison::Eq,
                         MilBlockId::ENTRY,
-                        MilOperand::Register(stack.pop().unwrap()),
+                        MilOperand::Register(stack.pop(builder, MilType::Ref)),
                         MilOperand::Null
                     ),
                     bc
@@ -1015,14 +1115,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 end_block = Some(block);
             },
             BytecodeInstruction::AThrow => {
-                let val = MilOperand::Register(stack.pop().unwrap());
+                let val = MilOperand::Register(stack.pop(builder, MilType::Ref));
                 end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Throw(val),
                     bc
                 ));
             },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
-                let val = MilOperand::Register(stack.pop().unwrap());
+                let val = MilOperand::Register(stack.pop_any(builder));
                 end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Return(val),
                     bc
@@ -1036,7 +1136,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::TableSwitch(_, _, _) | BytecodeInstruction::LookupSwitch(_, _) => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                stack.pop();
+                stack.pop(builder, MilType::Int);
                 end_block = Some(builder.append_end_instruction(
                     MilEndInstructionKind::Throw(MilOperand::Null),
                     bc
@@ -1056,7 +1156,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
     let block_info = blocks.get_mut(&off).unwrap();
     block_info.blocks = builder.end_ordered_blocks();
-    block_info.end_stack = stack.clone();
+    block_info.end_stack = stack.as_slice().iter().copied().collect_vec();
 
     for succ_bc in blocks.get(&off).unwrap().succs.iter().cloned() {
         let succ = blocks.get(&succ_bc).unwrap();
@@ -1064,9 +1164,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         if let Some(succ_start_block) = succ.blocks.first() {
             let start_block = builder.func.blocks.get_mut(succ_start_block).unwrap();
 
-            assert!(stack.len() == start_block.phi_nodes.len());
+            assert_eq!(stack.len(), start_block.phi_nodes.len());
 
-            for (stack_elem, phi) in stack.iter().cloned().zip(start_block.phi_nodes.iter_mut()) {
+            for (stack_elem, phi) in stack.non_void_slots().zip(start_block.phi_nodes.iter_mut()) {
                 assert_eq!(builder.func.reg_map.get_reg_info(stack_elem).ty, builder.func.reg_map.get_reg_info(phi.sources[0].0).ty);
                 phi.sources.push((stack_elem, end_block));
             };
