@@ -1,12 +1,47 @@
 package java.lang;
 
+import java.util.Arrays;
+
 public class Object {
     public Object() {}
 
     protected void finalize() {}
 
     protected Object clone() throws CloneNotSupportedException {
-        throw new UnsupportedOperationException();
+        Class<?> clazz = getClass();
+
+        if (clazz.isArray()) {
+            if (this instanceof boolean[]) {
+                boolean[] self = (boolean[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof byte[]) {
+                byte[] self = (byte[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof char[]) {
+                char[] self = (char[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof double[]) {
+                double[] self = (double[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof float[]) {
+                float[] self = (float[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof int[]) {
+                int[] self = (int[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof long[]) {
+                long[] self = (long[])this;
+                return Arrays.copyOf(self, self.length);
+            } else if (this instanceof short[]) {
+                short[] self = (short[])this;
+                return Arrays.copyOf(self, self.length);
+            } else {
+                Object[] self = (Object[])this;
+                return Arrays.copyOf(self, self.length);
+            }
+        } else {
+            throw new UnsupportedOperationException();
+        }
     }
 
     public boolean equals(Object o) {
