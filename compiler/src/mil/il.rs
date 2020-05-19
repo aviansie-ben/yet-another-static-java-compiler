@@ -7,11 +7,21 @@ use crate::bytecode::BytecodeCondition;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId};
 use crate::static_heap::JavaStaticRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MilRegister(pub u32);
 
 impl MilRegister {
     pub const VOID: MilRegister = MilRegister(!0);
+}
+
+impl fmt::Debug for MilRegister {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self == &MilRegister::VOID {
+            write!(f, "MilRegister::VOID")
+        } else {
+            write!(f, "MilRegister({})", self.0)
+        }
+    }
 }
 
 impl fmt::Display for MilRegister {
@@ -322,7 +332,9 @@ impl MilComparison {
 pub enum MilUnOp {
     INeg,
     IExtB,
-    IExtS
+    IExtS,
+    I2L,
+    L2I
 }
 
 impl fmt::Display for MilUnOp {
@@ -330,7 +342,9 @@ impl fmt::Display for MilUnOp {
         match *self {
             MilUnOp::INeg => write!(f, "ineg"),
             MilUnOp::IExtB => write!(f, "iextb"),
-            MilUnOp::IExtS => write!(f, "iexts")
+            MilUnOp::IExtS => write!(f, "iexts"),
+            MilUnOp::I2L => write!(f, "i2l"),
+            MilUnOp::L2I => write!(f, "l2i")
         }
     }
 }

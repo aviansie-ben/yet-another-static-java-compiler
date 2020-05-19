@@ -669,6 +669,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(builder, reg, MilType::Int);
             },
+            BytecodeInstruction::LLoad(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Long, &mut builder.func.reg_map);
+                let reg = builder.allocate_reg(MilType::Long);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, reg),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Long);
+            },
             BytecodeInstruction::AStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
                 let val = stack.pop(builder, MilType::Ref);
@@ -680,6 +689,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::IStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Int, &mut builder.func.reg_map);
                 let val = stack.pop(builder, MilType::Int);
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
+                    bc
+                );
+            },
+            BytecodeInstruction::LStore(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Long, &mut builder.func.reg_map);
+                let val = stack.pop(builder, MilType::Long);
                 builder.append_instruction(
                     MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
                     bc
@@ -731,6 +748,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 stack.push(builder, result_reg, MilType::Int);
             },
+            BytecodeInstruction::I2L => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::I2L, MilType::Int, MilType::Long);
+            },
             BytecodeInstruction::INeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int, MilType::Int);
             },
@@ -763,6 +783,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::IXor => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::IXor, MilType::Int, MilType::Int, MilType::Int);
+            },
+            BytecodeInstruction::L2I => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::L2I, MilType::Long, MilType::Int);
             },
             // TODO Support multithreading
             BytecodeInstruction::MonitorEnter => {
