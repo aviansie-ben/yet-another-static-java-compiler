@@ -7,8 +7,8 @@ import java.util.*;
 
 public class System {
     public static final InputStream in = null /*new FileInputStream(FileDescriptor.in)*/;
-    public static final PrintStream out = null /*new PrintStream(new FileOutputStream(FileDescriptor.out))*/;
-    public static final PrintStream err = null /*new PrintStream(new FileOutputStream(FileDescriptor.err))*/;
+    public static final PrintStream out = new PrintStream(new FileOutputStream(FileDescriptor.out));
+    public static final PrintStream err = new PrintStream(new FileOutputStream(FileDescriptor.err));
 
     private static final Properties props = null /*new Properties()*/;
 
