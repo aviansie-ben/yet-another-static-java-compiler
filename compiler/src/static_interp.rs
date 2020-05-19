@@ -413,6 +413,12 @@ fn native_double_from_bits(state: &mut InterpreterState) -> Result<(), StaticInt
     Result::Ok(())
 }
 
+fn native_double_log(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let val = f64::from_bits(state.stack.pop().as_double().unwrap());
+    state.stack.push(Value::Double(val.ln().to_bits()));
+    Result::Ok(())
+}
+
 fn native_object_get_class(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     let val = state.stack.pop().into_ref().unwrap();
 
@@ -625,6 +631,11 @@ lazy_static! {
         known_natives.insert(
             "java/lang/Double.longBitsToDouble(J)D",
             native_double_from_bits as StaticNative
+        );
+
+        known_natives.insert(
+            "java/lang/StrictMath.log(D)D",
+            native_double_log as StaticNative
         );
 
         known_natives.insert(
