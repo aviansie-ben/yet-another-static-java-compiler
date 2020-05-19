@@ -9,3 +9,8 @@ pub unsafe extern fn org_mocha_test_Output_writeString(_: *mut MochaClass, msg: 
 pub unsafe extern fn org_mocha_test_Output_writeInt(_: *mut MochaClass, val: i32) {
     print!("{}", val);
 }
+
+#[no_mangle]
+pub unsafe extern fn org_mocha_test_Output_writeLong(_: *mut MochaClass, val: i64) {
+    print!("{}", val);
+}

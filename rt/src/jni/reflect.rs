@@ -36,5 +36,20 @@ pub unsafe extern fn java_lang_Class_getComponentType0(_: *mut MochaClass, vtabl
 
 #[no_mangle]
 pub unsafe extern fn java_lang_Class_getClassForVTable(_: *mut MochaClass, vtable: u32) -> *mut MochaClass {
-    MochaVTable::from_compressed(vtable).class_obj as *const MochaClass as *mut MochaClass
+    if vtable != 0 {
+        MochaVTable::from_compressed(vtable).class_obj as *const MochaClass as *mut MochaClass
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern fn java_lang_Class_getSuperclass0(_: *mut MochaClass, vtable: u32) -> u32 {
+    let vtable = MochaVTable::from_compressed(vtable);
+
+    if vtable.depth > 0 {
+        vtable.super_vtables.read()
+    } else {
+        0
+    }
 }

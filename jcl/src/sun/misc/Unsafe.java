@@ -61,8 +61,14 @@ public final class Unsafe {
         return clazz;
     }
 
-    public native long staticFieldOffset(Field f);
-    public native long objectFieldOffset(Field f);
+    public long staticFieldOffset(Field f) {
+        return f._MOCHA_getOffset();
+    }
+
+    public long objectFieldOffset(Field f) {
+        return f._MOCHA_getOffset();
+    }
+
     public int fieldOffset(Field f) {
         return (int) (Modifier.isStatic(f.getModifiers()) ? staticFieldOffset(f) : objectFieldOffset(f));
     }

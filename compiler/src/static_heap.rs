@@ -27,6 +27,12 @@ pub const JAVA_LANG_CLASS_CANONICAL_NAME_FIELD: FieldId = FieldId(ClassId::JAVA_
 
 pub const JAVA_LANG_STRING_DATA_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_STRING, 0);
 
+pub const JAVA_LANG_REFLECT_FIELD_CLAZZ_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_REFLECT_FIELD, 0);
+pub const JAVA_LANG_REFLECT_FIELD_OFFSET_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_REFLECT_FIELD, 1);
+pub const JAVA_LANG_REFLECT_FIELD_NAME_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_REFLECT_FIELD, 2);
+pub const JAVA_LANG_REFLECT_FIELD_TYPE_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_REFLECT_FIELD, 3);
+pub const JAVA_LANG_REFLECT_FIELD_MOD_FIELD: FieldId = FieldId(ClassId::JAVA_LANG_REFLECT_FIELD, 4);
+
 pub fn collect_constant_strings<'a>(strings: impl IntoIterator<Item=ConstantId>, env: &mut ClassEnvironment) -> Vec<Arc<str>> {
     let mut strs = vec![];
     let mut str_map = HashMap::new();
@@ -867,6 +873,10 @@ impl <'a> JavaStaticHeap<'a> {
         }
     }
 
+    pub fn has_class_object(&self, class_id: ClassId) -> bool {
+        self.class_objs.contains_key(&class_id)
+    }
+
     pub unsafe fn get_class_object_untracked(&self, class_id: ClassId) -> JavaStaticRef<'a> {
         self.class_objs[&class_id].clone_untracked()
     }
@@ -972,6 +982,7 @@ mod tests {
                 Some(Result::Ok(ResolvedClass::User(create_mock_class(&[
                     (FieldFlags::empty(), ClassId::JAVA_LANG_OBJECT),
                     (FieldFlags::empty(), ClassId::PRIMITIVE_INT),
+                    (FieldFlags::empty(), ClassId::JAVA_LANG_OBJECT),
                     (FieldFlags::empty(), ClassId::JAVA_LANG_OBJECT)
                 ]))))
             } else if name == "java/lang/String" {

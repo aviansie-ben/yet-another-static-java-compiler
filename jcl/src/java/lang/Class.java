@@ -28,6 +28,8 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     private transient final int vtableAddress;
     private transient final String canonicalName;
 
+    private transient Field[] declaredFields;
+
     private Class() {
         throw new UnsupportedOperationException();
     }
@@ -146,12 +148,31 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
         throw new UnsupportedOperationException();
     }
 
-    public Field getDeclaredField(String name) {
-        throw new UnsupportedOperationException();
+    private Field getDeclaredFieldOrNull(String name) {
+        for (Field f : getDeclaredFields()) {
+            if (f.getName().equals(name)) {
+                return f;
+            }
+        }
+
+        return null;
     }
 
+    public Field getDeclaredField(String name) throws NoSuchFieldException {
+        Field f = getDeclaredFieldOrNull(name);
+        if (f == null)
+            throw new NoSuchFieldException();
+
+        return f;
+    }
+
+    private static native Field[] getDeclaredFields0(int vtable);
+
     public Field[] getDeclaredFields() {
-        throw new UnsupportedOperationException();
+        if (declaredFields == null)
+            declaredFields = getDeclaredFields0(vtableAddress);
+
+        return declaredFields;
     }
 
     public Method getDeclaredMethod(String name, Class<?>... paramClasses) {
@@ -182,8 +203,17 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
         throw new UnsupportedOperationException();
     }
 
-    public Field getField(String name) {
-        throw new UnsupportedOperationException();
+    public Field getField(String name) throws NoSuchFieldException {
+        Field f = getDeclaredFieldOrNull(name);
+        if (f == null) {
+            Class<?> superclass = getSuperclass();
+            if (superclass == null)
+                throw new NoSuchFieldException();
+
+            return superclass.getField(name);
+        }
+
+        return f;
     }
 
     public Field[] getFields() {
@@ -242,8 +272,11 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
         throw new UnsupportedOperationException();
     }
 
+    private static native int getSuperclass0(int vtable);
+
+    @SuppressWarnings("unchecked")
     public Class<? super T> getSuperclass() {
-        throw new UnsupportedOperationException();
+        return (Class<? super T>)getClassForVTable(getSuperclass0(vtableAddress));
     }
 
     public String getTypeName() {
@@ -279,7 +312,16 @@ public final class Class<T> implements Serializable, GenericDeclaration, Type, A
     }
 
     public boolean isInstance(Object obj) {
-        throw new UnsupportedOperationException();
+        if (obj == null)
+            return false;
+
+        // TODO Array types, interfaces?
+        for (Class<?> c = obj.getClass(); c != null; c = c.getSuperclass()) {
+            if (c == this)
+                return true;
+        }
+
+        return false;
     }
 
     public boolean isInterface() {

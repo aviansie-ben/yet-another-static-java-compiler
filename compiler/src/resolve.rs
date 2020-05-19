@@ -43,8 +43,10 @@ impl ClassId {
     pub const JAVA_LANG_INVOKE_METHODHANDLE: ClassId = ClassId(18);
     pub const JAVA_LANG_STRING: ClassId = ClassId(19);
     pub const JAVA_LANG_CLASS: ClassId = ClassId(20);
+    pub const JAVA_LANG_REFLECT_FIELD: ClassId = ClassId(21);
 
-    pub const JAVA_LANG_OBJECT_ARRAY: ClassId = ClassId(21);
+    pub const JAVA_LANG_OBJECT_ARRAY: ClassId = ClassId(22);
+    pub const JAVA_LANG_REFLECT_FIELD_ARRAY: ClassId = ClassId(23);
 
     pub fn for_primitive_type(t: PrimitiveType) -> ClassId {
         match t {
@@ -73,7 +75,7 @@ impl ClassId {
     }
 
     pub fn num_special_classes() -> u32 {
-        22
+        24
     }
 
     pub fn special_classes() -> impl Iterator<Item=ClassId> {
@@ -450,10 +452,18 @@ impl ClassEnvironment {
             self.load("java/lang/Class")?,
             ClassId::JAVA_LANG_CLASS
         );
+        assert_eq!(
+            self.load("java/lang/reflect/Field")?,
+            ClassId::JAVA_LANG_REFLECT_FIELD
+        );
 
         assert_eq!(
             self.load("[Ljava/lang/Object;")?,
             ClassId::JAVA_LANG_OBJECT_ARRAY
+        );
+        assert_eq!(
+            self.load("[Ljava/lang/reflect/Field;")?,
+            ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY
         );
 
         Result::Ok(())

@@ -1,5 +1,6 @@
 use std::alloc::AllocErr;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 
 use lazy_static::lazy_static;
@@ -257,6 +258,7 @@ pub enum StaticInterpretError {
     UnimplementedBytecode(MethodId, BytecodeInstruction),
     UnknownNativeCall(MethodId),
     OutOfMemory,
+    IllegalUnsafeOperation,
     WouldThrowException(ClassId),
     ExcludedClinit(ClassId)
 }
@@ -386,6 +388,43 @@ fn native_class_from_vtable(state: &mut InterpreterState) -> Result<(), StaticIn
         state.stack.push(Value::Ref(None));
     };
 
+    Result::Ok(())
+}
+
+fn native_class_get_declared_fields(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    let arr = match **state.env.get(class_id) {
+        ResolvedClass::Array(_) | ResolvedClass::Primitive(_) => {
+            state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, 0)?
+        },
+        ResolvedClass::User(ref class) => {
+            let arr = state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, class.fields.len() as u32)?;
+            let class_obj = state.heap.get_class_object(class_id);
+
+            for (i, field) in class.fields.iter().enumerate() {
+                let field_obj = state.heap.allocate_object(ClassId::JAVA_LANG_REFLECT_FIELD)?;
+
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_CLAZZ_FIELD, Value::Ref(Some(class_obj.clone())));
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_OFFSET_FIELD, Value::Int(field.off as i32));
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_NAME_FIELD, Value::Ref(Some(state.heap.allocate_string(field.name.as_ref())?)));
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_TYPE_FIELD, Value::Ref(
+                    if state.heap.has_class_object(field.class_id) {
+                        Some(state.heap.get_class_object(field.class_id))
+                    } else {
+                        Some(state.heap.get_class_object(ClassId::JAVA_LANG_OBJECT))
+                    }
+                ));
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_MOD_FIELD, Value::Int(field.flags.bits() as i32));
+
+                arr.write_array_element(i as i32, Value::Ref(Some(field_obj)));
+            };
+
+            arr
+        }
+    };
+
+    state.stack.push(Value::Ref(Some(arr)));
     Result::Ok(())
 }
 
@@ -527,6 +566,122 @@ fn native_unsafe_address_size(state: &mut InterpreterState) -> Result<(), Static
     Result::Ok(())
 }
 
+fn find_unsafe_field<F: FnOnce (ClassId) -> bool>(env: &ClassEnvironment, obj: &JavaStaticRef<'_>, offset: u64, type_check: F) -> Result<FieldId, ()> {
+    match *obj.class() {
+        ResolvedClass::User(ref class) => {
+            let offset = u32::try_from(offset).map_err(|_| ())?;
+            if let Some(field_id) = class.layout.fields.iter().copied().filter(|&(_, f_off)| f_off == offset).map(|(f, _)| f).next() {
+                if type_check(env.get_field(field_id).1.class_id) {
+                    Ok(field_id)
+                } else {
+                    Err(())
+                }
+            } else if obj.class_id() == ClassId::JAVA_LANG_CLASS {
+                match **env.get(ClassId(obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32)) {
+                    ResolvedClass::User(ref class) => {
+                        if let Some(field_id) = class.layout.static_fields.iter().copied().filter(|&(_, f_off)| f_off == offset).map(|(f, _)| f).next() {
+                            if type_check(env.get_field(field_id).1.class_id) {
+                                Ok(field_id)
+                            } else {
+                                Err(())
+                            }
+                        } else {
+                            Err(())
+                        }
+                    },
+                    _ => Err(())
+                }
+            } else {
+                Err(())
+            }
+        },
+        _ => Err(())
+    }
+}
+
+fn find_unsafe_array_offset<F: FnOnce (ClassId) -> bool>(env: &ClassEnvironment, obj: &JavaStaticRef<'_>, offset: u64, type_check: F) -> Result<i32, ()> {
+    match *obj.class() {
+        ResolvedClass::Array(elem_id) => {
+            if type_check(elem_id) {
+                let (scale, align) = layout::get_field_size_align(env, elem_id);
+                let base = layout::get_array_header_size(align);
+
+                let offset = offset.checked_sub(base as u64).ok_or(())?;
+                let index = offset / (scale as u64);
+
+                if index * (scale as u64) == offset && index < (obj.read_array_length() as u64) {
+                    Ok(index as i32)
+                } else {
+                    Err(())
+                }
+            } else {
+                Err(())
+            }
+        },
+        _ => Err(())
+    }
+}
+
+fn native_unsafe_get(state: &mut InterpreterState, class_id: ClassId) -> Result<(), StaticInterpretError> {
+    let offset = state.stack.pop().as_long().unwrap() as u64;
+    let obj = state.stack.pop().into_ref().unwrap();
+    state.stack.pop();
+
+    let obj = if let Some(obj) = obj {
+        obj
+    } else {
+        return Err(StaticInterpretError::IllegalUnsafeOperation);
+    };
+
+    eprintln!("{} {}", obj, offset);
+
+    if let Ok(field_id) = find_unsafe_field(state.env, &obj, offset, |type_id| state.env.can_convert(type_id, class_id)) {
+        state.stack.push(obj.read_field(field_id));
+        Ok(())
+    } else if let Ok(index) = find_unsafe_array_offset(state.env, &obj, offset, |type_id| state.env.can_convert(type_id, class_id)) {
+        state.stack.push(obj.read_array_element(index));
+        Ok(())
+    } else {
+        Err(StaticInterpretError::IllegalUnsafeOperation)
+    }
+}
+
+fn native_unsafe_put(state: &mut InterpreterState, class_id: ClassId) -> Result<(), StaticInterpretError> {
+    let val = state.stack.pop();
+    let offset = state.stack.pop().as_long().unwrap() as u64;
+    let obj = state.stack.pop().into_ref().unwrap();
+    state.stack.pop();
+
+    let obj = if let Some(obj) = obj {
+        obj
+    } else {
+        return Err(StaticInterpretError::IllegalUnsafeOperation);
+    };
+
+    eprintln!("{} {}", obj, offset);
+
+    let is_convertible = |expected, actual| {
+        if !state.env.can_convert(actual, expected) {
+            false
+        } else {
+            match **state.env.get(expected) {
+                ResolvedClass::Primitive(_) => true,
+                _ => state.env.can_convert(val.as_ref().unwrap().unwrap().class_id(), expected)
+            }
+        }
+    };
+
+    if let Ok(field_id) = find_unsafe_field(state.env, &obj, offset, |type_id| is_convertible(class_id, type_id)) {
+        obj.write_field(field_id, val);
+        Ok(())
+    } else if let Ok(index) = find_unsafe_array_offset(state.env, &obj, offset, |type_id| is_convertible(class_id, type_id)) {
+        obj.write_array_element(index, val);
+        Ok(())
+    } else {
+        Err(StaticInterpretError::IllegalUnsafeOperation)
+    }
+}
+
 fn native_new_array(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     let len = state.stack.pop().as_int().unwrap();
     let class_obj = state.stack.pop().into_ref().unwrap();
@@ -581,6 +736,80 @@ lazy_static! {
         );
 
         known_natives.insert(
+            "sun/misc/Unsafe.getBoolean(Ljava/lang/Object;J)Z",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_BOOLEAN)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getByte(Ljava/lang/Object;J)B",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_BYTE)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getShort(Ljava/lang/Object;J)S",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_SHORT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getChar(Ljava/lang/Object;J)C",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_CHAR)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getInt(Ljava/lang/Object;J)I",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_INT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getLong(Ljava/lang/Object;J)J",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_LONG)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getFloat(Ljava/lang/Object;J)F",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_FLOAT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getDouble(Ljava/lang/Object;J)D",
+            (|state| native_unsafe_get(state, ClassId::PRIMITIVE_DOUBLE)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.getObject(Ljava/lang/Object;J)Ljava/lang/Object;",
+            (|state| native_unsafe_get(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
+        );
+
+        known_natives.insert(
+            "sun/misc/Unsafe.putBoolean(Ljava/lang/Object;JZ)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_BOOLEAN)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putByte(Ljava/lang/Object;JB)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_BYTE)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putShort(Ljava/lang/Object;JS)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_SHORT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putChar(Ljava/lang/Object;JC)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_CHAR)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putInt(Ljava/lang/Object;JI)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_INT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putLong(Ljava/lang/Object;JJ)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_LONG)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putFloat(Ljava/lang/Object;JF)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_FLOAT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putDouble(Ljava/lang/Object;JD)V",
+            (|state| native_unsafe_put(state, ClassId::PRIMITIVE_DOUBLE)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putObject(Ljava/lang/Object;JLjava/lang/Object;)V",
+            (|state| native_unsafe_put(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
+        );
+
+        known_natives.insert(
             "java/lang/Object.getClass()Ljava/lang/Class;",
             native_object_get_class as StaticNative
         );
@@ -609,6 +838,10 @@ lazy_static! {
         known_natives.insert(
             "java/lang/Class.isPrimitive0(I)Z",
             native_class_is_primitive as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.getDeclaredFields0(I)[Ljava/lang/reflect/Field;",
+            native_class_get_declared_fields as StaticNative
         );
 
         known_natives.insert(
@@ -1522,6 +1755,9 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
                 },
                 StaticInterpretError::OutOfMemory => {
                     eprintln!("Ran out of memory in static heap");
+                },
+                StaticInterpretError::IllegalUnsafeOperation => {
+                    eprintln!("Unsafe operation would cause undefined behaviour");
                 },
                 StaticInterpretError::WouldThrowException(exception_class_id) => {
                     eprintln!("Threw exception of type {}", env.get(exception_class_id).name(env));
