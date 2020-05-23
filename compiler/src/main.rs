@@ -12,6 +12,7 @@ pub mod mil;
 pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
+pub mod util;
 
 use std::collections::HashSet;
 

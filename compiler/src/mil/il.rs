@@ -6,6 +6,8 @@ use smallvec::SmallVec;
 use crate::bytecode::BytecodeCondition;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId};
 use crate::static_heap::JavaStaticRef;
+use crate::static_interp::Value;
+use crate::util::BitVecIndex;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MilRegister(pub u32);
@@ -31,6 +33,16 @@ impl fmt::Display for MilRegister {
         } else {
             write!(f, "${}", self.0)
         }
+    }
+}
+
+impl BitVecIndex for MilRegister {
+    fn into_index(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_index(i: usize) -> Self {
+        MilRegister(i as u32)
     }
 }
 
@@ -63,6 +75,16 @@ pub struct MilLocalId(pub u32);
 impl fmt::Display for MilLocalId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "%{}", self.0)
+    }
+}
+
+impl BitVecIndex for MilLocalId {
+    fn into_index(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_index(i: usize) -> Self {
+        MilLocalId(i as u32)
     }
 }
 
@@ -159,6 +181,16 @@ impl fmt::Display for MilBlockId {
         } else {
             write!(f, "L{}", self.0)
         }
+    }
+}
+
+impl BitVecIndex for MilBlockId {
+    fn into_index(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_index(i: usize) -> Self {
+        MilBlockId(i as u32)
     }
 }
 
