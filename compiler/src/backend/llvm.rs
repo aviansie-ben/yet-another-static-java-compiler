@@ -705,7 +705,7 @@ unsafe fn emit_basic_block(
     locals: &mut HashMap<MilLocalId, LLVMValueRef>,
     llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, LLVMValueRef)>,
     all_regs: &mut HashMap<MilRegister, LLVMValueRef>,
-    phis_to_add: &mut Vec<(LLVMValueRef, MilBlockId, MilRegister)>
+    phis_to_add: &mut Vec<(LLVMValueRef, MilBlockId, MilOperand)>
 ) {
     let mut local_regs = HashMap::new();
 
@@ -731,7 +731,7 @@ unsafe fn emit_basic_block(
                 local_regs.insert(reg, phi);
 
                 for pred in cfg.get(block_id).incoming.iter().cloned() {
-                    phis_to_add.push((phi, pred, reg));
+                    phis_to_add.push((phi, pred, MilOperand::Register(reg)));
                 };
             };
         };
@@ -1295,10 +1295,10 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         };
     };
 
-    for (phi, pred, reg) in phis_to_add {
+    for (phi, pred, val) in phis_to_add {
         LLVMAddIncoming(
             phi,
-            &all_regs[&reg] as *const LLVMValueRef as *mut LLVMValueRef,
+            &mut create_value_ref(module, &val, &all_regs) as *mut LLVMValueRef,
             &llvm_blocks[&pred].1 as *const LLVMBasicBlockRef as *mut LLVMBasicBlockRef,
             1
         );

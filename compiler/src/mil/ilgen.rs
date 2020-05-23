@@ -37,7 +37,7 @@ impl MilBuilder {
                 ty = Some(new_ty);
             };
 
-            (reg, block)
+            (MilOperand::Register(reg), block)
         }).collect();
 
         let reg = self.allocate_reg(ty.unwrap());
@@ -1286,8 +1286,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             assert_eq!(stack.len(), start_block.phi_nodes.len());
 
             for (stack_elem, phi) in stack.non_void_slots().zip(start_block.phi_nodes.iter_mut()) {
-                assert_eq!(builder.func.reg_map.get_reg_info(stack_elem).ty, builder.func.reg_map.get_reg_info(phi.sources[0].0).ty);
-                phi.sources.push((stack_elem, end_block));
+                assert_eq!(builder.func.reg_map.get_reg_info(stack_elem).ty, phi.sources[0].0.get_type(&builder.func.reg_map));
+                phi.sources.push((MilOperand::Register(stack_elem), end_block));
             };
         } else if !block_worklist.contains(&succ_bc) {
             block_worklist.push(succ_bc);

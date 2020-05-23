@@ -9,6 +9,7 @@ pub mod classfile;
 pub mod layout;
 pub mod liveness;
 pub mod mil;
+pub mod opt;
 pub mod resolve;
 pub mod static_heap;
 pub mod static_interp;
@@ -226,23 +227,30 @@ fn main() {
     };
 
     let mut known_objects = mil::il::MilKnownObjectMap::new();
+    for obj in heap.all_objs() {
+        known_objects.add(obj);
+    };
     for class_id in liveness.needs_class_object.iter().cloned() {
-        let obj_id = known_objects.add(heap.get_class_object(class_id));
+        let obj_id = known_objects.id_of(&heap.get_class_object(class_id));
         known_objects.refs.classes.insert(class_id, obj_id);
     };
     for i in 0..(constant_strings.len()) {
-        let obj_id = known_objects.add(heap.get_constant_string(i));
+        let obj_id = known_objects.id_of(&heap.get_constant_string(i));
         known_objects.refs.strings.push(obj_id);
     };
 
     let start_ilgen = std::time::Instant::now();
     let mut program = mil::il::MilProgram::new(known_objects, main_method);
     for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
-        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, &liveness, args.is_present("verbose")) {
+        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, &liveness, args.is_present("verbose") || true) {
             program.funcs.insert(method_id, func);
         };
     };
     println!("Generated MIL for {} functions in {:.3}s", program.funcs.len(), start_ilgen.elapsed().as_secs_f32());
+
+    let start_opt = std::time::Instant::now();
+    opt::optimize_program(&mut program, &env, &heap);
+    println!("Optimized MIL in {:.3}s", start_opt.elapsed().as_secs_f32());
 
     let start_codegen = std::time::Instant::now();
     let llvm_ctx = backend::llvm::LLVMContext::new();

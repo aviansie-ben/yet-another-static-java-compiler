@@ -54,7 +54,7 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraph<T> {
         };
 
         for to in node.outgoing {
-            self.get_mut(to).outgoing.remove_item(&id);
+            self.get_mut(to).incoming.remove_item(&id);
         };
     }
 
@@ -66,6 +66,18 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraph<T> {
     pub fn remove_edge(&mut self, from: T, to: T) {
         self.get_mut(from).outgoing.remove_item(&to);
         self.get_mut(to).incoming.remove_item(&from);
+    }
+
+    pub fn merge_nodes_back(&mut self, from: T, to: T) {
+        let to_node = self.nodes.remove(&to).unwrap();
+
+        for succ in to_node.outgoing.iter().copied() {
+            let succ = self.get_mut(succ);
+            let i = succ.incoming.iter().enumerate().filter(|(_, &id)| id == to).map(|(i, _)| i).next().unwrap();
+            succ.incoming[i] = from;
+        };
+
+        self.get_mut(from).outgoing = to_node.outgoing;
     }
 
     pub fn clear(&mut self) {

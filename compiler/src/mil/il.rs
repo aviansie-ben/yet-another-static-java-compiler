@@ -255,6 +255,7 @@ impl MilKnownObjectRefs {
 pub struct MilKnownObjectMap<'a> {
     pub refs: MilKnownObjectRefs,
     objs: HashMap<MilKnownObjectId, JavaStaticRef<'a>>,
+    rev_objs: HashMap<JavaStaticRef<'a>, MilKnownObjectId>,
     next: MilKnownObjectId
 }
 
@@ -263,19 +264,25 @@ impl <'a> MilKnownObjectMap<'a> {
         MilKnownObjectMap {
             refs: MilKnownObjectRefs::new(),
             objs: HashMap::new(),
+            rev_objs: HashMap::new(),
             next: MilKnownObjectId(0)
         }
     }
 
     pub fn add(&mut self, obj: JavaStaticRef<'a>) -> MilKnownObjectId {
         let id = self.next;
-        self.objs.insert(id, obj);
+        self.objs.insert(id, obj.clone());
+        self.rev_objs.insert(obj, id);
         self.next.0 += 1;
         id
     }
 
     pub fn get(&self, id: MilKnownObjectId) -> &JavaStaticRef<'a> {
         &self.objs[&id]
+    }
+
+    pub fn id_of(&self, obj: &JavaStaticRef<'a>) -> MilKnownObjectId {
+        self.rev_objs[obj]
     }
 }
 
@@ -308,10 +315,32 @@ impl MilOperand {
         }
     }
 
+    pub fn from_const<'a>(val: Value<'a>, known_objects: &MilKnownObjectMap<'a>) -> MilOperand {
+        match val {
+            Value::Int(val) => MilOperand::Int(val),
+            Value::Long(val) => MilOperand::Long(val),
+            Value::Float(val) => MilOperand::Float(val),
+            Value::Double(val) => MilOperand::Double(val),
+            Value::Ref(None) => MilOperand::Null,
+            Value::Ref(Some(val)) => {
+                let class_id = val.class_id();
+                MilOperand::KnownObject(known_objects.id_of(&val), class_id)
+            },
+            _ => unreachable!()
+        }
+    }
+
     pub fn get_type(&self, reg_map: &MilRegisterMap) -> MilType {
         match *self {
             MilOperand::Register(reg) => reg_map.get_reg_info(reg).ty,
             _ => self.get_const_type().unwrap()
+        }
+    }
+
+    pub fn as_reg(&self) -> Option<MilRegister> {
+        match *self {
+            MilOperand::Register(reg) => Some(reg),
+            _ => None
         }
     }
 
@@ -609,6 +638,54 @@ impl MilInstruction {
             }
         };
     }
+
+    pub fn for_operands_mut(&mut self, mut f: impl FnMut (&mut MilOperand) -> ()) {
+        match self.kind {
+            MilInstructionKind::Nop => {},
+            MilInstructionKind::Copy(_, ref mut val) => {
+                f(val);
+            },
+            MilInstructionKind::UnOp(_, _, ref mut val) => {
+                f(val);
+            },
+            MilInstructionKind::BinOp(_, _, ref mut lhs, ref mut rhs) => {
+                f(lhs);
+                f(rhs);
+            },
+            MilInstructionKind::GetParam(_, _, _) => {}
+            MilInstructionKind::GetLocal(_, _) => {},
+            MilInstructionKind::SetLocal(_, ref mut val) => {
+                f(val);
+            },
+            MilInstructionKind::GetField(_, _, _, ref mut obj) => {
+                f(obj);
+            },
+            MilInstructionKind::PutField(_, _, ref mut obj, ref mut val) => {
+                f(obj);
+                f(val);
+            },
+            MilInstructionKind::GetArrayLength(_, ref mut obj) => {
+                f(obj);
+            },
+            MilInstructionKind::GetArrayElement(_, _, ref mut obj, ref mut idx) => {
+                f(obj);
+                f(idx);
+            },
+            MilInstructionKind::PutArrayElement(_, ref mut obj, ref mut idx, ref mut val) => {
+                f(obj);
+                f(idx);
+                f(val);
+            },
+            MilInstructionKind::GetStatic(_, _, _) => {},
+            MilInstructionKind::PutStatic(_, _, ref mut val) => {
+                f(val);
+            },
+            MilInstructionKind::AllocObj(_, _) => {},
+            MilInstructionKind::AllocArray(_, _, ref mut len) => {
+                f(len);
+            }
+        };
+    }
 }
 
 pub struct PrettyMilEndInstruction<'a>(&'a MilEndInstruction, &'a ClassEnvironment);
@@ -740,6 +817,46 @@ impl MilEndInstruction {
         };
     }
 
+    pub fn for_operands_mut(&mut self, mut f: impl FnMut (&mut MilOperand) -> ()) {
+        match self.kind {
+            MilEndInstructionKind::Nop => {},
+            MilEndInstructionKind::Unreachable => {},
+            MilEndInstructionKind::Call(_, _, _, ref mut args) => {
+                for a in args.iter_mut() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallVirtual(_, _, _, ref mut obj, ref mut args) => {
+                f(obj);
+                for a in args.iter_mut() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallInterface(_, _, _, ref mut obj, ref mut args) => {
+                f(obj);
+                for a in args.iter_mut() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::CallNative(_, _, _, ref mut args) => {
+                for a in args.iter_mut() {
+                    f(a);
+                };
+            },
+            MilEndInstructionKind::Throw(ref mut val) => {
+                f(val);
+            },
+            MilEndInstructionKind::Return(ref mut val) => {
+                f(val);
+            },
+            MilEndInstructionKind::Jump(_) => {},
+            MilEndInstructionKind::JumpIf(_, _, ref mut lhs, ref mut rhs) => {
+                f(lhs);
+                f(rhs);
+            }
+        };
+    }
+
     pub fn can_fall_through(&self) -> bool {
         match self.kind {
             MilEndInstructionKind::Nop => true,
@@ -766,15 +883,23 @@ impl MilEndInstruction {
 #[derive(Debug, Clone)]
 pub struct MilPhiNode {
     pub target: MilRegister,
-    pub sources: SmallVec<[(MilRegister, MilBlockId); 2]>
+    pub sources: SmallVec<[(MilOperand, MilBlockId); 2]>
 }
 
-impl fmt::Display for MilPhiNode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "phi {}", self.target)?;
+impl MilPhiNode {
+    pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
+        PrettyMilPhiNode(self, env)
+    }
+}
 
-        for (src, pred) in self.sources.iter().cloned() {
-            write!(f, ", {}:{}", pred, src)?;
+struct PrettyMilPhiNode<'a>(&'a MilPhiNode, &'a ClassEnvironment);
+
+impl fmt::Display for PrettyMilPhiNode<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "phi {}", self.0.target)?;
+
+        for (src, pred) in self.0.sources.iter().cloned() {
+            write!(f, ", {}:{}", pred, src.pretty(self.1))?;
         };
 
         Result::Ok(())
@@ -816,7 +941,7 @@ impl <'a> fmt::Display for PrettyMilBlock<'a> {
         write!(f, "{}:", self.0.id)?;
 
         for phi in self.0.phi_nodes.iter() {
-            write!(f, "\n  {}", phi)?;
+            write!(f, "\n  {}", phi.pretty(self.1))?;
         };
 
         for instr in self.0.instrs.iter() {

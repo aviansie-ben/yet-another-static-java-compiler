@@ -2,6 +2,7 @@ use std::alloc::{AllocErr, AllocInit, AllocRef, Global, Layout};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::{self, HashMap};
 use std::convert::TryInto;
+use std::hash::{Hash, Hasher};
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -561,6 +562,12 @@ impl <'a> PartialEq for JavaStaticRef<'a> {
 }
 
 impl <'a> Eq for JavaStaticRef<'a> {}
+
+impl <'a> Hash for JavaStaticRef<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.ptr.hash(state);
+    }
+}
 
 impl <'a> Drop for JavaStaticRef<'a> {
     fn drop(&mut self) {
