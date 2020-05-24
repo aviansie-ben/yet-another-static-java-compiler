@@ -367,6 +367,100 @@ impl <'a> fmt::Display for PrettyMilOperand<'a> {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct MilClassConstraint(ClassId, bool);
+
+impl MilClassConstraint {
+    pub fn class_id(&self) -> ClassId {
+        self.0
+    }
+
+    pub fn nullable(&self) -> bool {
+        self.1
+    }
+
+    pub fn or_null(&self) -> MilClassConstraint {
+        MilClassConstraint(self.0, true)
+    }
+
+    pub fn not_null(&self) -> MilClassConstraint {
+        MilClassConstraint(self.0, false)
+    }
+
+    pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
+        PrettyMilClassConstraint(self, env)
+    }
+
+    pub fn for_class(class_id: ClassId) -> MilClassConstraint {
+        MilClassConstraint(class_id, !class_id.is_primitive_type())
+    }
+
+    pub fn null() -> MilClassConstraint {
+        MilClassConstraint(ClassId::UNRESOLVED, true)
+    }
+
+    pub fn non_null() -> MilClassConstraint {
+        MilClassConstraint(ClassId::JAVA_LANG_OBJECT, false)
+    }
+
+    pub fn union(a: MilClassConstraint, b: MilClassConstraint, env: &ClassEnvironment) -> MilClassConstraint {
+        let common_class_id = if a.0 == ClassId::UNRESOLVED {
+            b.0
+        } else if b.0 == ClassId::UNRESOLVED {
+            a.0
+        } else {
+            let a_chain = env.get_class_chain(a.0);
+            let b_chain = env.get_class_chain(b.0);
+            let mut common_class_id = ClassId::UNRESOLVED;
+
+            for class_id in a_chain {
+                if b_chain.contains(&class_id) {
+                    common_class_id = class_id;
+                    break;
+                };
+            };
+
+            assert_ne!(common_class_id, ClassId::UNRESOLVED);
+            common_class_id
+        };
+
+        MilClassConstraint(common_class_id, a.1 || b.1)
+    }
+
+    pub fn intersection(a: MilClassConstraint, b: MilClassConstraint, env: &ClassEnvironment) -> MilClassConstraint {
+        let lower_class_id = if a.0 == ClassId::UNRESOLVED || b.0 == ClassId::UNRESOLVED {
+            ClassId::UNRESOLVED
+        } else if env.can_convert(a.0, b.0) {
+            a.0
+        } else {
+            assert!(env.can_convert(b.0, a.0));
+            b.0
+        };
+
+        MilClassConstraint(lower_class_id, a.1 && b.1)
+    }
+}
+
+struct PrettyMilClassConstraint<'a>(&'a MilClassConstraint, &'a ClassEnvironment);
+
+impl <'a> fmt::Display for PrettyMilClassConstraint<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if (self.0).0 == ClassId::UNRESOLVED {
+            if (self.0).1 {
+                write!(f, "null")?;
+            } else {
+                write!(f, "never")?;
+            };
+        } else {
+            write!(f, "{}", self.1.get((self.0).0).name(self.1))?;
+            if (self.0).1 {
+                write!(f, "?")?;
+            };
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MilComparison {
     Eq,
     Ne,
@@ -385,6 +479,17 @@ impl MilComparison {
             BytecodeCondition::Lt => MilComparison::Lt,
             BytecodeCondition::Ge => MilComparison::Ge,
             BytecodeCondition::Le => MilComparison::Le
+        }
+    }
+
+    pub fn reverse(&self) -> MilComparison {
+        match *self {
+            MilComparison::Eq => MilComparison::Ne,
+            MilComparison::Ne => MilComparison::Eq,
+            MilComparison::Gt => MilComparison::Lt,
+            MilComparison::Lt => MilComparison::Gt,
+            MilComparison::Ge => MilComparison::Le,
+            MilComparison::Le => MilComparison::Ge
         }
     }
 }
@@ -447,7 +552,7 @@ pub enum MilInstructionKind {
     Copy(MilRegister, MilOperand),
     UnOp(MilUnOp, MilRegister, MilOperand),
     BinOp(MilBinOp, MilRegister, MilOperand, MilOperand),
-    GetParam(u16, ClassId, MilRegister),
+    GetParam(u16, MilClassConstraint, MilRegister),
     GetLocal(MilLocalId, MilRegister),
     SetLocal(MilLocalId, MilOperand),
     GetField(FieldId, ClassId, MilRegister, MilOperand),
@@ -523,8 +628,8 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
                 write!(f, "{} {}, {}, {}", op, tgt, lhs.pretty(self.1), rhs.pretty(self.1))?;
             },
-            MilInstructionKind::GetParam(n, class_id, tgt) => {
-                write!(f, "get_param <{} {}> {}", n, self.1.get(class_id).name(self.1), tgt)?;
+            MilInstructionKind::GetParam(n, class_constraint, tgt) => {
+                write!(f, "get_param <{} {}> {}", n, class_constraint.pretty(self.1), tgt)?;
             },
             MilInstructionKind::GetLocal(local_id, tgt) => {
                 write!(f, "get_local <{}> {}", local_id, tgt)?;
@@ -604,7 +709,7 @@ impl MilInstruction {
                 f(lhs);
                 f(rhs);
             },
-            MilInstructionKind::GetParam(_, _, _) => {}
+            MilInstructionKind::GetParam(_, _, _) => {},
             MilInstructionKind::GetLocal(_, _) => {},
             MilInstructionKind::SetLocal(_, ref val) => {
                 f(val);
@@ -652,7 +757,7 @@ impl MilInstruction {
                 f(lhs);
                 f(rhs);
             },
-            MilInstructionKind::GetParam(_, _, _) => {}
+            MilInstructionKind::GetParam(_, _, _) => {},
             MilInstructionKind::GetLocal(_, _) => {},
             MilInstructionKind::SetLocal(_, ref mut val) => {
                 f(val);

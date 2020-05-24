@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
+use smallvec::SmallVec;
 use zip::ZipArchive;
 use zip::result::{ZipError, ZipResult};
 
@@ -86,6 +87,21 @@ impl ClassId {
         match *self {
             ClassId::PRIMITIVE_DOUBLE => true,
             ClassId::PRIMITIVE_LONG => true,
+            _ => false
+        }
+    }
+
+    pub fn is_primitive_type(&self) -> bool {
+        match *self {
+            ClassId::PRIMITIVE_VOID => true,
+            ClassId::PRIMITIVE_BYTE => true,
+            ClassId::PRIMITIVE_CHAR => true,
+            ClassId::PRIMITIVE_DOUBLE => true,
+            ClassId::PRIMITIVE_FLOAT => true,
+            ClassId::PRIMITIVE_INT => true,
+            ClassId::PRIMITIVE_LONG => true,
+            ClassId::PRIMITIVE_SHORT => true,
+            ClassId::PRIMITIVE_BOOLEAN => true,
             _ => false
         }
     }
@@ -601,6 +617,21 @@ impl ClassEnvironment {
                 _ => false
             }
         }).count()
+    }
+
+    pub fn get_class_chain(&self, mut id: ClassId) -> SmallVec<[ClassId; 4]> {
+        let mut chain = SmallVec::new();
+
+        while id != ClassId::UNRESOLVED {
+            chain.push(id);
+            id = match **self.get(id) {
+                ResolvedClass::Primitive(_) => ClassId::UNRESOLVED,
+                ResolvedClass::User(ref class) => class.meta.super_id,
+                ResolvedClass::Array(_) => ClassId::JAVA_LANG_OBJECT
+            };
+        };
+
+        chain
     }
 
     pub fn class_ids(&self) -> impl Iterator<Item=ClassId> {

@@ -274,12 +274,12 @@ fn constant_from_cpe(cpe: &ConstantPoolEntry, known_objects: &MilKnownObjectRefs
     }
 }
 
-fn read_param(builder: &mut MilBuilder, i: u16, param_type: ClassId) -> MilRegister {
-    let reg = builder.allocate_reg(MilType::for_class(param_type));
+fn read_param(builder: &mut MilBuilder, i: u16, param_constraint: MilClassConstraint) -> MilRegister {
+    let reg = builder.allocate_reg(MilType::for_class(param_constraint.class_id()));
 
     builder.append_instruction(
-        if param_type != ClassId::UNRESOLVED {
-            MilInstructionKind::GetParam(i.try_into().unwrap(), param_type, reg)
+        if param_constraint.class_id() != ClassId::UNRESOLVED {
+            MilInstructionKind::GetParam(i.try_into().unwrap(), param_constraint, reg)
         } else {
             MilInstructionKind::Copy(reg, MilOperand::Null)
         },
@@ -298,7 +298,12 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
             MilType::for_class(param_type),
             &mut builder.func.reg_map
         );
-        let reg = read_param(builder, i.try_into().unwrap(), param_type);
+        let param_constraint = if i == 0 && !method.flags.contains(MethodFlags::STATIC) {
+            MilClassConstraint::for_class(param_type).not_null()
+        } else {
+            MilClassConstraint::for_class(param_type)
+        };
+        let reg = read_param(builder, i.try_into().unwrap(), param_constraint);
         builder.append_instruction(
             MilInstructionKind::SetLocal(local_id, MilOperand::Register(reg)),
             0
@@ -323,7 +328,7 @@ fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, 
     args.extend(
         method.param_types.iter().cloned().enumerate()
             .map(|(i, param_type)| MilOperand::Register(
-                read_param(&mut builder, i.try_into().unwrap(), param_type)
+                read_param(&mut builder, i.try_into().unwrap(), MilClassConstraint::for_class(param_type))
             ))
     );
 

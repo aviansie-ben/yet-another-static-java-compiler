@@ -263,3 +263,25 @@ pub fn fold_constant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockI
 
     num_folded
 }
+
+pub fn remove_redundant_jumps(func: &mut MilFunction, env: &ClassEnvironment) -> usize {
+    eprintln!("\n===== REDUNDANT JUMP REMOVAL =====\n");
+
+    let mut num_removed = 0;
+
+    for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
+        let block = func.blocks.get_mut(&block_id).unwrap();
+
+        if matches!(block.end_instr.kind, MilEndInstructionKind::Jump(target_block_id) if target_block_id == next_block_id) {
+            eprintln!("Removed redundant jump from {} to next block {}", block_id, next_block_id);
+            block.end_instr.kind = MilEndInstructionKind::Nop;
+            num_removed += 1;
+        };
+    };
+
+    if num_removed != 0 {
+        eprintln!("\n===== AFTER REDUNDANT JUMP REMOVAL =====\n\n{}", func.pretty(env));
+    };
+
+    num_removed
+}

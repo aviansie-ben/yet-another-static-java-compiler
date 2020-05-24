@@ -24,12 +24,33 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
     basic_control_flow::simplify_phis(func, &mut cfg, env.env);
     basic_control_flow::merge_blocks(func, &mut cfg, env.env);
     basic_control_flow::eliminate_dead_blocks(func, &mut cfg, env.env);
+    while basic_control_flow::remove_redundant_jumps(func, env.env) != 0 {
+        basic_control_flow::merge_blocks(func, &mut cfg, env.env);
+    };
 
     // Now turn local slots into phi nodes and perform some basic cleanup to deal with the results
-    value_prop::transform_locals_into_phis(func, &cfg, env.env);
-    basic_control_flow::simplify_phis(func, &mut cfg, env.env);
-    value_prop::fold_constant_exprs(func, env.env, env.known_objects);
+    if !func.reg_map.local_info.is_empty() {
+        value_prop::transform_locals_into_phis(func, &cfg, env.env);
+        basic_control_flow::simplify_phis(func, &mut cfg, env.env);
+        value_prop::fold_constant_exprs(func, env.env, env.known_objects);
+        basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env);
+        basic_control_flow::eliminate_dead_blocks(func, &mut cfg, env.env);
+        basic_control_flow::simplify_phis(func, &mut cfg, env.env);
+        basic_control_flow::merge_blocks(func, &mut cfg, env.env);
+        while basic_control_flow::remove_redundant_jumps(func, env.env) != 0 {
+            basic_control_flow::merge_blocks(func, &mut cfg, env.env);
+        };
+    };
+
+    // Perform class constraint analysis and related cleanups
+    value_prop::perform_class_constraint_analysis(func, &cfg, env.env);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env);
+    basic_control_flow::eliminate_dead_blocks(func, &mut cfg, env.env);
+    basic_control_flow::simplify_phis(func, &mut cfg, env.env);
+    basic_control_flow::merge_blocks(func, &mut cfg, env.env);
+    while basic_control_flow::remove_redundant_jumps(func, env.env) != 0 {
+        basic_control_flow::merge_blocks(func, &mut cfg, env.env);
+    };
 }
 
 pub fn optimize_program(program: &mut MilProgram, env: &ClassEnvironment, heap: &JavaStaticHeap) {

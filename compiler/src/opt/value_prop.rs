@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::iter::FromIterator;
 
 use itertools::Itertools;
 use smallvec::SmallVec;
@@ -72,7 +73,7 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
 }
 
 pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known_objects: &MilKnownObjectMap) -> usize {
-    eprintln!("===== CONSTANT/COPY FOLDING =====\n");
+    eprintln!("\n===== CONSTANT/COPY FOLDING =====\n");
 
     let mut num_folded = 0;
     let mut constants = HashMap::new();
@@ -116,23 +117,8 @@ pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known
     num_folded
 }
 
-fn try_fold_constant_jump(instr: &MilEndInstructionKind, env: &ClassEnvironment, next_block_id: MilBlockId) -> Option<MilBlockId> {
-    Some(match *instr {
-        MilEndInstructionKind::JumpIf(cmp, tgt, MilOperand::Int(lhs), MilOperand::Int(rhs)) => {
-            if const_compare(cmp, lhs, rhs) {
-                tgt
-            } else {
-                next_block_id
-            }
-        },
-        _ => {
-            return None
-        }
-    })
-}
-
 pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment) {
-    eprintln!("===== LOCAL TO PHI TRANSFORMATION =====\n");
+    eprintln!("\n===== LOCAL TO PHI TRANSFORMATION =====\n");
 
     let locals_len = func.reg_map.local_info.iter().map(|(id, _)| id.0).max().map_or(0, |i| i + 1);
     let local_types = (0..locals_len).map(|i| func.reg_map.local_info.get(&MilLocalId(i)).map_or(MilType::Void, |info| info.ty)).collect_vec();
@@ -218,4 +204,305 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
     };
 
     eprintln!("\n===== AFTER LOCAL TO PHI TRANSFORMATION =====\n\n{}", func.pretty(env));
+}
+
+fn find_constraint(constraints: &[(MilRegister, MilClassConstraint)], reg: MilRegister) -> Option<MilClassConstraint> {
+    constraints.iter().copied().find(|&(creg, _)| creg == reg).map(|(_, constraint)| constraint)
+}
+
+fn overwrite_constraint(constraints: &mut Vec<(MilRegister, MilClassConstraint)>, reg: MilRegister, constraint: MilClassConstraint, env: &ClassEnvironment) {
+    if let Some(&mut (_, ref mut existing_constraint)) = constraints.iter_mut().find(|&&mut (creg, _)| creg == reg) {
+        *existing_constraint = constraint;
+    } else {
+        constraints.push((reg, constraint));
+    }
+}
+
+fn intersect_constraint(constraints: &mut Vec<(MilRegister, MilClassConstraint)>, reg: MilRegister, constraint: MilClassConstraint, env: &ClassEnvironment) {
+    if let Some(&mut (_, ref mut existing_constraint)) = constraints.iter_mut().find(|&&mut (creg, _)| creg == reg) {
+        *existing_constraint = MilClassConstraint::intersection(*existing_constraint, constraint, env);
+    } else {
+        constraints.push((reg, constraint));
+    }
+}
+
+fn register_constraint(block_constraints: &[(MilRegister, MilClassConstraint)], constraints: &HashMap<MilRegister, MilClassConstraint>, reg: MilRegister) -> Option<MilClassConstraint> {
+    find_constraint(block_constraints, reg).or_else(|| constraints.get(&reg).copied())
+}
+
+fn operand_constraint(block_constraints: &[(MilRegister, MilClassConstraint)], constraints: &HashMap<MilRegister, MilClassConstraint>, val: &MilOperand) -> Option<MilClassConstraint> {
+    match *val {
+        MilOperand::Register(reg) => register_constraint(block_constraints, constraints, reg),
+        MilOperand::KnownObject(_, class_id) => Some(MilClassConstraint::for_class(class_id).not_null()),
+        MilOperand::Null => Some(MilClassConstraint::null()),
+        _ => None
+    }
+}
+
+pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment) -> usize {
+    eprintln!("\n===== CLASS CONSTRAINT ANALYSIS =====\n");
+
+    let mut num_changes = 0;
+    let mut constraints = HashMap::new();
+    let mut edge_constraints = HashMap::new();
+
+    eprintln!("Collecting initial constraints...");
+    for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
+        let block = &func.blocks[&block_id];
+
+        for instr in block.instrs.iter() {
+            let constraint = match instr.kind {
+                MilInstructionKind::Nop => None,
+                // Copies should already be eliminated by now, so no need to handle them
+                MilInstructionKind::Copy(_, _) => None,
+                MilInstructionKind::UnOp(_, _, _) => None,
+                MilInstructionKind::BinOp(_, _, _, _) => None,
+                MilInstructionKind::GetParam(_, constraint, _) => Some(constraint),
+                MilInstructionKind::GetLocal(_, _) => None,
+                MilInstructionKind::SetLocal(_, _) => None,
+                MilInstructionKind::GetField(_, class_id, _, _) => Some(MilClassConstraint::for_class(class_id)),
+                MilInstructionKind::PutField(_, _, _, _) => None,
+                MilInstructionKind::GetArrayLength(_, _) => None,
+                MilInstructionKind::GetArrayElement(class_id, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
+                MilInstructionKind::PutArrayElement(_, _, _, _) => None,
+                MilInstructionKind::GetStatic(_, class_id, _) => Some(MilClassConstraint::for_class(class_id)),
+                MilInstructionKind::PutStatic(_, _, _) => None,
+                MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null()),
+                MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null())
+            };
+
+            if let Some(constraint) = constraint {
+                let tgt = instr.target().cloned().unwrap();
+
+                if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
+                    eprintln!("  {} <- {}", tgt, constraint.pretty(env));
+                    constraints.insert(tgt, constraint);
+                };
+            };
+        };
+
+        let constraint = match block.end_instr.kind {
+            MilEndInstructionKind::Nop => None,
+            MilEndInstructionKind::Unreachable => None,
+            MilEndInstructionKind::Call(class_id, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
+            MilEndInstructionKind::CallVirtual(class_id, _, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
+            MilEndInstructionKind::CallInterface(class_id, _, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
+            MilEndInstructionKind::CallNative(class_id, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
+            MilEndInstructionKind::Throw(_) => None,
+            MilEndInstructionKind::Return(_) => None,
+            MilEndInstructionKind::Jump(_) => None,
+            MilEndInstructionKind::JumpIf(MilComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+                eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
+                eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
+
+                edge_constraints.entry((block_id, target_block_id)).or_insert_with(Vec::new).push((lhs, MilClassConstraint::null()));
+                edge_constraints.entry((block_id, next_block_id)).or_insert_with(Vec::new).push((lhs, MilClassConstraint::non_null()));
+
+                None
+            },
+            MilEndInstructionKind::JumpIf(MilComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+                eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
+                eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
+
+                edge_constraints.entry((block_id, target_block_id)).or_insert_with(Vec::new).push((lhs, MilClassConstraint::non_null()));
+                edge_constraints.entry((block_id, next_block_id)).or_insert_with(Vec::new).push((lhs, MilClassConstraint::null()));
+
+                None
+            },
+            MilEndInstructionKind::JumpIf(_, _, _, _) => None
+        };
+
+        if let Some(constraint) = constraint {
+            let tgt = block.end_instr.target().cloned().unwrap();
+
+            if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
+                eprintln!("  {} <- {}", tgt, constraint.pretty(env));
+                constraints.insert(tgt, constraint);
+            };
+        };
+    };
+
+    eprintln!("Updating edge constraints...");
+    for (&(from, to), edge_constraints) in edge_constraints.iter_mut() {
+        for &mut (reg, ref mut edge_constraint) in edge_constraints.iter_mut() {
+            if let Some(constraint) = constraints.get(&reg).copied() {
+                *edge_constraint = MilClassConstraint::intersection(*edge_constraint, constraint, env);
+                eprintln!("  [{} -> {}] {} <- {}", from, to, reg, edge_constraint.pretty(env));
+            };
+        };
+    };
+
+    let mut block_constraints: HashMap<MilBlockId, _> = HashMap::new();
+    let mut worklist = VecDeque::from_iter(func.block_order.iter().copied());
+
+    eprintln!("Performing constraint dataflow analysis...");
+    while let Some(block_id) = worklist.pop_front() {
+        eprintln!("  {}:", block_id);
+
+        let cfg_node = cfg.get(block_id);
+        let block = &func.blocks[&block_id];
+
+        let mut changed = false;
+        let mut this_block_constraints = vec![];
+        let mut pred_constraints: SmallVec<[_; 2]> = SmallVec::new();
+
+        for pred in cfg_node.incoming.iter().copied() {
+            let this_pred_constraints = if let Some(mut this_pred_constraints) = block_constraints.get(&pred).cloned() {
+                if let Some(edge_constraints) = edge_constraints.get(&(pred, block_id)) {
+                    for (reg, constraint) in edge_constraints.iter().cloned() {
+                        intersect_constraint(&mut this_pred_constraints, reg, constraint, env);
+                    };
+                };
+                this_pred_constraints
+            } else {
+                edge_constraints.get(&(pred, block_id)).cloned().unwrap_or_else(Vec::new)
+            };
+
+            pred_constraints.push((pred, this_pred_constraints));
+        };
+
+        for phi in block.phi_nodes.iter() {
+            let mut constraint = None;
+
+            for &(ref src, _) in phi.sources.iter() {
+                let src_constraint = operand_constraint(&vec![], &constraints, src).unwrap_or(MilClassConstraint::for_class(ClassId::JAVA_LANG_OBJECT));
+
+                constraint = Some(if let Some(constraint) = constraint {
+                    MilClassConstraint::union(constraint, src_constraint, env)
+                } else {
+                    src_constraint
+                });
+            };
+
+            let constraint = constraint.unwrap();
+            if constraint.class_id() != ClassId::JAVA_LANG_OBJECT {
+                eprintln!("    {} <- {}", phi.target, constraint.pretty(env));
+                overwrite_constraint(&mut this_block_constraints, phi.target, constraint, env);
+            };
+        };
+
+        // TODO Make this more efficient by keeping lists sorted
+        'constraint_merge_loop: for (reg, mut constraint) in pred_constraints[0].1.iter().copied() {
+            for &(_, ref pred_constraints) in pred_constraints[1..].iter() {
+                if let Some(pred_constraint) = find_constraint(pred_constraints, reg) {
+                    constraint = MilClassConstraint::union(constraint, pred_constraint, env);
+                } else {
+                    continue 'constraint_merge_loop;
+                };
+            };
+
+            eprintln!("    {} <- {}", reg, constraint.pretty(env));
+            overwrite_constraint(&mut this_block_constraints, reg, constraint, env);
+        };
+
+        this_block_constraints.sort_by_key(|&(r, _)| r.0);
+
+        let changed = if this_block_constraints.is_empty() {
+            false
+        } else if let Some(old_block_constraints) = block_constraints.get(&block_id) {
+            &this_block_constraints != old_block_constraints
+        } else {
+            true
+        };
+
+        if changed {
+            eprintln!("    Constraint changes detected. Updating edge constraints...");
+            block_constraints.insert(block_id, this_block_constraints);
+
+            for succ in cfg_node.outgoing.iter().copied() {
+                if succ != MilBlockId::EXIT {
+                    if let Some(edge_constraints) = edge_constraints.get_mut(&(block_id, succ)) {
+                        for &mut (reg, ref mut edge_constraint) in edge_constraints.iter_mut() {
+                            if let Some(constraint) = constraints.get(&reg).copied() {
+                                *edge_constraint = MilClassConstraint::intersection(*edge_constraint, constraint, env);
+                                eprintln!("      [{} -> {}] {} <- {}", block_id, succ, reg, edge_constraint.pretty(env));
+                            };
+                        };
+                    };
+
+                    if !worklist.contains(&succ) {
+                        worklist.push_back(succ);
+                    };
+                };
+            };
+        };
+    };
+
+    let empty_constraints = vec![];
+
+    eprintln!("Performing optimizations...");
+    for block_id in func.block_order.iter().cloned() {
+        let block = func.blocks.get_mut(&block_id).unwrap();
+        let block_constraints = block_constraints.get(&block_id).unwrap_or(&empty_constraints);
+
+        for instr in block.instrs.iter_mut() {
+            instr.for_operands_mut(|op| if let MilOperand::Register(reg) = *op {
+                if let Some(constraint) = register_constraint(&block_constraints, &constraints, reg) {
+                    if constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+                        eprintln!("  Replacing {} in {} with ref:null", reg, block_id);
+                        *op = MilOperand::Null;
+                    };
+                };
+            });
+        };
+
+        block.end_instr.for_operands_mut(|op| if let MilOperand::Register(reg) = *op {
+            if let Some(constraint) = register_constraint(&block_constraints, &constraints, reg) {
+                if constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+                    eprintln!("  Replacing {} in {} with ref:null", reg, block_id);
+                    *op = MilOperand::Null;
+                };
+            };
+        });
+
+        match block.end_instr.kind {
+            MilEndInstructionKind::JumpIf(cmp, target_block, MilOperand::Register(reg), MilOperand::Null)
+                | MilEndInstructionKind::JumpIf(cmp, target_block, MilOperand::Null, MilOperand::Register(reg)) => {
+                if let Some(constraint) = register_constraint(&block_constraints, &constraints, reg) {
+                    if !constraint.nullable() {
+                        eprintln!("  Folding conditional at end of {} since {} is never null", block_id, reg);
+                        block.end_instr.kind = MilEndInstructionKind::JumpIf(cmp.reverse(), target_block, MilOperand::Null, MilOperand::Null);
+                        num_changes += 1;
+                    };
+                };
+            },
+            MilEndInstructionKind::CallInterface(return_class_id, method_id, tgt, ref recv, ref args) => {
+                if let Some(constraint) = operand_constraint(&block_constraints, &constraints, recv) {
+                    if constraint.class_id() != ClassId::UNRESOLVED {
+                        let method = env.get_method(method_id).1;
+
+                        for class_id in env.get_class_chain(constraint.class_id()) {
+                            if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
+                                eprintln!("  Replacing interface call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
+                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
+                                break;
+                            };
+                        };
+                    };
+                };
+            },
+            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref recv, ref args) => {
+                if let Some(constraint) = operand_constraint(&block_constraints, &constraints, recv) {
+                    if constraint.class_id() != ClassId::UNRESOLVED {
+                        let method = env.get_method(method_id).1;
+
+                        for class_id in env.get_class_chain(constraint.class_id()) {
+                            if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
+                                eprintln!("  Replacing virtual call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
+                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
+                                break;
+                            };
+                        };
+                    };
+                };
+            },
+            _ => {}
+        };
+    };
+
+    if num_changes != 0 {
+        eprintln!("\n===== AFTER CLASS CONSTRAINT ANALYSIS =====\n\n{}", func.pretty(env));
+    };
+
+    num_changes
 }
