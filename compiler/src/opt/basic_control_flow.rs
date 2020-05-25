@@ -30,7 +30,7 @@ pub fn eliminate_dead_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBloc
             eprintln!("Eliminating dead block {}", block_id);
 
             for succ in cfg.get(block_id).outgoing.iter().copied() {
-                if succ != MilBlockId::EXIT {
+                if succ != MilBlockId::EXIT && succ != block_id {
                     transform::remove_incoming_phis(blocks.get_mut(&succ).unwrap(), block_id);
                 };
             };

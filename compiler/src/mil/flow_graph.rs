@@ -50,11 +50,15 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraph<T> {
         let node = self.nodes.remove(&id).unwrap();
 
         for from in node.incoming {
-            self.get_mut(from).outgoing.remove_item(&id);
+            if from != id {
+                self.get_mut(from).outgoing.remove_item(&id);
+            };
         };
 
         for to in node.outgoing {
-            self.get_mut(to).incoming.remove_item(&id);
+            if to != id {
+                self.get_mut(to).incoming.remove_item(&id);
+            };
         };
     }
 
