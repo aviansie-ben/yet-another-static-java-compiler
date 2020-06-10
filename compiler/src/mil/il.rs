@@ -546,7 +546,7 @@ impl fmt::Display for MilBinOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MilInstructionKind {
     Nop,
     Copy(MilRegister, MilOperand),
@@ -566,7 +566,7 @@ pub enum MilInstructionKind {
     AllocArray(ClassId, MilRegister, MilOperand)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MilEndInstructionKind {
     Nop,
     Unreachable,

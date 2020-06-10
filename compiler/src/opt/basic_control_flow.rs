@@ -51,7 +51,7 @@ pub fn eliminate_dead_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBloc
     num_eliminated
 }
 
-pub fn simplify_phis(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment) -> usize {
+pub fn simplify_phis(func: &mut MilFunction, env: &ClassEnvironment) -> usize {
     eprintln!("\n===== PHI NODE SIMPLIFICATION =====\n");
 
     let mut num_simplified = 0;
@@ -284,4 +284,330 @@ pub fn remove_redundant_jumps(func: &mut MilFunction, env: &ClassEnvironment) ->
     };
 
     num_removed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resolve::MethodId;
+    use crate::test_util::*;
+
+    use smallvec::smallvec;
+
+    fn create_test_block(id: MilBlockId, phis: &[MilPhiNode], instrs: &[MilInstructionKind], end_instr: MilEndInstructionKind) -> MilBlock {
+        let mut block = MilBlock::new();
+
+        block.id = id;
+        block.phi_nodes = phis.iter().cloned().collect();
+        block.instrs = instrs.iter().cloned().map(|instr| MilInstruction { kind: instr, bytecode: (!0, !0) }).collect();
+        block.end_instr.kind = end_instr;
+
+        block
+    }
+
+    #[test]
+    fn test_eliminate_trivial_dead_block() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 1);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0)]);
+        assert!(func.blocks.get(&MilBlockId(0)).is_some());
+        assert!(func.blocks.get(&MilBlockId(1)).is_none());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_none());
+    }
+
+    #[test]
+    fn test_eliminate_dead_block_with_edge_to_live_block() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(0))));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 1);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0)]);
+        assert!(func.blocks.get(&MilBlockId(0)).is_some());
+        assert!(func.blocks.get(&MilBlockId(1)).is_none());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_none());
+        assert_eq!(cfg.get(MilBlockId(0)).incoming, vec![MilBlockId::ENTRY]);
+    }
+
+    #[test]
+    fn test_eliminate_dead_block_with_phi_to_live_block() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Nop));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(2), MilBlockId(2))] }],
+            &[],
+            MilEndInstructionKind::Return(MilOperand::Null)
+        ));
+        func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 1);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0), MilBlockId(1)]);
+        assert!(func.blocks.get(&MilBlockId(0)).is_some());
+        assert!(func.blocks.get(&MilBlockId(1)).is_some());
+        assert!(func.blocks.get(&MilBlockId(2)).is_none());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_some());
+        assert!(cfg.try_get(MilBlockId(2)).is_none());
+        assert_eq!(func.blocks[&MilBlockId(1)].phi_nodes[0].sources.clone().into_vec(), vec![(MilOperand::Int(0), MilBlockId(0))]);
+    }
+
+    #[test]
+    fn test_eliminate_dead_block_single_loop() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 1);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0)]);
+        assert!(func.blocks.get(&MilBlockId(1)).is_none());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_none());
+    }
+
+    #[test]
+    fn test_eliminate_dead_block_multi_loop() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Nop));
+        func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 2);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0)]);
+        assert!(func.blocks.get(&MilBlockId(1)).is_none());
+        assert!(func.blocks.get(&MilBlockId(2)).is_none());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_none());
+        assert!(cfg.try_get(MilBlockId(2)).is_none());
+    }
+
+    #[test]
+    fn test_no_eliminate_live_blocks() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIf(MilComparison::Eq, MilBlockId(3), MilOperand::Null, MilOperand::Null)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
+        func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Nop));
+        func.blocks.insert(MilBlockId(3), create_test_block(MilBlockId(3), &[], &[], MilEndInstructionKind::Jump(MilBlockId(2))));
+        func.blocks.insert(MilBlockId(4), create_test_block(MilBlockId(4), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(eliminate_dead_blocks(&mut func, &mut cfg, &TEST_ENV), 0);
+
+        assert_eq!(func.block_order, vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)]);
+        assert!(func.blocks.get(&MilBlockId(0)).is_some());
+        assert!(func.blocks.get(&MilBlockId(1)).is_some());
+        assert!(func.blocks.get(&MilBlockId(2)).is_some());
+        assert!(func.blocks.get(&MilBlockId(3)).is_some());
+        assert!(func.blocks.get(&MilBlockId(4)).is_some());
+        assert!(cfg.try_get(MilBlockId(0)).is_some());
+        assert!(cfg.try_get(MilBlockId(1)).is_some());
+        assert!(cfg.try_get(MilBlockId(2)).is_some());
+        assert!(cfg.try_get(MilBlockId(3)).is_some());
+        assert!(cfg.try_get(MilBlockId(4)).is_some());
+    }
+
+    #[test]
+    fn test_simplify_phi_same_const() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Int(0)));
+    }
+
+    #[test]
+    fn test_simplify_phi_same_reg() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(1)), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+    }
+
+    #[test]
+    fn test_simplify_phi_const_and_self() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Int(0)));
+    }
+
+    #[test]
+    fn test_simplify_phi_reg_and_self() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+    }
+
+    #[test]
+    fn test_simplify_poisoned_phi() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister::VOID), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister::VOID)));
+    }
+
+    #[test]
+    fn test_unsimplifiable_phis() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[
+                MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))] },
+                MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(2)), MilBlockId(0)), (MilOperand::Register(MilRegister(3)), MilBlockId(1))] }
+            ],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0))),
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 0);
+        assert_eq!(func.blocks[&MilBlockId(0)].phi_nodes.len(), 2);
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0))));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[1].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+    }
+
+    #[test]
+    fn test_simplify_phi_with_nonlocal_refs() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))] }],
+            &[],
+            MilEndInstructionKind::Nop
+        ));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+            ],
+            MilEndInstructionKind::Return(MilOperand::Register(MilRegister(0)))
+        ));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 1);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(1)].phi_nodes[0].sources.clone().into_vec(), vec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))]);
+        assert_eq!(func.blocks[&MilBlockId(1)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Int(0)));
+        assert_eq!(func.blocks[&MilBlockId(1)].end_instr.kind, MilEndInstructionKind::Return(MilOperand::Int(0)));
+    }
+
+    #[test]
+    fn test_simplify_phi_nested() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))] }],
+            &[],
+            MilEndInstructionKind::Nop
+        ));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))] }],
+            &[
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1)))
+            ],
+            MilEndInstructionKind::Nop
+        ));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
+
+        assert_eq!(simplify_phis(&mut func, &TEST_ENV), 2);
+        assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
+        assert!(func.blocks[&MilBlockId(1)].phi_nodes.is_empty());
+        assert_eq!(func.blocks[&MilBlockId(1)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Int(0)));
+    }
 }

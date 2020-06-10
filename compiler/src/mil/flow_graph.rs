@@ -34,12 +34,20 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraph<T> {
         FlowGraph { nodes: HashMap::new() }
     }
 
+    pub fn try_get(&self, id: T) -> Option<&FlowGraphNode<T>> {
+        self.nodes.get(&id)
+    }
+
     pub fn get(&self, id: T) -> &FlowGraphNode<T> {
-        self.nodes.get(&id).unwrap()
+        self.try_get(id).unwrap()
+    }
+
+    pub fn try_get_mut(&mut self, id: T) -> Option<&mut FlowGraphNode<T>> {
+        self.nodes.get_mut(&id)
     }
 
     pub fn get_mut(&mut self, id: T) -> &mut FlowGraphNode<T> {
-        self.nodes.get_mut(&id).unwrap()
+        self.try_get_mut(id).unwrap()
     }
 
     pub fn add_node(&mut self, id: T) {
