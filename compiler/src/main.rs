@@ -15,6 +15,9 @@ pub mod static_heap;
 pub mod static_interp;
 pub mod util;
 
+#[cfg(test)]
+mod test_util;
+
 use std::collections::HashSet;
 
 use clap::{App, Arg, ArgMatches};
