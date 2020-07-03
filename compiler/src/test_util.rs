@@ -47,6 +47,7 @@ fn create_mock_class(fields: &[(FieldFlags, ClassId)]) -> Class {
             super_id: ClassId::UNRESOLVED,
             interface_ids: vec![],
             all_interface_ids: vec![],
+            extra_interface_overrides: vec![],
             clinit_method: None,
             name: Arc::clone(&empty_string)
         }
