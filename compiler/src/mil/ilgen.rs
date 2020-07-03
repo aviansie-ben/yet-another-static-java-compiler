@@ -1002,7 +1002,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::AALoad => {
                 generate_array_load(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT, MilType::Ref);
-            }
+            },
+            BytecodeInstruction::FALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_FLOAT, MilType::Float);
+            },
+            BytecodeInstruction::DALoad => {
+                generate_array_load(builder, &mut stack, bc, ClassId::PRIMITIVE_DOUBLE, MilType::Double);
+            },
             BytecodeInstruction::BAStore => {
                 generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_BYTE, MilType::Int);
             },
@@ -1020,6 +1026,12 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::AAStore => {
                 generate_array_store(builder, &mut stack, bc, ClassId::JAVA_LANG_OBJECT, MilType::Ref);
+            },
+            BytecodeInstruction::FAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_FLOAT, MilType::Float);
+            },
+            BytecodeInstruction::DAStore => {
+                generate_array_store(builder, &mut stack, bc, ClassId::PRIMITIVE_DOUBLE, MilType::Double);
             },
             BytecodeInstruction::ArrayLength => {
                 let reg = builder.allocate_reg(MilType::Int);
