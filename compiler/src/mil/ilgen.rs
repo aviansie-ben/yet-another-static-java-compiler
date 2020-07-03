@@ -640,6 +640,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(builder, reg, MilType::Float);
             },
+            BytecodeInstruction::DConst(val) => {
+                let reg = builder.allocate_reg(MilType::Double);
+                builder.append_instruction(
+                    MilInstructionKind::Copy(reg, MilOperand::Double(val)),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Double);
+            },
             BytecodeInstruction::Dup => {
                 stack.push_slot(stack.peek());
             },
@@ -695,6 +703,24 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(builder, reg, MilType::Long);
             },
+            BytecodeInstruction::FLoad(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Float, &mut builder.func.reg_map);
+                let reg = builder.allocate_reg(MilType::Float);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, reg),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Float);
+            },
+            BytecodeInstruction::DLoad(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Double, &mut builder.func.reg_map);
+                let reg = builder.allocate_reg(MilType::Double);
+                builder.append_instruction(
+                    MilInstructionKind::GetLocal(local_id, reg),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Double);
+            },
             BytecodeInstruction::AStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Ref, &mut builder.func.reg_map);
                 let val = stack.pop(builder, MilType::Ref);
@@ -714,6 +740,22 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::LStore(idx) => {
                 let local_id = locals.get_or_add(idx, MilType::Long, &mut builder.func.reg_map);
                 let val = stack.pop(builder, MilType::Long);
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
+                    bc
+                );
+            },
+            BytecodeInstruction::FStore(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Float, &mut builder.func.reg_map);
+                let val = stack.pop(builder, MilType::Float);
+                builder.append_instruction(
+                    MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
+                    bc
+                );
+            },
+            BytecodeInstruction::DStore(idx) => {
+                let local_id = locals.get_or_add(idx, MilType::Double, &mut builder.func.reg_map);
+                let val = stack.pop(builder, MilType::Double);
                 builder.append_instruction(
                     MilInstructionKind::SetLocal(local_id, MilOperand::Register(val)),
                     bc
@@ -839,6 +881,36 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::LXor => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::LXor, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::FNeg => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::FNeg, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::FAdd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FAdd, MilType::Float, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::FSub => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FSub, MilType::Float, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::FMul => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FMul, MilType::Float, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::FDiv => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FDiv, MilType::Float, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::DNeg => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::DNeg, MilType::Double, MilType::Double);
+            },
+            BytecodeInstruction::DAdd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DAdd, MilType::Double, MilType::Double, MilType::Double);
+            },
+            BytecodeInstruction::DSub => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DSub, MilType::Double, MilType::Double, MilType::Double);
+            },
+            BytecodeInstruction::DMul => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DMul, MilType::Double, MilType::Double, MilType::Double);
+            },
+            BytecodeInstruction::DDiv => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DDiv, MilType::Double, MilType::Double, MilType::Double);
             },
             // TODO Support multithreading
             BytecodeInstruction::MonitorEnter => {
@@ -1250,23 +1322,6 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 ));
             },
-            BytecodeInstruction::FStore(_) => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                stack.pop(builder, MilType::Float);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
-            },
-            BytecodeInstruction::FLoad(_) => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                let reg = builder.allocate_reg(MilType::Float);
-                stack.push(builder, reg, MilType::Float);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
-            },
             BytecodeInstruction::I2F => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
                 let reg = builder.allocate_reg(MilType::Float);
@@ -1282,17 +1337,6 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let reg = builder.allocate_reg(MilType::Int);
                 stack.pop(builder, MilType::Float);
                 stack.push(builder, reg, MilType::Int);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
-            },
-            BytecodeInstruction::FMul => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                let reg = builder.allocate_reg(MilType::Float);
-                stack.pop(builder, MilType::Float);
-                stack.pop(builder, MilType::Float);
-                stack.push(builder, reg, MilType::Float);
                 builder.append_end_instruction(
                     MilEndInstructionKind::Throw(MilOperand::Null),
                     bc

@@ -37,6 +37,20 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             MilUnOp::L2I => MilOperand::Int(val as i32),
             _ => unreachable!()
         },
+        MilInstructionKind::UnOp(op, _, MilOperand::Float(val_bits)) => {
+            let val = f32::from_bits(val_bits);
+            match op {
+                MilUnOp::FNeg => MilOperand::Float((-val).to_bits()),
+                _ => unreachable!()
+            }
+        }
+        MilInstructionKind::UnOp(op, _, MilOperand::Double(val_bits)) => {
+            let val = f64::from_bits(val_bits);
+            match op {
+                MilUnOp::DNeg => MilOperand::Double((-val).to_bits()),
+                _ => unreachable!()
+            }
+        },
         MilInstructionKind::BinOp(op, _, MilOperand::Int(lhs), MilOperand::Int(rhs)) => match op {
             MilBinOp::IAdd => MilOperand::Int(lhs.wrapping_add(rhs)),
             MilBinOp::ISub => MilOperand::Int(lhs.wrapping_sub(rhs)),
@@ -77,6 +91,30 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
                 Ordering::Greater => 1
             }),
             _ => unreachable!()
+        },
+        MilInstructionKind::BinOp(op, _, MilOperand::Float(lhs_bits), MilOperand::Float(rhs_bits)) => {
+            let lhs = f32::from_bits(lhs_bits);
+            let rhs = f32::from_bits(rhs_bits);
+
+            match op {
+                MilBinOp::FAdd => MilOperand::Float((lhs + rhs).to_bits()),
+                MilBinOp::FSub => MilOperand::Float((lhs - rhs).to_bits()),
+                MilBinOp::FMul => MilOperand::Float((lhs * rhs).to_bits()),
+                MilBinOp::FDiv => MilOperand::Float((lhs / rhs).to_bits()),
+                _ => unreachable!()
+            }
+        },
+        MilInstructionKind::BinOp(op, _, MilOperand::Double(lhs_bits), MilOperand::Double(rhs_bits)) => {
+            let lhs = f64::from_bits(lhs_bits);
+            let rhs = f64::from_bits(rhs_bits);
+
+            match op {
+                MilBinOp::DAdd => MilOperand::Double((lhs + rhs).to_bits()),
+                MilBinOp::DSub => MilOperand::Double((lhs - rhs).to_bits()),
+                MilBinOp::DMul => MilOperand::Double((lhs * rhs).to_bits()),
+                MilBinOp::DDiv => MilOperand::Double((lhs / rhs).to_bits()),
+                _ => unreachable!()
+            }
         },
         MilInstructionKind::GetField(field_id, _, _, MilOperand::KnownObject(val, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {

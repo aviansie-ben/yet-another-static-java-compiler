@@ -802,6 +802,16 @@ unsafe fn emit_basic_block(
                         val,
                         register_name(tgt).as_ptr()
                     ),
+                    MilUnOp::FNeg => LLVMBuildFNeg(
+                        builder.ptr(),
+                        val,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::DNeg => LLVMBuildFNeg(
+                        builder.ptr(),
+                        val,
+                        register_name(tgt).as_ptr()
+                    ),
                     MilUnOp::I2L => LLVMBuildSExt(
                         builder.ptr(),
                         val,
@@ -1016,6 +1026,53 @@ unsafe fn emit_basic_block(
                         ),
                         register_name(tgt).as_ptr()
                     ),
+                    MilBinOp::FAdd => LLVMBuildFAdd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::FSub => LLVMBuildFSub(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::FMul => LLVMBuildFMul(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::FDiv => LLVMBuildFDiv(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::DAdd => LLVMBuildFAdd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::DSub => LLVMBuildFSub(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::DMul => LLVMBuildFMul(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::DDiv => LLVMBuildFDiv(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
                     )
                 }, &module.types);
             },

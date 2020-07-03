@@ -500,6 +500,8 @@ pub enum MilUnOp {
     IExtB,
     IExtS,
     LNeg,
+    FNeg,
+    DNeg,
     I2L,
     L2I
 }
@@ -511,6 +513,8 @@ impl fmt::Display for MilUnOp {
             MilUnOp::IExtB => write!(f, "iextb"),
             MilUnOp::IExtS => write!(f, "iexts"),
             MilUnOp::LNeg => write!(f, "lneg"),
+            MilUnOp::FNeg => write!(f, "fneg"),
+            MilUnOp::DNeg => write!(f, "dneg"),
             MilUnOp::I2L => write!(f, "i2l"),
             MilUnOp::L2I => write!(f, "l2i")
         }
@@ -540,7 +544,15 @@ pub enum MilBinOp {
     LShrS,
     LShrU,
     LShl,
-    LCmp
+    LCmp,
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    DAdd,
+    DSub,
+    DMul,
+    DDiv
 }
 
 impl fmt::Display for MilBinOp {
@@ -567,7 +579,15 @@ impl fmt::Display for MilBinOp {
             MilBinOp::LShrS => write!(f, "lshrs"),
             MilBinOp::LShrU => write!(f, "lshru"),
             MilBinOp::LShl => write!(f, "lshl"),
-            MilBinOp::LCmp => write!(f, "lcmp")
+            MilBinOp::LCmp => write!(f, "lcmp"),
+            MilBinOp::FAdd => write!(f, "fadd"),
+            MilBinOp::FSub => write!(f, "fsub"),
+            MilBinOp::FMul => write!(f, "fmul"),
+            MilBinOp::FDiv => write!(f, "fdiv"),
+            MilBinOp::DAdd => write!(f, "dadd"),
+            MilBinOp::DSub => write!(f, "dsub"),
+            MilBinOp::DMul => write!(f, "dmul"),
+            MilBinOp::DDiv => write!(f, "ddiv")
         }
     }
 }
