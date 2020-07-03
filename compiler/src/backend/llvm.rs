@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 use std::ptr::NonNull;
 
 use itertools::Itertools;
-use llvm_sys::LLVMIntPredicate;
+use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate};
 use llvm_sys::analysis::*;
 use llvm_sys::bit_writer::*;
 use llvm_sys::core::*;
@@ -818,10 +818,214 @@ unsafe fn emit_basic_block(
                         module.types.long,
                         register_name(tgt).as_ptr()
                     ),
+                    MilUnOp::I2F => LLVMBuildSIToFP(
+                        builder.ptr(),
+                        val,
+                        module.types.float,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::I2D => LLVMBuildSIToFP(
+                        builder.ptr(),
+                        val,
+                        module.types.double,
+                        register_name(tgt).as_ptr()
+                    ),
                     MilUnOp::L2I => LLVMBuildTrunc(
                         builder.ptr(),
                         val,
                         module.types.int,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::L2F => LLVMBuildSIToFP(
+                        builder.ptr(),
+                        val,
+                        module.types.float,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::L2D => LLVMBuildSIToFP(
+                        builder.ptr(),
+                        val,
+                        module.types.double,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::F2I => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealUNO,
+                            val,
+                            val,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_int(0),
+                        LLVMBuildSelect(
+                            builder.ptr(),
+                            LLVMBuildFCmp(
+                                builder.ptr(),
+                                LLVMRealPredicate::LLVMRealOGE,
+                                val,
+                                module.const_float((i32::MAX as f32).to_bits()),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.const_int(i32::MAX),
+                            LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLE,
+                                    val,
+                                    module.const_float((i32::MIN as f32).to_bits()),
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(i32::MIN),
+                                LLVMBuildFPToSI(
+                                    builder.ptr(),
+                                    val,
+                                    module.types.int,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::F2L => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealUNO,
+                            val,
+                            val,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_long(0),
+                        LLVMBuildSelect(
+                            builder.ptr(),
+                            LLVMBuildFCmp(
+                                builder.ptr(),
+                                LLVMRealPredicate::LLVMRealOGE,
+                                val,
+                                module.const_float((i64::MAX as f32).to_bits()),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.const_long(i64::MAX),
+                            LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLE,
+                                    val,
+                                    module.const_float((i64::MIN as f32).to_bits()),
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_long(i64::MIN),
+                                LLVMBuildFPToSI(
+                                    builder.ptr(),
+                                    val,
+                                    module.types.long,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::F2D => LLVMBuildFPExt(
+                        builder.ptr(),
+                        val,
+                        module.types.double,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::D2I => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealUNO,
+                            val,
+                            val,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_int(0),
+                        LLVMBuildSelect(
+                            builder.ptr(),
+                            LLVMBuildFCmp(
+                                builder.ptr(),
+                                LLVMRealPredicate::LLVMRealOGE,
+                                val,
+                                module.const_double((i32::MAX as f64).to_bits()),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.const_int(i32::MAX),
+                            LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLE,
+                                    val,
+                                    module.const_double((i32::MIN as f64).to_bits()),
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(i32::MIN),
+                                LLVMBuildFPToSI(
+                                    builder.ptr(),
+                                    val,
+                                    module.types.int,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::D2L => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealUNO,
+                            val,
+                            val,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_long(0),
+                        LLVMBuildSelect(
+                            builder.ptr(),
+                            LLVMBuildFCmp(
+                                builder.ptr(),
+                                LLVMRealPredicate::LLVMRealOGE,
+                                val,
+                                module.const_double((i64::MAX as f64).to_bits()),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.const_long(i64::MAX),
+                            LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLE,
+                                    val,
+                                    module.const_double((i64::MIN as f64).to_bits()),
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_long(i64::MIN),
+                                LLVMBuildFPToSI(
+                                    builder.ptr(),
+                                    val,
+                                    module.types.long,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilUnOp::D2F => LLVMBuildFPTrunc(
+                        builder.ptr(),
+                        val,
+                        module.types.float,
                         register_name(tgt).as_ptr()
                     )
                 }, &module.types);

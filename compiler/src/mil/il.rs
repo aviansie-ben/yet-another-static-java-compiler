@@ -503,7 +503,17 @@ pub enum MilUnOp {
     FNeg,
     DNeg,
     I2L,
-    L2I
+    I2D,
+    I2F,
+    L2I,
+    L2F,
+    L2D,
+    F2I,
+    F2L,
+    F2D,
+    D2I,
+    D2L,
+    D2F
 }
 
 impl fmt::Display for MilUnOp {
@@ -516,7 +526,17 @@ impl fmt::Display for MilUnOp {
             MilUnOp::FNeg => write!(f, "fneg"),
             MilUnOp::DNeg => write!(f, "dneg"),
             MilUnOp::I2L => write!(f, "i2l"),
-            MilUnOp::L2I => write!(f, "l2i")
+            MilUnOp::I2F => write!(f, "i2f"),
+            MilUnOp::I2D => write!(f, "i2d"),
+            MilUnOp::L2I => write!(f, "l2i"),
+            MilUnOp::L2F => write!(f, "l2f"),
+            MilUnOp::L2D => write!(f, "l2d"),
+            MilUnOp::F2I => write!(f, "f2i"),
+            MilUnOp::F2L => write!(f, "f2l"),
+            MilUnOp::F2D => write!(f, "f2d"),
+            MilUnOp::D2I => write!(f, "d2i"),
+            MilUnOp::D2L => write!(f, "d2l"),
+            MilUnOp::D2F => write!(f, "d2f")
         }
     }
 }

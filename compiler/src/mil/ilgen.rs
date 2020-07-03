@@ -810,6 +810,12 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::I2L => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::I2L, MilType::Int, MilType::Long);
             },
+            BytecodeInstruction::I2F => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::I2F, MilType::Int, MilType::Float);
+            },
+            BytecodeInstruction::I2D => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::I2D, MilType::Int, MilType::Double);
+            },
             BytecodeInstruction::INeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::INeg, MilType::Int, MilType::Int);
             },
@@ -845,6 +851,12 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::L2I => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::L2I, MilType::Long, MilType::Int);
+            },
+            BytecodeInstruction::L2F => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::L2F, MilType::Long, MilType::Float);
+            },
+            BytecodeInstruction::L2D => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::L2D, MilType::Long, MilType::Double);
             },
             BytecodeInstruction::LNeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::LNeg, MilType::Long, MilType::Long);
@@ -882,6 +894,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::LXor => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::LXor, MilType::Long, MilType::Long, MilType::Long);
             },
+            BytecodeInstruction::F2I => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::F2I, MilType::Float, MilType::Int);
+            },
+            BytecodeInstruction::F2L => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::F2L, MilType::Float, MilType::Long);
+            },
+            BytecodeInstruction::F2D => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::F2D, MilType::Float, MilType::Double);
+            },
             BytecodeInstruction::FNeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::FNeg, MilType::Float, MilType::Float);
             },
@@ -896,6 +917,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::FDiv => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::FDiv, MilType::Float, MilType::Float, MilType::Float);
+            },
+            BytecodeInstruction::D2I => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::D2I, MilType::Double, MilType::Int);
+            },
+            BytecodeInstruction::D2L => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::D2L, MilType::Double, MilType::Long);
+            },
+            BytecodeInstruction::D2F => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::D2F, MilType::Double, MilType::Float);
             },
             BytecodeInstruction::DNeg => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::DNeg, MilType::Double, MilType::Double);
@@ -1321,26 +1351,6 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
                     bc
                 ));
-            },
-            BytecodeInstruction::I2F => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                let reg = builder.allocate_reg(MilType::Float);
-                stack.pop(builder, MilType::Int);
-                stack.push(builder, reg, MilType::Float);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
-            },
-            BytecodeInstruction::F2I => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                let reg = builder.allocate_reg(MilType::Int);
-                stack.pop(builder, MilType::Float);
-                stack.push(builder, reg, MilType::Int);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
             },
             BytecodeInstruction::FCmpG | BytecodeInstruction::FCmpL => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);

@@ -30,17 +30,44 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             MilUnOp::IExtB => MilOperand::Int(val as i8 as i32),
             MilUnOp::IExtS => MilOperand::Int(val as i16 as i32),
             MilUnOp::I2L => MilOperand::Long(val as i64),
+            MilUnOp::I2F => MilOperand::Float((val as f32).to_bits()),
+            MilUnOp::I2D => MilOperand::Double((val as f64).to_bits()),
             _ => unreachable!()
         },
         MilInstructionKind::UnOp(op, _, MilOperand::Long(val)) => match op {
             MilUnOp::LNeg => MilOperand::Long(val.wrapping_neg()),
             MilUnOp::L2I => MilOperand::Int(val as i32),
+            MilUnOp::L2F => MilOperand::Float((val as f32).to_bits()),
+            MilUnOp::L2D => MilOperand::Double((val as f64).to_bits()),
             _ => unreachable!()
         },
         MilInstructionKind::UnOp(op, _, MilOperand::Float(val_bits)) => {
             let val = f32::from_bits(val_bits);
             match op {
                 MilUnOp::FNeg => MilOperand::Float((-val).to_bits()),
+                MilUnOp::F2I => MilOperand::Int(
+                    if val.is_nan() {
+                        0
+                    } else if val >= (i32::MAX as f32) {
+                        i32::MAX
+                    } else if val <= (i32::MIN as f32) {
+                        i32::MIN
+                    } else {
+                        val as i32
+                    }
+                ),
+                MilUnOp::F2L => MilOperand::Long(
+                    if val.is_nan() {
+                        0
+                    } else if val >= (i64::MAX as f32) {
+                        i64::MAX
+                    } else if val <= (i64::MIN as f32) {
+                        i64::MIN
+                    } else {
+                        val as i64
+                    }
+                ),
+                MilUnOp::F2D => MilOperand::Double((val as f64).to_bits()),
                 _ => unreachable!()
             }
         }
@@ -48,6 +75,29 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             let val = f64::from_bits(val_bits);
             match op {
                 MilUnOp::DNeg => MilOperand::Double((-val).to_bits()),
+                MilUnOp::D2I => MilOperand::Int(
+                    if val.is_nan() {
+                        0
+                    } else if val >= (i32::MAX as f64) {
+                        i32::MAX
+                    } else if val <= (i32::MIN as f64) {
+                        i32::MIN
+                    } else {
+                        val as i32
+                    }
+                ),
+                MilUnOp::D2L => MilOperand::Long(
+                    if val.is_nan() {
+                        0
+                    } else if val >= (i64::MAX as f64) {
+                        i64::MAX
+                    } else if val <= (i64::MIN as f64) {
+                        i64::MIN
+                    } else {
+                        val as i64
+                    }
+                ),
+                MilUnOp::D2F => MilOperand::Float((val as f32).to_bits()),
                 _ => unreachable!()
             }
         },
