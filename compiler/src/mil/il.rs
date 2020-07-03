@@ -499,6 +499,7 @@ pub enum MilUnOp {
     INeg,
     IExtB,
     IExtS,
+    LNeg,
     I2L,
     L2I
 }
@@ -509,6 +510,7 @@ impl fmt::Display for MilUnOp {
             MilUnOp::INeg => write!(f, "ineg"),
             MilUnOp::IExtB => write!(f, "iextb"),
             MilUnOp::IExtS => write!(f, "iexts"),
+            MilUnOp::LNeg => write!(f, "lneg"),
             MilUnOp::I2L => write!(f, "i2l"),
             MilUnOp::L2I => write!(f, "l2i")
         }
@@ -526,7 +528,19 @@ pub enum MilBinOp {
     IXor,
     IShrS,
     IShrU,
-    IShl
+    IShl,
+    LAdd,
+    LSub,
+    LMul,
+    LDivS,
+    LRemS,
+    LAnd,
+    LOr,
+    LXor,
+    LShrS,
+    LShrU,
+    LShl,
+    LCmp
 }
 
 impl fmt::Display for MilBinOp {
@@ -541,7 +555,19 @@ impl fmt::Display for MilBinOp {
             MilBinOp::IXor => write!(f, "ixor"),
             MilBinOp::IShrS => write!(f, "ishrs"),
             MilBinOp::IShrU => write!(f, "ishru"),
-            MilBinOp::IShl => write!(f, "ishl")
+            MilBinOp::IShl => write!(f, "ishl"),
+            MilBinOp::LAdd => write!(f, "ladd"),
+            MilBinOp::LSub => write!(f, "lsub"),
+            MilBinOp::LMul => write!(f, "lmul"),
+            MilBinOp::LDivS => write!(f, "ldivs"),
+            MilBinOp::LRemS => write!(f, "lrems"),
+            MilBinOp::LAnd => write!(f, "land"),
+            MilBinOp::LOr => write!(f, "lor"),
+            MilBinOp::LXor => write!(f, "lxor"),
+            MilBinOp::LShrS => write!(f, "lshrs"),
+            MilBinOp::LShrU => write!(f, "lshru"),
+            MilBinOp::LShl => write!(f, "lshl"),
+            MilBinOp::LCmp => write!(f, "lcmp")
         }
     }
 }

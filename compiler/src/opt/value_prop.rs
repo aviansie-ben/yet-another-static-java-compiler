@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::iter::FromIterator;
 
@@ -32,6 +33,7 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             _ => unreachable!()
         },
         MilInstructionKind::UnOp(op, _, MilOperand::Long(val)) => match op {
+            MilUnOp::LNeg => MilOperand::Long(val.wrapping_neg()),
             MilUnOp::L2I => MilOperand::Int(val as i32),
             _ => unreachable!()
         },
@@ -48,7 +50,33 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             MilBinOp::IXor => MilOperand::Int(lhs ^ rhs),
             MilBinOp::IShrS => MilOperand::Int(lhs >> (rhs & 0x1f)),
             MilBinOp::IShrU => MilOperand::Int(((lhs as u32) >> (rhs & 0x1f)) as i32),
-            MilBinOp::IShl => MilOperand::Int(lhs << (rhs & 0x1f))
+            MilBinOp::IShl => MilOperand::Int(lhs << (rhs & 0x1f)),
+            _ => unreachable!()
+        },
+        MilInstructionKind::BinOp(op, _, MilOperand::Long(lhs), MilOperand::Int(rhs)) => match op {
+            MilBinOp::LShrS => MilOperand::Long(lhs >> (rhs & 0x3f)),
+            MilBinOp::LShrU => MilOperand::Long(((lhs as u64) >> (rhs & 0x3f)) as i64),
+            MilBinOp::LShl => MilOperand::Long(lhs << (rhs & 0x3f)),
+            _ => unreachable!()
+        },
+        MilInstructionKind::BinOp(op, _, MilOperand::Long(lhs), MilOperand::Long(rhs)) => match op {
+            MilBinOp::LAdd => MilOperand::Long(lhs.wrapping_add(rhs)),
+            MilBinOp::LSub => MilOperand::Long(lhs.wrapping_sub(rhs)),
+            MilBinOp::LMul => MilOperand::Long(lhs.wrapping_mul(rhs)),
+            MilBinOp::LDivS | MilBinOp::LRemS if rhs == 0 => {
+                return None;
+            },
+            MilBinOp::LDivS => MilOperand::Long(lhs.wrapping_div(rhs)),
+            MilBinOp::LRemS => MilOperand::Long(lhs.wrapping_rem(rhs)),
+            MilBinOp::LAnd => MilOperand::Long(lhs & rhs),
+            MilBinOp::LOr => MilOperand::Long(lhs | rhs),
+            MilBinOp::LXor => MilOperand::Long(lhs ^ rhs),
+            MilBinOp::LCmp => MilOperand::Int(match lhs.cmp(&rhs) {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1
+            }),
+            _ => unreachable!()
         },
         MilInstructionKind::GetField(field_id, _, _, MilOperand::KnownObject(val, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {

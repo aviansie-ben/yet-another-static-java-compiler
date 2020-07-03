@@ -531,8 +531,8 @@ fn generate_un_op(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32
 
 fn generate_bin_op(builder: &mut MilBuilder, stack: &mut MilVirtualStack, bc: u32, op: MilBinOp, op1_ty: MilType, op2_ty: MilType, result_ty: MilType) {
     let reg = builder.allocate_reg(result_ty);
-    let rhs = MilOperand::Register(stack.pop(builder, op1_ty));
-    let lhs = MilOperand::Register(stack.pop(builder, op2_ty));
+    let rhs = MilOperand::Register(stack.pop(builder, op2_ty));
+    let lhs = MilOperand::Register(stack.pop(builder, op1_ty));
 
     builder.append_instruction(
         MilInstructionKind::BinOp(op, reg, lhs, rhs),
@@ -624,6 +624,14 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 );
                 stack.push(builder, reg, MilType::Int);
             },
+            BytecodeInstruction::LConst(val) => {
+                let reg = builder.allocate_reg(MilType::Long);
+                builder.append_instruction(
+                    MilInstructionKind::Copy(reg, MilOperand::Long(val)),
+                    bc
+                );
+                stack.push(builder, reg, MilType::Long);
+            },
             BytecodeInstruction::FConst(val) => {
                 let reg = builder.allocate_reg(MilType::Float);
                 builder.append_instruction(
@@ -653,6 +661,10 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 stack.push_slot(val2);
                 stack.push_slot(val1);
             },
+            BytecodeInstruction::Dup2 => {
+                stack.push_slot(stack.read(1));
+                stack.push_slot(stack.read(1));
+            }
             BytecodeInstruction::Pop => {
                 stack.pop_slot();
             },
@@ -791,6 +803,42 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::L2I => {
                 generate_un_op(builder, &mut stack, bc, MilUnOp::L2I, MilType::Long, MilType::Int);
+            },
+            BytecodeInstruction::LNeg => {
+                generate_un_op(builder, &mut stack, bc, MilUnOp::LNeg, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LAdd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LAdd, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LSub => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LSub, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LMul => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LMul, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LDiv => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LDivS, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LRem => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LRemS, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LShr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LShrS, MilType::Long, MilType::Int, MilType::Long);
+            },
+            BytecodeInstruction::LUShr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LShrU, MilType::Long, MilType::Int, MilType::Long);
+            },
+            BytecodeInstruction::LShl => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LShl, MilType::Long, MilType::Int, MilType::Long);
+            },
+            BytecodeInstruction::LAnd => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LAnd, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LOr => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LOr, MilType::Long, MilType::Long, MilType::Long);
+            },
+            BytecodeInstruction::LXor => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LXor, MilType::Long, MilType::Long, MilType::Long);
             },
             // TODO Support multithreading
             BytecodeInstruction::MonitorEnter => {
@@ -1041,6 +1089,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 );
             },
+            BytecodeInstruction::LCmp => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::LCmp, MilType::Long, MilType::Long, MilType::Int);
+            },
             BytecodeInstruction::If(cond, target) => {
                 let val = stack.pop(builder, MilType::Int);
                 let block = builder.append_end_instruction(
@@ -1288,7 +1339,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         if let Some(succ_start_block) = succ.blocks.first() {
             let start_block = builder.func.blocks.get_mut(succ_start_block).unwrap();
 
-            assert_eq!(stack.len(), start_block.phi_nodes.len());
+            assert_eq!(stack.non_void_slots().count(), start_block.phi_nodes.len());
 
             for (stack_elem, phi) in stack.non_void_slots().zip(start_block.phi_nodes.iter_mut()) {
                 assert_eq!(builder.func.reg_map.get_reg_info(stack_elem).ty, phi.sources[0].0.get_type(&builder.func.reg_map));

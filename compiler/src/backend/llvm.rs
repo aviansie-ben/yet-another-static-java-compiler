@@ -797,6 +797,11 @@ unsafe fn emit_basic_block(
                         module.types.int,
                         register_name(tgt).as_ptr()
                     ),
+                    MilUnOp::LNeg => LLVMBuildNeg(
+                        builder.ptr(),
+                        val,
+                        register_name(tgt).as_ptr()
+                    ),
                     MilUnOp::I2L => LLVMBuildSExt(
                         builder.ptr(),
                         val,
@@ -889,6 +894,128 @@ unsafe fn emit_basic_block(
                             b"\0".as_ptr() as *const c_char
                         ),
                         register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LAdd => LLVMBuildAdd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LSub => LLVMBuildSub(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LMul => LLVMBuildMul(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LDivS => LLVMBuildSDiv(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LRemS => LLVMBuildSRem(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LAnd => LLVMBuildAnd(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LOr => LLVMBuildOr(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LXor => LLVMBuildXor(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LShrS => LLVMBuildAShr(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildZExt(
+                            builder.ptr(),
+                            LLVMBuildAnd(
+                                builder.ptr(),
+                                rhs,
+                                module.const_int(0x3f),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.types.long,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LShrU => LLVMBuildLShr(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildZExt(
+                            builder.ptr(),
+                            LLVMBuildAnd(
+                                builder.ptr(),
+                                rhs,
+                                module.const_int(0x3f),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.types.long,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LShl => LLVMBuildShl(
+                        builder.ptr(),
+                        lhs,
+                        LLVMBuildZExt(
+                            builder.ptr(),
+                            LLVMBuildAnd(
+                                builder.ptr(),
+                                rhs,
+                                module.const_int(0x3f),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.types.long,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::LCmp => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildICmp(
+                            builder.ptr(),
+                            LLVMIntPredicate::LLVMIntEQ,
+                            lhs,
+                            rhs,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_int(0),
+                        LLVMBuildSelect(
+                            builder.ptr(),
+                            LLVMBuildICmp(
+                                builder.ptr(),
+                                LLVMIntPredicate::LLVMIntSGT,
+                                lhs,
+                                rhs,
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            module.const_int(1),
+                            module.const_int(-1),
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        register_name(tgt).as_ptr()
+                    ),
                     )
                 }, &module.types);
             },
