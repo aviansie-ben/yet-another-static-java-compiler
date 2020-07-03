@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::classfile::{Class, FieldFlags, PrimitiveType};
 use crate::liveness::LivenessInfo;
+use crate::mil::il::MethodName;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
 
 pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
@@ -184,6 +185,26 @@ fn compute_layout(env: &ClassEnvironment, liveness: &LivenessInfo, class_id: Cla
                                 Arc::make_mut(&mut layout.interface_slots[islot].1)[vslot] = method_id;
                             };
                         };
+                    };
+                };
+            };
+
+            for (interface_method, super_method) in class.meta.extra_interface_overrides.iter().copied() {
+                let islot = layout.interface_slots.iter().enumerate()
+                    .filter(|&(_, &(interface_id, _))| interface_id == interface_method.0)
+                    .next().map(|(i, _)| i);
+
+                if let Some(islot) = islot {
+                    let vslot = layouts[&interface_method.0].virtual_slots.iter().enumerate()
+                        .filter(|&(_, &mid)| mid == interface_method)
+                        .next().map(|(i, _)| i);
+
+                    if let Some(vslot) = vslot {
+                        if verbose {
+                            eprintln!("    Superclass method {} overriding interface method at islot ({}, {})", MethodName(super_method, env), islot, vslot);
+                        };
+
+                        Arc::make_mut(&mut layout.interface_slots[islot].1)[vslot] = super_method;
                     };
                 };
             };

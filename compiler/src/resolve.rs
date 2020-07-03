@@ -7,6 +7,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use smallvec::SmallVec;
 use zip::ZipArchive;
@@ -1025,12 +1026,13 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
     let mut resolving_class = Box::new(Class::dummy_class());
     let mut overridden_by: HashMap<MethodId, Vec<MethodId>> = HashMap::new();
 
+    // PASS 1: Resolve overriding based only on methods explicitly declared in each class
     for resolving_id in env.class_ids() {
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
 
             if verbose {
-                eprintln!("Resolving overriding from {}...", resolving_class.meta.name);
+                eprintln!("Resolving direct overriding from {}...", resolving_class.meta.name);
             };
         } else {
             continue;
@@ -1128,9 +1130,103 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
         };
     };
 
+    // PASS 2: Resolve overriding caused by implementing new interfaces in a subclass. e.g. Class A has a method a()V which does not
+    //         override any interface methods, and subclass B implements an interface I having a method a()V using the method inherited
+    //         from class A.
+    for resolving_id in env.class_ids() {
+        let class = if let ResolvedClass::User(ref class) = **env.get(resolving_id) {
+            class
+        } else {
+            continue;
+        };
+
+        if class.meta.super_id == ClassId::UNRESOLVED {
+            continue;
+        };
+
+        let super_class = env.get(class.meta.super_id).as_user_class();
+        let new_interfaces = class.meta.all_interface_ids.iter().copied()
+            .filter(|&iface_id| !super_class.meta.all_interface_ids.contains(&iface_id))
+            .collect_vec();
+
+        if new_interfaces.is_empty() {
+            continue;
+        };
+
+        if verbose {
+            eprintln!("Resolving indirect overriding from {}...", class.meta.name);
+        };
+
+        let mut super_chain = vec![super_class];
+        while super_chain.last().unwrap().meta.super_id != ClassId::UNRESOLVED {
+            super_chain.push(env.get(super_chain.last().unwrap().meta.super_id).as_user_class());
+        };
+
+        let mut extra_interface_overrides = vec![];
+
+        for interface_id in new_interfaces {
+            let interface_class = env.get(interface_id).as_user_class();
+
+            for (i, m) in interface_class.methods.iter().enumerate() {
+                if m.flags.intersects(MethodFlags::STATIC) {
+                    continue;
+                };
+
+                let method_id = MethodId(interface_class.meta.this_id, i as u16);
+
+                if overridden_by.get(&method_id).map_or(false, |overridden_by| overridden_by.iter().copied().any(|m| m.0 == resolving_id)) {
+                    continue;
+                };
+
+                if verbose {
+                    eprint!("    {}.{}{}: ", interface_class.meta.name, m.name, m.descriptor);
+                };
+
+                let mut overrider = None;
+
+                for super_class in super_chain.iter().copied() {
+                    for (i, sm) in super_class.methods.iter().enumerate() {
+                        if sm.name == m.name && sm.descriptor == m.descriptor {
+                            overrider = Some(MethodId(super_class.meta.this_id, i as u16));
+                        };
+                    };
+                };
+
+                if let Some(overrider) = overrider {
+                    if verbose {
+                        eprintln!("Overriden by {}", env.get(overrider.0).name(env));
+                    };
+
+                    extra_interface_overrides.push((method_id, overrider));
+
+                    match overridden_by.entry(method_id) {
+                        hash_map::Entry::Occupied(mut entry) => {
+                            entry.get_mut().push(overrider);
+                        },
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(vec![overrider]);
+                        }
+                    };
+                } else {
+                    if verbose {
+                        eprintln!("Not overridden");
+                    };
+
+                    if m.flags.intersects(MethodFlags::ABSTRACT) && !class.flags.intersects(ClassFlags::ABSTRACT) {
+                        eprintln!("WARNING: Class {} implements interface {} without overriding {}{}", class.meta.name, interface_class.meta.name, m.name, m.descriptor);
+                    };
+                };
+            };
+        };
+
+        env.get_mut(resolving_id).as_user_class_mut().meta.extra_interface_overrides = extra_interface_overrides;
+    };
+
     let mut worklist: VecDeque<_> = overridden_by.keys().cloned().collect();
     let mut inherited_overrides = vec![];
 
+    // PASS 3: Propagate information about chained overrides. e.g. Class A has virtual method a()V, which is overridden by subclass B, which
+    //         is in turn overridden by subclass C, which means that C.a()V should override A.a()V.
     while let Some(resolving_id) = worklist.pop_front() {
         for overrider_id in overridden_by[&resolving_id].iter() {
             if let Some(overridden_by) = overridden_by.get(overrider_id) {
@@ -1169,6 +1265,7 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
         };
     };
 
+    // PASS 4: Write information about overriders of each method
     for resolving_id in env.class_ids() {
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {
             mem::swap(class, &mut resolving_class);
