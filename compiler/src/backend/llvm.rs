@@ -1058,6 +1058,12 @@ unsafe fn emit_basic_block(
                         rhs,
                         register_name(tgt).as_ptr()
                     ),
+                    MilBinOp::IRemS => LLVMBuildSRem(
+                        builder.ptr(),
+                        lhs,
+                        rhs,
+                        register_name(tgt).as_ptr()
+                    ),
                     MilBinOp::IAnd => LLVMBuildAnd(
                         builder.ptr(),
                         lhs,

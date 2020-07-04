@@ -831,6 +831,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::IDiv => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::IDivS, MilType::Int, MilType::Int, MilType::Int);
             },
+            BytecodeInstruction::IRem => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::IRemS, MilType::Int, MilType::Int, MilType::Int);
+            },
             BytecodeInstruction::IShr => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::IShrS, MilType::Int, MilType::Int, MilType::Int);
             },

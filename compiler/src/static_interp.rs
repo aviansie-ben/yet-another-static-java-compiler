@@ -1323,6 +1323,16 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
 
                 state.stack.push(Value::Int(o1.wrapping_div(o2)));
             },
+            BytecodeInstruction::IRem => {
+                let o2 = state.stack.pop().as_int().unwrap();
+                let o1 = state.stack.pop().as_int().unwrap();
+
+                if o2 == 0 {
+                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                };
+
+                state.stack.push(Value::Int(o1.wrapping_rem(o2)));
+            },
             BytecodeInstruction::IShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_int().unwrap();

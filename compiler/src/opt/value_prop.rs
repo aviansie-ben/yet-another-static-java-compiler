@@ -105,10 +105,11 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             MilBinOp::IAdd => MilOperand::Int(lhs.wrapping_add(rhs)),
             MilBinOp::ISub => MilOperand::Int(lhs.wrapping_sub(rhs)),
             MilBinOp::IMul => MilOperand::Int(lhs.wrapping_mul(rhs)),
-            MilBinOp::IDivS if rhs == 0 => {
+            MilBinOp::IDivS | MilBinOp::IRemS if rhs == 0 => {
                 return None;
             },
             MilBinOp::IDivS => MilOperand::Int(lhs.wrapping_div(rhs)),
+            MilBinOp::IRemS => MilOperand::Int(lhs.wrapping_rem(rhs)),
             MilBinOp::IAnd => MilOperand::Int(lhs & rhs),
             MilBinOp::IOr => MilOperand::Int(lhs | rhs),
             MilBinOp::IXor => MilOperand::Int(lhs ^ rhs),
