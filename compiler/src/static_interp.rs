@@ -1363,6 +1363,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = state.stack.pop().as_int().unwrap();
                 state.stack.push(Value::Int(o1 ^ o2));
             },
+            BytecodeInstruction::LNeg => {
+                let val = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(val.wrapping_neg()));
+            },
             BytecodeInstruction::LAdd => {
                 let o2 = state.stack.pop().as_long().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
