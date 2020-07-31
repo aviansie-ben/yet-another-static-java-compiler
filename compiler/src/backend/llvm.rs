@@ -454,13 +454,37 @@ fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMConte
 }
 
 struct LLVMMochaBuiltins {
+    init: LLVMValueRef,
+    shutdown: LLVMValueRef,
+
     alloc_obj: LLVMValueRef,
     alloc_array: LLVMValueRef,
+
     throw: LLVMValueRef
 }
 
 unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaBuiltins {
     LLVMMochaBuiltins {
+        init: LLVMAddFunction(
+            module.ptr(),
+            b"mocha_init\0".as_ptr() as *const c_char,
+            LLVMFunctionType(
+                types.any_raw_pointer,
+                [types.any_raw_pointer].as_mut_ptr(),
+                1,
+                0
+            )
+        ),
+        shutdown: LLVMAddFunction(
+            module.ptr(),
+            b"mocha_shutdown\0".as_ptr() as *const c_char,
+            LLVMFunctionType(
+                types.any_raw_pointer,
+                [types.any_raw_pointer].as_mut_ptr(),
+                1,
+                0
+            )
+        ),
         alloc_obj: LLVMAddFunction(
             module.ptr(),
             b"mocha_alloc_obj\0".as_ptr() as *const c_char,
@@ -1767,6 +1791,14 @@ unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
     let main_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), main_func, b"main\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), main_block);
 
+    let env = LLVMBuildCall(
+        builder.ptr(),
+        module.builtins.init,
+        [LLVMConstPointerCast(module.builtin_class_table, module.types.any_raw_pointer)].as_mut_ptr(),
+        1,
+        b"env\0".as_ptr() as *const c_char
+    );
+
     LLVMBuildCall(
         builder.ptr(),
         module.methods[&main_method],
@@ -1774,6 +1806,15 @@ unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
         1,
         b"\0".as_ptr() as *const c_char
     );
+
+    LLVMBuildCall(
+        builder.ptr(),
+        module.builtins.shutdown,
+        [env].as_mut_ptr(),
+        1,
+        b"\0".as_ptr() as *const c_char
+    );
+
     LLVMBuildRet(builder.ptr(), module.const_int(0));
 }
 
