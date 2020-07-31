@@ -172,7 +172,8 @@ struct MochaModule<'a, 'b, 'c> {
     objs: Vec<JavaStaticRef<'c>>,
     known_objs: &'a MilKnownObjectMap<'c>,
     obj_map: HashMap<NonNull<u8>, LLVMValueRef>,
-    methods: HashMap<MethodId, LLVMValueRef>
+    methods: HashMap<MethodId, LLVMValueRef>,
+    builtin_class_table: LLVMValueRef
 }
 
 impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
@@ -491,6 +492,32 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
             )
         )
     }
+}
+
+unsafe fn create_builtin_class_table(env: &ClassEnvironment, ctx: &LLVMContext, module: &LLVMModule, types: &LLVMTypes) -> LLVMValueRef {
+    let mut builtin_classes = ClassId::special_classes().map(|id| {
+        // HACK: MethodHandle doesn't work yet, so don't try to use it
+        if id != ClassId::JAVA_LANG_INVOKE_METHODHANDLE {
+            LLVMConstIntCast(
+                LLVMConstAdd(
+                    LLVMConstPointerCast(types.class_types[&id].vtable, types.long),
+                    LLVMConstInt(types.long, 8, 0)
+                ),
+                types.int,
+                0
+            )
+        } else {
+            LLVMConstInt(types.int, 8, 0)
+        }
+    }).collect_vec();
+
+    let builtin_classes_type = LLVMArrayType(types.int, builtin_classes.len() as u32);
+    let builtin_classes = LLVMConstArray(types.int, builtin_classes.as_mut_ptr(), builtin_classes.len() as u32);
+
+    let global = LLVMAddGlobal(module.ptr(), builtin_classes_type, b"builtin_classes\0".as_ptr() as *const c_char);
+    LLVMSetInitializer(global, builtin_classes);
+
+    global
 }
 
 unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValueRef {
@@ -2046,6 +2073,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
     unsafe {
         let builtins = declare_builtins(&module, &types);
+        let builtin_class_table = create_builtin_class_table(env, ctx, &module, &types);
 
         let mut module = MochaModule {
             env,
@@ -2056,7 +2084,8 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             objs: heap.all_objs(),
             known_objs: &program.known_objects,
             obj_map: HashMap::new(),
-            methods: HashMap::new()
+            methods: HashMap::new(),
+            builtin_class_table
         };
 
         for (i, obj) in module.objs.iter().enumerate() {
