@@ -183,6 +183,16 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
                 return None;
             }
         },
+        MilInstructionKind::GetStatic(field_id, _, _) => {
+            if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
+                MilOperand::from_const(
+                    known_objects.get(known_objects.refs.classes[&field_id.0]).read_field(field_id),
+                    known_objects
+                )
+            } else {
+                return None;
+            }
+        },
         _ => {
             return None;
         }
