@@ -1684,17 +1684,28 @@ unsafe fn emit_basic_block(
             LLVMBuildRet(builder.ptr(), val);
         },
         MilEndInstructionKind::Jump(_) => {},
-        MilEndInstructionKind::JumpIf(cond, _, ref lhs, ref rhs) => {
+        MilEndInstructionKind::JumpIfRCmp(cond, _, ref lhs, ref rhs) => {
             let lhs = create_value_ref(&module, lhs, &local_regs);
             let rhs = create_value_ref(&module, rhs, &local_regs);
 
             let cond = match cond {
-                MilComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
-                MilComparison::Ne => LLVMIntPredicate::LLVMIntNE,
-                MilComparison::Gt => LLVMIntPredicate::LLVMIntSGT,
-                MilComparison::Lt => LLVMIntPredicate::LLVMIntSLT,
-                MilComparison::Ge => LLVMIntPredicate::LLVMIntSGE,
-                MilComparison::Le => LLVMIntPredicate::LLVMIntSLE
+                MilRefComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
+                MilRefComparison::Ne => LLVMIntPredicate::LLVMIntNE
+            };
+
+            cond_out = LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
+        },
+        MilEndInstructionKind::JumpIfICmp(cond, _, ref lhs, ref rhs) => {
+            let lhs = create_value_ref(&module, lhs, &local_regs);
+            let rhs = create_value_ref(&module, rhs, &local_regs);
+
+            let cond = match cond {
+                MilIntComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
+                MilIntComparison::Ne => LLVMIntPredicate::LLVMIntNE,
+                MilIntComparison::Gt => LLVMIntPredicate::LLVMIntSGT,
+                MilIntComparison::Lt => LLVMIntPredicate::LLVMIntSLT,
+                MilIntComparison::Ge => LLVMIntPredicate::LLVMIntSGE,
+                MilIntComparison::Le => LLVMIntPredicate::LLVMIntSLE
             };
 
             cond_out = LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
@@ -1763,7 +1774,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
             MilEndInstructionKind::Jump(tgt) => {
                 LLVMBuildBr(builder.ptr(), llvm_blocks[&tgt].0);
             },
-            MilEndInstructionKind::JumpIf(_, tgt, _, _) => {
+            MilEndInstructionKind::JumpIfICmp(_, tgt, _, _) | MilEndInstructionKind::JumpIfRCmp(_, tgt, _, _) => {
                 LLVMBuildCondBr(builder.ptr(), cond, llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
             },
             MilEndInstructionKind::Throw(_) => {},

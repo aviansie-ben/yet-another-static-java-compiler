@@ -124,7 +124,7 @@ impl FlowGraph<MilBlockId> {
                 MilEndInstructionKind::Jump(target) => {
                     cfg.add_edge(prev_block_id, target);
                 },
-                MilEndInstructionKind::JumpIf(_, target, _, _) => {
+                MilEndInstructionKind::JumpIfICmp(_, target, _, _) | MilEndInstructionKind::JumpIfRCmp(_, target, _, _) => {
                     cfg.add_edge(prev_block_id, target);
                 },
                 _ => {}

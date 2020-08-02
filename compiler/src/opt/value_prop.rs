@@ -11,14 +11,14 @@ use crate::mil::il::*;
 use crate::mil::transform;
 use crate::resolve::{ClassEnvironment, ClassId, ResolvedClass};
 
-fn const_compare<T: Ord>(cmp: MilComparison, lhs: T, rhs: T) -> bool {
+fn const_compare<T: Ord>(cmp: MilIntComparison, lhs: T, rhs: T) -> bool {
     match cmp {
-        MilComparison::Eq => lhs == rhs,
-        MilComparison::Ne => lhs != rhs,
-        MilComparison::Gt => lhs > rhs,
-        MilComparison::Lt => lhs < rhs,
-        MilComparison::Ge => lhs >= rhs,
-        MilComparison::Le => lhs <= rhs
+        MilIntComparison::Eq => lhs == rhs,
+        MilIntComparison::Ne => lhs != rhs,
+        MilIntComparison::Gt => lhs > rhs,
+        MilIntComparison::Lt => lhs < rhs,
+        MilIntComparison::Ge => lhs >= rhs,
+        MilIntComparison::Le => lhs <= rhs
     }
 }
 
@@ -408,7 +408,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIf(MilComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
                 eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
                 eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
 
@@ -417,7 +417,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
                 None
             },
-            MilEndInstructionKind::JumpIf(MilComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
                 eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
                 eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
 
@@ -426,7 +426,8 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
                 None
             },
-            MilEndInstructionKind::JumpIf(_, _, _, _) => None
+            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => None,
+            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => None
         };
 
         if let Some(constraint) = constraint {
@@ -573,12 +574,12 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         });
 
         match block.end_instr.kind {
-            MilEndInstructionKind::JumpIf(cmp, target_block, MilOperand::Register(reg), MilOperand::Null)
-                | MilEndInstructionKind::JumpIf(cmp, target_block, MilOperand::Null, MilOperand::Register(reg)) => {
+            MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Register(reg), MilOperand::Null)
+                | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Null, MilOperand::Register(reg)) => {
                 if let Some(constraint) = register_constraint(&block_constraints, &constraints, reg) {
                     if !constraint.nullable() {
                         eprintln!("  Folding conditional at end of {} since {} is never null", block_id, reg);
-                        block.end_instr.kind = MilEndInstructionKind::JumpIf(cmp.reverse(), target_block, MilOperand::Null, MilOperand::Null);
+                        block.end_instr.kind = MilEndInstructionKind::JumpIfRCmp(cmp.reverse(), target_block, MilOperand::Null, MilOperand::Null);
                         num_changes += 1;
                     };
                 };

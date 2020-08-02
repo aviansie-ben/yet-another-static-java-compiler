@@ -513,7 +513,7 @@ fn emit_null_check(builder: &mut MilBuilder, val: MilOperand, bc: u32) {
     let not_null_block = builder.end_block();
     builder.insert_end_instruction(
         check_block,
-        MilEndInstructionKind::JumpIf(MilComparison::Ne, not_null_block, val, MilOperand::Null),
+        MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, not_null_block, val, MilOperand::Null),
         bc
     );
 }
@@ -1212,8 +1212,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::If(cond, target) => {
                 let val = stack.pop(builder, MilType::Int);
                 let block = builder.append_end_instruction(
-                    MilEndInstructionKind::JumpIf(
-                        MilComparison::from_bytecode(cond),
+                    MilEndInstructionKind::JumpIfICmp(
+                        MilIntComparison::from_bytecode(cond),
                         MilBlockId::ENTRY,
                         MilOperand::Register(val),
                         MilOperand::Int(0)
@@ -1223,7 +1223,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 fixups.push(Box::new(move |builder, blocks| {
                     match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                        MilEndInstructionKind::JumpIfICmp(_, ref mut block, _, _) => {
                             *block = blocks[&target].blocks[0];
                         },
                         _ => unreachable!()
@@ -1235,8 +1235,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let rhs = stack.pop(builder, MilType::Int);
                 let lhs = stack.pop(builder, MilType::Int);
                 let block = builder.append_end_instruction(
-                    MilEndInstructionKind::JumpIf(
-                        MilComparison::from_bytecode(cond),
+                    MilEndInstructionKind::JumpIfICmp(
+                        MilIntComparison::from_bytecode(cond),
                         MilBlockId::ENTRY,
                         MilOperand::Register(lhs),
                         MilOperand::Register(rhs)
@@ -1246,7 +1246,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 fixups.push(Box::new(move |builder, blocks| {
                     match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                        MilEndInstructionKind::JumpIfICmp(_, ref mut block, _, _) => {
                             *block = blocks[&target].blocks[0];
                         },
                         _ => unreachable!()
@@ -1258,8 +1258,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let rhs = stack.pop(builder, MilType::Ref);
                 let lhs = stack.pop(builder, MilType::Ref);
                 let block = builder.append_end_instruction(
-                    MilEndInstructionKind::JumpIf(
-                        MilComparison::from_bytecode(cond),
+                    MilEndInstructionKind::JumpIfRCmp(
+                        MilRefComparison::from_bytecode(cond),
                         MilBlockId::ENTRY,
                         MilOperand::Register(lhs),
                         MilOperand::Register(rhs)
@@ -1269,7 +1269,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 fixups.push(Box::new(move |builder, blocks| {
                     match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                        MilEndInstructionKind::JumpIfRCmp(_, ref mut block, _, _) => {
                             *block = blocks[&target].blocks[0];
                         },
                         _ => unreachable!()
@@ -1279,8 +1279,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::IfNonNull(target) => {
                 let block = builder.append_end_instruction(
-                    MilEndInstructionKind::JumpIf(
-                        MilComparison::Ne,
+                    MilEndInstructionKind::JumpIfRCmp(
+                        MilRefComparison::Ne,
                         MilBlockId::ENTRY,
                         MilOperand::Register(stack.pop(builder, MilType::Ref)),
                         MilOperand::Null
@@ -1290,7 +1290,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 fixups.push(Box::new(move |builder, blocks| {
                     match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                        MilEndInstructionKind::JumpIfRCmp(_, ref mut block, _, _) => {
                             *block = blocks[&target].blocks[0];
                         },
                         _ => unreachable!()
@@ -1300,8 +1300,8 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::IfNull(target) => {
                 let block = builder.append_end_instruction(
-                    MilEndInstructionKind::JumpIf(
-                        MilComparison::Eq,
+                    MilEndInstructionKind::JumpIfRCmp(
+                        MilRefComparison::Eq,
                         MilBlockId::ENTRY,
                         MilOperand::Register(stack.pop(builder, MilType::Ref)),
                         MilOperand::Null
@@ -1311,7 +1311,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 fixups.push(Box::new(move |builder, blocks| {
                     match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(_, ref mut block, _, _) => {
+                        MilEndInstructionKind::JumpIfRCmp(_, ref mut block, _, _) => {
                             *block = blocks[&target].blocks[0];
                         },
                         _ => unreachable!()

@@ -461,7 +461,30 @@ impl <'a> fmt::Display for PrettyMilClassConstraint<'a> {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum MilComparison {
+pub enum MilRefComparison {
+    Eq,
+    Ne
+}
+
+impl MilRefComparison {
+    pub fn from_bytecode(cond: BytecodeCondition) -> MilRefComparison {
+        match cond {
+            BytecodeCondition::Eq => MilRefComparison::Eq,
+            BytecodeCondition::Ne => MilRefComparison::Ne,
+            _ => unreachable!()
+        }
+    }
+
+    pub fn reverse(&self) -> MilRefComparison {
+        match *self {
+            MilRefComparison::Eq => MilRefComparison::Ne,
+            MilRefComparison::Ne => MilRefComparison::Eq
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MilIntComparison {
     Eq,
     Ne,
     Gt,
@@ -470,26 +493,26 @@ pub enum MilComparison {
     Le
 }
 
-impl MilComparison {
-    pub fn from_bytecode(cond: BytecodeCondition) -> MilComparison {
+impl MilIntComparison {
+    pub fn from_bytecode(cond: BytecodeCondition) -> MilIntComparison {
         match cond {
-            BytecodeCondition::Eq => MilComparison::Eq,
-            BytecodeCondition::Ne => MilComparison::Ne,
-            BytecodeCondition::Gt => MilComparison::Gt,
-            BytecodeCondition::Lt => MilComparison::Lt,
-            BytecodeCondition::Ge => MilComparison::Ge,
-            BytecodeCondition::Le => MilComparison::Le
+            BytecodeCondition::Eq => MilIntComparison::Eq,
+            BytecodeCondition::Ne => MilIntComparison::Ne,
+            BytecodeCondition::Gt => MilIntComparison::Gt,
+            BytecodeCondition::Lt => MilIntComparison::Lt,
+            BytecodeCondition::Ge => MilIntComparison::Ge,
+            BytecodeCondition::Le => MilIntComparison::Le
         }
     }
 
-    pub fn reverse(&self) -> MilComparison {
+    pub fn reverse(&self) -> MilIntComparison {
         match *self {
-            MilComparison::Eq => MilComparison::Ne,
-            MilComparison::Ne => MilComparison::Eq,
-            MilComparison::Gt => MilComparison::Lt,
-            MilComparison::Lt => MilComparison::Gt,
-            MilComparison::Ge => MilComparison::Le,
-            MilComparison::Le => MilComparison::Ge
+            MilIntComparison::Eq => MilIntComparison::Ne,
+            MilIntComparison::Ne => MilIntComparison::Eq,
+            MilIntComparison::Gt => MilIntComparison::Lt,
+            MilIntComparison::Lt => MilIntComparison::Gt,
+            MilIntComparison::Ge => MilIntComparison::Le,
+            MilIntComparison::Le => MilIntComparison::Ge
         }
     }
 }
@@ -645,7 +668,8 @@ pub enum MilEndInstructionKind {
     Throw(MilOperand),
     Return(MilOperand),
     Jump(MilBlockId),
-    JumpIf(MilComparison, MilBlockId, MilOperand, MilOperand)
+    JumpIfRCmp(MilRefComparison, MilBlockId, MilOperand, MilOperand),
+    JumpIfICmp(MilIntComparison, MilBlockId, MilOperand, MilOperand)
 }
 
 #[derive(Debug, Clone)]
@@ -906,23 +930,31 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Jump(block) => {
                 write!(f, "j {}", block)?;
             },
-            MilEndInstructionKind::JumpIf(MilComparison::Eq, block, ref src1, ref src2) => {
-                write!(f, "jeq {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            MilEndInstructionKind::JumpIfRCmp(cond, block, ref src1, ref src2) => {
+                write!(f, "jrcmp.{} {}, {}, {}",
+                    match cond {
+                        MilRefComparison::Eq => "eq",
+                        MilRefComparison::Ne => "ne"
+                    },
+                    block,
+                    src1.pretty(self.1),
+                    src2.pretty(self.1)
+                )?;
             },
-            MilEndInstructionKind::JumpIf(MilComparison::Ne, block, ref src1, ref src2) => {
-                write!(f, "jne {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
-            },
-            MilEndInstructionKind::JumpIf(MilComparison::Gt, block, ref src1, ref src2) => {
-                write!(f, "jgt {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
-            },
-            MilEndInstructionKind::JumpIf(MilComparison::Lt, block, ref src1, ref src2) => {
-                write!(f, "jlt {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
-            },
-            MilEndInstructionKind::JumpIf(MilComparison::Ge, block, ref src1, ref src2) => {
-                write!(f, "jge {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
-            },
-            MilEndInstructionKind::JumpIf(MilComparison::Le, block, ref src1, ref src2) => {
-                write!(f, "jle {}, {}, {}", block, src1.pretty(self.1), src2.pretty(self.1))?;
+            MilEndInstructionKind::JumpIfICmp(cond, block, ref src1, ref src2) => {
+                write!(f, "jicmp.{} {}, {}, {}",
+                    match cond {
+                        MilIntComparison::Eq => "eq",
+                        MilIntComparison::Ne => "ne",
+                        MilIntComparison::Gt => "gt",
+                        MilIntComparison::Lt => "lt",
+                        MilIntComparison::Ge => "ge",
+                        MilIntComparison::Le => "le"
+                    },
+                    block,
+                    src1.pretty(self.1),
+                    src2.pretty(self.1)
+                )?;
             }
         }
 
@@ -946,7 +978,8 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIf(_, _, _, _) => None
+            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => None,
+            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => None
         }
     }
 
@@ -983,7 +1016,11 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIf(_, _, ref lhs, ref rhs) => {
+            MilEndInstructionKind::JumpIfRCmp(_, _, ref lhs, ref rhs) => {
+                f(lhs);
+                f(rhs);
+            },
+            MilEndInstructionKind::JumpIfICmp(_, _, ref lhs, ref rhs) => {
                 f(lhs);
                 f(rhs);
             }
@@ -1023,7 +1060,11 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIf(_, _, ref mut lhs, ref mut rhs) => {
+            MilEndInstructionKind::JumpIfRCmp(_, _, ref mut lhs, ref mut rhs) => {
+                f(lhs);
+                f(rhs);
+            },
+            MilEndInstructionKind::JumpIfICmp(_, _, ref mut lhs, ref mut rhs) => {
                 f(lhs);
                 f(rhs);
             }
@@ -1041,7 +1082,8 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => false,
             MilEndInstructionKind::Return(_) => false,
             MilEndInstructionKind::Jump(_) => false,
-            MilEndInstructionKind::JumpIf(_, _, _, _) => true
+            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => true,
+            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => true
         }
     }
 
