@@ -360,7 +360,7 @@ fn register_constraint(block_constraints: &[(MilRegister, MilClassConstraint)], 
 fn operand_constraint(block_constraints: &[(MilRegister, MilClassConstraint)], constraints: &HashMap<MilRegister, MilClassConstraint>, val: &MilOperand) -> Option<MilClassConstraint> {
     match *val {
         MilOperand::Register(reg) => register_constraint(block_constraints, constraints, reg),
-        MilOperand::KnownObject(_, class_id) => Some(MilClassConstraint::for_class(class_id).not_null()),
+        MilOperand::KnownObject(_, class_id) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
         MilOperand::Null => Some(MilClassConstraint::null()),
         _ => None
     }
@@ -394,8 +394,8 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                 MilInstructionKind::PutArrayElement(_, _, _, _) => None,
                 MilInstructionKind::GetStatic(_, class_id, _) => Some(MilClassConstraint::for_class(class_id)),
                 MilInstructionKind::PutStatic(_, _, _) => None,
-                MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null()),
-                MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null())
+                MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
+                MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact())
             };
 
             if let Some(constraint) = constraint {
@@ -621,6 +621,18 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                                 break;
                             };
                         };
+                    };
+                };
+            },
+            _ => {}
+        };
+
+        match block.end_instr.kind {
+            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref recv, ref args) => {
+                if let Some(constraint) = operand_constraint(&block_constraints, &constraints, recv) {
+                    if constraint.is_exact() {
+                        eprintln!("  Devirtualizing call to {} in {} since receiver type is known to be exact", MethodName(method_id, env), block_id);
+                        block.end_instr.kind = MilEndInstructionKind::Call(return_class_id, method_id, tgt, args.clone());
                     };
                 };
             },
