@@ -6,6 +6,7 @@ use crate::resolve::ClassEnvironment;
 use crate::static_heap::JavaStaticHeap;
 
 pub mod basic_control_flow;
+pub mod class_constraints;
 pub mod value_prop;
 
 pub struct OptimizationEnvironment<'a, 'b> {
@@ -43,7 +44,7 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
     };
 
     // Perform class constraint analysis and related cleanups
-    value_prop::perform_class_constraint_analysis(func, &cfg, env.env);
+    class_constraints::perform_class_constraint_analysis(func, &cfg, env.env);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env);
     run_block_cleanup_group(func, &mut cfg, env);
 }
