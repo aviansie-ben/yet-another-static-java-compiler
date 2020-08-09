@@ -9,7 +9,7 @@ use crate::static_heap::JavaStaticRef;
 use crate::static_interp::Value;
 use crate::util::BitVecIndex;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MilRegister(pub u32);
 
 impl MilRegister {
