@@ -347,7 +347,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
         for instr in block.instrs.iter_mut() {
             instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
-                if constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+                if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
                     eprintln!("  Replacing {} in {} with ref:null", op.pretty(env), block_id);
                     *op = MilOperand::Null;
                 };
@@ -355,7 +355,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
 
         block.end_instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
-            if constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+            if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
                 eprintln!("  Replacing {} in {} with ref:null", op.pretty(env), block_id);
                 *op = MilOperand::Null;
             };
