@@ -8,7 +8,7 @@ use super::flow_graph::*;
 use super::il::*;
 use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{AttributeCode, ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
+use crate::classfile::{AttributeCode, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
@@ -1091,35 +1091,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     stack.push(builder, reg, MilType::for_class(ret_class));
                 };
             },
-            BytecodeInstruction::InvokeVirtual(idx) => {
+            BytecodeInstruction::InvokeVirtual(idx) | BytecodeInstruction::InvokeInterface(idx, _) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
-                    _ => unreachable!()
-                };
-
-                let (class, method) = env.get_method(cpe.method_id);
-
-                let ret_class = method.return_type;
-                let reg = builder.allocate_reg(MilType::for_class(ret_class));
-                let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
-
-                emit_null_check(builder, args[0].clone(), bc);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::CallVirtual(
-                        ret_class,
-                        cpe.method_id,
-                        reg,
-                        args[0].clone(),
-                        args
-                    ),
-                    bc
-                );
-                if ret_class != ClassId::PRIMITIVE_VOID {
-                    stack.push(builder, reg, MilType::for_class(ret_class));
-                };
-            },
-            BytecodeInstruction::InvokeInterface(idx, _) => {
-                let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::InterfaceMethodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
@@ -1131,16 +1105,30 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
 
                 emit_null_check(builder, args[0].clone(), bc);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::CallInterface(
-                        ret_class,
-                        cpe.method_id,
-                        reg,
-                        args[0].clone(),
-                        args
-                    ),
-                    bc
-                );
+                if class.flags.contains(ClassFlags::INTERFACE) {
+                    builder.append_end_instruction(
+                        MilEndInstructionKind::CallInterface(
+                            ret_class,
+                            cpe.method_id,
+                            reg,
+                            args[0].clone(),
+                            args
+                        ),
+                        bc
+                    );
+                } else {
+                    builder.append_end_instruction(
+                        MilEndInstructionKind::CallVirtual(
+                            ret_class,
+                            cpe.method_id,
+                            reg,
+                            args[0].clone(),
+                            args
+                        ),
+                        bc
+                    );
+                };
+
                 if ret_class != ClassId::PRIMITIVE_VOID {
                     stack.push(builder, reg, MilType::for_class(ret_class));
                 };
