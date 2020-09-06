@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 
+use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeData, Class, ClassFlags, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodFlags, MethodSummary, PrimitiveType};
 use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, ResolvedClass};
 use crate::layout;
+use crate::mil::il::MethodName;
 use crate::static_heap::{self, ObjectFlags, JavaStaticHeap, JavaStaticRef};
 
 fn add_may_virtual_call(summary: &mut MethodSummary, method_id: MethodId) {
@@ -151,6 +153,15 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
     summary
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReturnAddress(pub MethodId, pub usize);
+
+impl fmt::Display for ReturnAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ReturnAddress({:?}, {})", self.0, self.1)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value<'a> {
     Int(i32),
@@ -158,7 +169,7 @@ pub enum Value<'a> {
     Float(u32),
     Double(u64),
     Ref(Option<JavaStaticRef<'a>>),
-    ReturnAddress(MethodId, usize, usize),
+    ReturnAddress(ReturnAddress),
     Empty
 }
 
@@ -205,9 +216,9 @@ impl <'a> Value<'a> {
         }
     }
 
-    pub fn as_return_address(&self) -> Option<(MethodId, usize, usize)> {
+    pub fn as_return_address(&self) -> Option<ReturnAddress> {
         match *self {
-            Value::ReturnAddress(method, off, drop_locals) => Some((method, off, drop_locals)),
+            Value::ReturnAddress(ret) => Some(ret),
             _ => None
         }
     }
@@ -242,8 +253,8 @@ impl <'a> fmt::Display for Value<'a> {
             Value::Ref(Some(ref val)) => {
                 write!(f, "Ref({})", val)?;
             },
-            Value::ReturnAddress(method_id, off, drop_locals) => {
-                write!(f, "ReturnAddress({:?}, {}, {})", method_id, off, drop_locals)?;
+            Value::ReturnAddress(ret) => {
+                write!(f, "{}", ret)?;
             },
             Value::Empty => {
                 write!(f, "Empty")?;
@@ -254,7 +265,7 @@ impl <'a> fmt::Display for Value<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum StaticInterpretError {
+pub enum StaticInterpretErrorKind {
     UnimplementedBytecode(MethodId, BytecodeInstruction),
     UnknownNativeCall(MethodId),
     OutOfMemory,
@@ -263,9 +274,33 @@ pub enum StaticInterpretError {
     ExcludedClinit(ClassId)
 }
 
-impl From<AllocErr> for StaticInterpretError {
-    fn from(_: AllocErr) -> Self {
-        StaticInterpretError::OutOfMemory
+impl From<AllocErr> for StaticInterpretErrorKind {
+    fn from(err: AllocErr) -> StaticInterpretErrorKind {
+        StaticInterpretErrorKind::OutOfMemory
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StaticInterpretError(pub StaticInterpretErrorKind, pub Vec<ReturnAddress>);
+
+impl StaticInterpretError {
+    fn new(kind: StaticInterpretErrorKind, state: &InterpreterState) -> StaticInterpretError {
+        StaticInterpretError(kind, state.backtrace().collect_vec())
+    }
+
+    fn throw<T>(kind: StaticInterpretErrorKind, state: &InterpreterState) -> Result<T, StaticInterpretError> {
+        Err(StaticInterpretError::new(kind, state))
+    }
+
+    fn wrap<T>(inner: Result<T, impl Into<StaticInterpretErrorKind>>, state: &InterpreterState) -> Result<T, StaticInterpretError> {
+        inner.map_err(|err| StaticInterpretError::new(err.into(), state))
+    }
+
+    fn wrap_nested<T>(inner: Result<T, StaticInterpretError>, state: &InterpreterState) -> Result<T, StaticInterpretError> {
+        inner.map_err(|StaticInterpretError(kind, mut backtrace)| {
+            backtrace.extend(state.backtrace());
+            StaticInterpretError(kind, backtrace)
+        })
     }
 }
 
@@ -333,14 +368,14 @@ fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), Static
             "boolean" => state.heap.get_class_object(ClassId::PRIMITIVE_BOOLEAN),
             _ => {
                 eprintln!("WARNING: Call to Class.getPrimitiveClass with unknown type {:?}", name);
-                return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
             }
         };
 
         state.stack.push(Value::Ref(Some(result)));
         Result::Ok(())
     } else {
-        Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
+        StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state)
     }
 }
 
@@ -351,7 +386,7 @@ fn native_class_get_component_type(state: &mut InterpreterState) -> Result<(), S
         ResolvedClass::Array(class_id) => class_id.0 as i32,
         ref class => {
             eprintln!("WARNING: Call to Class.getComponentType0 with non array type {}", class.name(state.env));
-            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+            return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
         }
     }));
     Result::Ok(())
@@ -396,18 +431,20 @@ fn native_class_get_declared_fields(state: &mut InterpreterState) -> Result<(), 
 
     let arr = match **state.env.get(class_id) {
         ResolvedClass::Array(_) | ResolvedClass::Primitive(_) => {
-            state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, 0)?
+            StaticInterpretError::wrap(state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, 0), state)?
         },
         ResolvedClass::User(ref class) => {
-            let arr = state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, class.fields.len() as u32)?;
+            let arr = StaticInterpretError::wrap(state.heap.allocate_array(ClassId::JAVA_LANG_REFLECT_FIELD_ARRAY, class.fields.len() as u32), state)?;
             let class_obj = state.heap.get_class_object(class_id);
 
             for (i, field) in class.fields.iter().enumerate() {
-                let field_obj = state.heap.allocate_object(ClassId::JAVA_LANG_REFLECT_FIELD)?;
+                let field_obj = StaticInterpretError::wrap(state.heap.allocate_object(ClassId::JAVA_LANG_REFLECT_FIELD), state)?;
 
                 field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_CLAZZ_FIELD, Value::Ref(Some(class_obj.clone())));
                 field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_OFFSET_FIELD, Value::Int(field.off as i32));
-                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_NAME_FIELD, Value::Ref(Some(state.heap.allocate_string(field.name.as_ref())?)));
+                field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_NAME_FIELD, Value::Ref(Some(
+                    StaticInterpretError::wrap(state.heap.allocate_string(field.name.as_ref()), state)?
+                )));
                 field_obj.write_field(static_heap::JAVA_LANG_REFLECT_FIELD_TYPE_FIELD, Value::Ref(
                     if state.heap.has_class_object(field.class_id) {
                         Some(state.heap.get_class_object(field.class_id))
@@ -465,7 +502,7 @@ fn native_object_get_class(state: &mut InterpreterState) -> Result<(), StaticInt
         state.stack.push(Value::Ref(Some(state.heap.get_class_object(val.class_id()))));
         Result::Ok(())
     } else {
-        Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
+        StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state)
     }
 }
 
@@ -475,23 +512,23 @@ fn native_arraycopy(state: &mut InterpreterState) -> Result<(), StaticInterpretE
     let dst = if let Some(dst) = state.stack.pop().into_ref().unwrap() {
         dst
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
     let src_off = state.stack.pop().as_int().unwrap();
     let src = if let Some(src) = state.stack.pop().into_ref().unwrap() {
         src
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     // TODO Check type correctness
 
     if dst_off < 0 || dst_off > dst.read_array_length() || dst.read_array_length() - dst_off < len {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     if src_off < 0 || src_off > src.read_array_length() || src.read_array_length() - src_off < len {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     if src_off > dst_off {
@@ -511,18 +548,18 @@ fn native_unsafe_get_array_base(state: &mut InterpreterState) -> Result<(), Stat
     let class_obj = if let Some(class_obj) = state.stack.pop().into_ref().unwrap() {
         class_obj
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
     let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
 
     if state.stack.pop().into_ref().unwrap().is_none() {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     let elem_class_id = if let ResolvedClass::Array(elem_class_id) = **state.env.get(class_id) {
         elem_class_id
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     state.stack.push(Value::Int(
@@ -536,18 +573,18 @@ fn native_unsafe_get_array_scale(state: &mut InterpreterState) -> Result<(), Sta
     let class_obj = if let Some(class_obj) = state.stack.pop().into_ref().unwrap() {
         class_obj
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
     let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
 
     if state.stack.pop().into_ref().unwrap().is_none() {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     let elem_class_id = if let ResolvedClass::Array(elem_class_id) = **state.env.get(class_id) {
         elem_class_id
     } else {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     state.stack.push(Value::Int(
@@ -559,7 +596,7 @@ fn native_unsafe_get_array_scale(state: &mut InterpreterState) -> Result<(), Sta
 
 fn native_unsafe_address_size(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     if state.stack.pop().into_ref().unwrap().is_none() {
-        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     state.stack.push(Value::Int(8));
@@ -630,7 +667,7 @@ fn native_unsafe_get(state: &mut InterpreterState, class_id: ClassId) -> Result<
     let obj = if let Some(obj) = obj {
         obj
     } else {
-        return Err(StaticInterpretError::IllegalUnsafeOperation);
+        return StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state);
     };
 
     eprintln!("{} {}", obj, offset);
@@ -642,7 +679,7 @@ fn native_unsafe_get(state: &mut InterpreterState, class_id: ClassId) -> Result<
         state.stack.push(obj.read_array_element(index));
         Ok(())
     } else {
-        Err(StaticInterpretError::IllegalUnsafeOperation)
+        StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state)
     }
 }
 
@@ -655,7 +692,7 @@ fn native_unsafe_put(state: &mut InterpreterState, class_id: ClassId) -> Result<
     let obj = if let Some(obj) = obj {
         obj
     } else {
-        return Err(StaticInterpretError::IllegalUnsafeOperation);
+        return StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state);
     };
 
     eprintln!("{} {}", obj, offset);
@@ -678,7 +715,7 @@ fn native_unsafe_put(state: &mut InterpreterState, class_id: ClassId) -> Result<
         obj.write_array_element(index, val);
         Ok(())
     } else {
-        Err(StaticInterpretError::IllegalUnsafeOperation)
+        StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state)
     }
 }
 
@@ -687,22 +724,24 @@ fn native_new_array(state: &mut InterpreterState) -> Result<(), StaticInterpretE
     let class_obj = state.stack.pop().into_ref().unwrap();
 
     if len < 0 {
-        return Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     let class_obj = if let Some(class_obj) = class_obj {
         class_obj
     } else {
-        return Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state);
     };
 
     let class_id = ClassId(class_obj.read_field(static_heap::JAVA_LANG_CLASS_VTABLE_PTR_FIELD).as_int().unwrap() as u32);
 
     if let Some(class_id) = state.env.try_find_array(class_id) {
-        state.stack.push(Value::Ref(Some(state.heap.allocate_array(class_id, len as u32)?)));
+        state.stack.push(Value::Ref(Some(
+            StaticInterpretError::wrap(state.heap.allocate_array(class_id, len as u32), state)?
+        )));
         Ok(())
     } else {
-        Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT))
+        StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), state)
     }
 }
 
@@ -938,6 +977,7 @@ struct InterpreterState<'a, 'b> {
     instrs: BytecodeIterator<'a>,
 
     stack: InterpreterStack<'b>,
+    call_stack: Vec<(ReturnAddress, usize, usize)>,
     locals: Vec<Value<'b>>
 }
 
@@ -953,26 +993,24 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
     }
 
     fn exit_method(&mut self, verbose: bool) -> Result<bool, StaticInterpretError> {
-        if self.stack.is_empty() {
-            return Result::Ok(true);
-        };
+        if let Some((ReturnAddress(method_id, off), stack_size, locals_size)) = self.call_stack.pop() {
+            let (class, method) = self.env.get_method(method_id);
 
-        let (method_id, off, drop_locals) = self.stack.pop().as_return_address().unwrap();
-        let (class, method) = self.env.get_method(method_id);
+            if verbose {
+                eprintln!("    RETURN TO {}.{}{}", class.meta.name, method.name, method.descriptor);
+            };
 
-        if verbose {
-            eprintln!("    RETURN TO {}.{}{}", class.meta.name, method.name, method.descriptor);
-        };
+            self.stack.stack.truncate(stack_size);
+            self.locals.truncate(locals_size);
 
-        for _ in 0..drop_locals {
-            self.locals.pop();
-        };
+            self.class = class;
+            self.method_id = method_id;
+            self.instrs = BytecodeIterator(&method.code_attribute().unwrap().code, off);
 
-        self.class = class;
-        self.method_id = method_id;
-        self.instrs = BytecodeIterator(&method.code_attribute().unwrap().code, off);
-
-        Result::Ok(false)
+            Result::Ok(false)
+        } else {
+            Result::Ok(true)
+        }
     }
 
     fn find_virtual_target(&mut self, method_id: MethodId, receiver: JavaStaticRef<'b>, verbose: bool) -> Result<MethodId, StaticInterpretError> {
@@ -1019,8 +1057,14 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         Result::Ok(self.stack.read(num_param_slots).as_ref().unwrap())
     }
 
+    fn backtrace<'c>(&'c self) -> impl Iterator<Item=ReturnAddress> + 'c {
+        itertools::repeat_n(ReturnAddress(self.method_id, self.instrs.1), 1).chain(
+            self.call_stack.iter().rev().map(|&(ret, _, _)| ret)
+        )
+    }
+
     fn enter_method(&mut self, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
-        try_run_clinit_without_checkpoint(self.env, self.heap, method_id.0, verbose)?;
+        StaticInterpretError::wrap_nested(try_run_clinit_without_checkpoint(self.env, self.heap, method_id.0, verbose), self)?;
 
         let (class, method) = self.env.get_method(method_id);
 
@@ -1053,6 +1097,9 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
                 };
             };
 
+            let stack_size = self.stack.len() - num_param_slots;
+            let locals_size = self.locals.len();
+
             for _ in num_param_slots..(code.max_locals as usize) {
                 self.locals.push(Value::Empty);
             };
@@ -1061,7 +1108,9 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
                 self.locals.push(self.stack.pop_slot());
             };
 
-            self.stack.push(Value::ReturnAddress(self.method_id, self.instrs.1, code.max_locals as usize));
+            self.call_stack.push((ReturnAddress(self.method_id, self.instrs.1), stack_size, locals_size));
+
+            self.stack.push(Value::ReturnAddress(ReturnAddress(self.method_id, self.instrs.1)));
 
             self.class = class;
             self.method_id = method_id;
@@ -1078,7 +1127,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
             if let Some(native) = KNOWN_NATIVES.get(&name.as_str()) {
                 native(self)
             } else {
-                Result::Err(StaticInterpretError::UnknownNativeCall(method_id))
+                StaticInterpretError::throw(StaticInterpretErrorKind::UnknownNativeCall(method_id), self)
             }
         }
     }
@@ -1108,7 +1157,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
     let code = match method.code_attribute() {
         Some(code) => code,
         None => {
-            return Result::Err(StaticInterpretError::UnknownNativeCall(method_id));
+            return Err(StaticInterpretError(StaticInterpretErrorKind::UnknownNativeCall(method_id), vec![]));
         }
     };
     let instrs = BytecodeIterator::for_code(code);
@@ -1120,6 +1169,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
         class,
         instrs,
         stack: InterpreterStack::new(),
+        call_stack: vec![],
         locals: vec![]
     };
 
@@ -1316,7 +1366,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = state.stack.pop().as_int().unwrap();
 
                 if o2 == 0 {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
 
                 state.stack.push(Value::Int(o1.wrapping_div(o2)));
@@ -1326,7 +1376,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = state.stack.pop().as_int().unwrap();
 
                 if o2 == 0 {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
 
                 state.stack.push(Value::Int(o1.wrapping_rem(o2)));
@@ -1433,9 +1483,9 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::New(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Class(ref cpe) => {
-                        try_run_clinit_without_checkpoint(env, heap, cpe.class_id, verbose)?;
+                        StaticInterpretError::wrap_nested(try_run_clinit_without_checkpoint(env, heap, cpe.class_id, verbose), &state)?;
 
-                        let obj_ref = state.heap.allocate_object(cpe.class_id)?;
+                        let obj_ref = StaticInterpretError::wrap(state.heap.allocate_object(cpe.class_id), &state)?;
                         state.stack.push(Value::Ref(Some(obj_ref)));
                     },
                     _ => unreachable!()
@@ -1445,10 +1495,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let len = state.stack.pop().as_int().unwrap();
 
                 if len < 0 {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
 
-                let arr_ref = state.heap.allocate_array(ClassId::for_primitive_type_array(t), len as u32)?;
+                let arr_ref = StaticInterpretError::wrap(state.heap.allocate_array(ClassId::for_primitive_type_array(t), len as u32), &state)?;
 
                 state.stack.push(Value::Ref(Some(arr_ref)));
             },
@@ -1458,10 +1508,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                         let len = state.stack.pop().as_int().unwrap();
 
                         if len < 0 {
-                            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                            return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                         };
 
-                        let arr_ref = state.heap.allocate_array(cpe.array_class_id, len as u32)?;
+                        let arr_ref = StaticInterpretError::wrap(state.heap.allocate_array(cpe.array_class_id, len as u32), &state)?;
 
                         state.stack.push(Value::Ref(Some(arr_ref)));
                     },
@@ -1477,7 +1527,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     let val = arr_ref.read_array_element(idx);
                     state.stack.push(val);
                 } else {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
             },
             BytecodeInstruction::AAStore | BytecodeInstruction::BAStore | BytecodeInstruction::CAStore | BytecodeInstruction::DAStore |
@@ -1490,7 +1540,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     // TODO Check class of element stored
                     arr_ref.write_array_element(idx, val);
                 } else {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
             },
             BytecodeInstruction::ArrayLength => {
@@ -1499,7 +1549,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 if let Some(arr_ref) = arr_ref {
                     state.stack.push(Value::Int(arr_ref.read_array_length()));
                 } else {
-                    return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                 };
             },
             BytecodeInstruction::GetField(idx) => {
@@ -1511,7 +1561,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                             let value = obj_ref.read_field(cpe.field_id);
                             state.stack.push(value);
                         } else {
-                            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                            return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                         };
                     },
                     _ => unreachable!()
@@ -1526,7 +1576,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                         if let Some(obj_ref) = obj_ref {
                             obj_ref.write_field(cpe.field_id, value);
                         } else {
-                            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                            return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                         };
                     },
                     _ => unreachable!()
@@ -1535,7 +1585,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::GetStatic(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
-                        try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose)?;
+                        StaticInterpretError::wrap_nested(try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose), &state)?;
 
                         let class_obj = state.heap.get_class_object(cpe.field_id.0);
                         let value = class_obj.read_field(cpe.field_id);
@@ -1547,7 +1597,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::PutStatic(idx) => {
                 match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Fieldref(ref cpe) => {
-                        try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose)?;
+                        StaticInterpretError::wrap_nested(try_run_clinit_without_checkpoint(env, heap, cpe.field_id.0, verbose), &state)?;
 
                         let class_obj = state.heap.get_class_object(cpe.field_id.0);
                         let value = state.stack.pop();
@@ -1636,7 +1686,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
 
                 if let Some(val) = state.stack.peek().as_ref().unwrap() {
                     if !state.env.can_convert(val.class_id(), class_id) {
-                        return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                        return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                     };
                 };
             },
@@ -1659,7 +1709,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                             let real_method_id = state.find_virtual_target(cpe.method_id, receiver, verbose)?;
                             state.enter_method(real_method_id, verbose)?;
                         } else {
-                            return Result::Err(StaticInterpretError::WouldThrowException(ClassId::JAVA_LANG_OBJECT));
+                            return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
                         };
                     },
                     _ => unreachable!()
@@ -1673,7 +1723,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                     ClassId::JAVA_LANG_OBJECT
                 };
 
-                return Result::Err(StaticInterpretError::WouldThrowException(exception_class));
+                return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(exception_class), &state);
             },
             BytecodeInstruction::AReturn | BytecodeInstruction::DReturn | BytecodeInstruction::FReturn | BytecodeInstruction::IReturn | BytecodeInstruction::LReturn => {
                 let result = state.stack.pop();
@@ -1686,7 +1736,7 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 };
             },
             instr => {
-                return Result::Err(StaticInterpretError::UnimplementedBytecode(method_id, instr));
+                return StaticInterpretError::throw(StaticInterpretErrorKind::UnimplementedBytecode(method_id, instr), &state);
             }
         };
     };
@@ -1743,27 +1793,32 @@ pub fn try_run_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class: Clas
         Result::Ok(()) => true,
         Result::Err(err) => {
             eprint!("WARNING: Failed to statically run <clinit> for {}: ", env.get(class).name(env));
-            match err {
-                StaticInterpretError::UnimplementedBytecode(_, bc) => {
+            match err.0 {
+                StaticInterpretErrorKind::UnimplementedBytecode(_, bc) => {
                     eprintln!("Unimplemented bytecode {:?}", bc);
                 },
-                StaticInterpretError::UnknownNativeCall(method_id) => {
+                StaticInterpretErrorKind::UnknownNativeCall(method_id) => {
                     let (class, method) = env.get_method(method_id);
                     eprintln!("Unknown native call to {}.{}{}", class.meta.name, method.name, method.descriptor);
                 },
-                StaticInterpretError::OutOfMemory => {
+                StaticInterpretErrorKind::OutOfMemory => {
                     eprintln!("Ran out of memory in static heap");
                 },
-                StaticInterpretError::IllegalUnsafeOperation => {
+                StaticInterpretErrorKind::IllegalUnsafeOperation => {
                     eprintln!("Unsafe operation would cause undefined behaviour");
                 },
-                StaticInterpretError::WouldThrowException(exception_class_id) => {
+                StaticInterpretErrorKind::WouldThrowException(exception_class_id) => {
                     eprintln!("Threw exception of type {}", env.get(exception_class_id).name(env));
                 },
-                StaticInterpretError::ExcludedClinit(class_id) => {
+                StaticInterpretErrorKind::ExcludedClinit(class_id) => {
                     eprintln!("The <clinit> method of {} is explicitly disabled", env.get(class_id).name(env));
                 }
             };
+
+            for pc in err.1.iter().copied() {
+                eprintln!("  at {}", MethodName(pc.0, env))
+            };
+
             heap.rollback();
             false
         }
