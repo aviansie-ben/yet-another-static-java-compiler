@@ -453,17 +453,17 @@ pub fn read_op(bytecode: &[u8], off: usize) -> Result<(BytecodeInstruction, usiz
             (BytecodeInstruction::TableSwitch(lo, default, table), pad + 13 + (len * 4))
         },
         0xc4 => match read_u8(bytecode, off + 1)? {
-            0x19 => (BytecodeInstruction::ALoad(read_u16(bytecode, off + 1)?), 4),
-            0x3a => (BytecodeInstruction::AStore(read_u16(bytecode, off + 1)?), 4),
-            0x18 => (BytecodeInstruction::DLoad(read_u16(bytecode, off + 1)?), 4),
-            0x39 => (BytecodeInstruction::DStore(read_u16(bytecode, off + 1)?), 4),
-            0x17 => (BytecodeInstruction::FLoad(read_u16(bytecode, off + 1)?), 4),
-            0x38 => (BytecodeInstruction::FStore(read_u16(bytecode, off + 1)?), 4),
-            0x84 => (BytecodeInstruction::IInc(read_u16(bytecode, off + 1)?, read_u8(bytecode, off + 3)? as i16), 6),
-            0x15 => (BytecodeInstruction::ILoad(read_u16(bytecode, off + 1)?), 4),
-            0x36 => (BytecodeInstruction::IStore(read_u16(bytecode, off + 1)?), 4),
-            0x16 => (BytecodeInstruction::LLoad(read_u16(bytecode, off + 1)?), 4),
-            0x37 => (BytecodeInstruction::LStore(read_u16(bytecode, off + 1)?), 4),
+            0x19 => (BytecodeInstruction::ALoad(read_u16(bytecode, off + 2)?), 4),
+            0x3a => (BytecodeInstruction::AStore(read_u16(bytecode, off + 2)?), 4),
+            0x18 => (BytecodeInstruction::DLoad(read_u16(bytecode, off + 2)?), 4),
+            0x39 => (BytecodeInstruction::DStore(read_u16(bytecode, off + 2)?), 4),
+            0x17 => (BytecodeInstruction::FLoad(read_u16(bytecode, off + 2)?), 4),
+            0x38 => (BytecodeInstruction::FStore(read_u16(bytecode, off + 2)?), 4),
+            0x84 => (BytecodeInstruction::IInc(read_u16(bytecode, off + 2)?, read_u16(bytecode, off + 4)? as i16), 6),
+            0x15 => (BytecodeInstruction::ILoad(read_u16(bytecode, off + 2)?), 4),
+            0x36 => (BytecodeInstruction::IStore(read_u16(bytecode, off + 2)?), 4),
+            0x16 => (BytecodeInstruction::LLoad(read_u16(bytecode, off + 2)?), 4),
+            0x37 => (BytecodeInstruction::LStore(read_u16(bytecode, off + 2)?), 4),
             _ => {
                 return Result::Err(off + 1);
             }
