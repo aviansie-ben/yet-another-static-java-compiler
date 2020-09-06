@@ -784,9 +784,8 @@ fn find_with_super<T, U>(
     };
 
     find_t(class_id, t).or_else(|| {
-        meta.interface_ids.iter()
-            .cloned()
-            .chain(itertools::repeat_n(meta.super_id, 1))
+        itertools::repeat_n(meta.super_id, 1)
+            .chain(meta.interface_ids.iter().copied())
             .filter_map(|id| {
                 if id != ClassId::UNRESOLVED {
                     find_with_super(env, id, resolving_t, resolving_meta, get_class_t, find_t)
@@ -1070,6 +1069,10 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
                 resolving_meta,
                 &methodref
             );
+
+            if m.overrides.overrides_virtual != MethodId::UNRESOLVED && env.get(m.overrides.overrides_virtual.0).as_user_class().flags.contains(ClassFlags::INTERFACE) {
+                m.overrides.overrides_virtual = MethodId::UNRESOLVED;
+            };
 
             m.overrides.overrides_interface = resolving_class.meta.all_interface_ids.iter().cloned()
                 .filter_map(|interface| {
