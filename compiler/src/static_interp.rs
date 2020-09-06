@@ -1433,17 +1433,17 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::LShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
-                state.stack.push(Value::Long(o1 >> (o2 as i64)));
+                state.stack.push(Value::Long(o1 >> ((o2 & 0x3f) as i64)));
             },
             BytecodeInstruction::LUShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
-                state.stack.push(Value::Long(((o1 as u64) >> (o2 as u64)) as i64));
+                state.stack.push(Value::Long(((o1 as u64) >> ((o2 & 0x3f) as u64)) as i64));
             },
             BytecodeInstruction::LShl => {
                 let o2 = state.stack.pop().as_int().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
-                state.stack.push(Value::Long(o1 << (o2 as i64)));
+                state.stack.push(Value::Long(o1 << ((o2 & 0x3f) as i64)));
             },
             BytecodeInstruction::FCmpG => {
                 let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
