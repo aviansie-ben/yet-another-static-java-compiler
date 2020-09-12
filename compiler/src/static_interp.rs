@@ -469,6 +469,18 @@ fn native_class_get_declared_fields(state: &mut InterpreterState) -> Result<(), 
     Result::Ok(())
 }
 
+fn native_class_get_superclass(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
+    let class_id = ClassId(state.stack.pop().as_int().unwrap() as u32);
+
+    state.stack.push(Value::Int(match **state.env.get(class_id) {
+        ResolvedClass::User(ref class) => class.meta.super_id,
+        ResolvedClass::Array(_) => ClassId::JAVA_LANG_OBJECT,
+        ResolvedClass::Primitive(_) => ClassId::UNRESOLVED
+    }.0 as i32));
+
+    Result::Ok(())
+}
+
 fn native_get_raw_float_bits(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     let val = state.stack.pop().as_float().unwrap();
     state.stack.push(Value::Int(val as i32));
@@ -885,6 +897,10 @@ lazy_static! {
         known_natives.insert(
             "java/lang/Class.getDeclaredFields0(I)[Ljava/lang/reflect/Field;",
             native_class_get_declared_fields as StaticNative
+        );
+        known_natives.insert(
+            "java/lang/Class.getSuperclass0(I)I",
+            native_class_get_superclass as StaticNative
         );
 
         known_natives.insert(
