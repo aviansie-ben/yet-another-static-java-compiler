@@ -354,6 +354,11 @@ fn native_nop(_state: &mut InterpreterState) -> Result<(), StaticInterpretError>
     Result::Ok(())
 }
 
+fn native_push_const<'a>(state: &mut InterpreterState<'_, 'a>, value: Value<'a>) -> Result<(), StaticInterpretError> {
+    state.stack.push(value);
+    Ok(())
+}
+
 fn native_get_primitive_class(state: &mut InterpreterState) -> Result<(), StaticInterpretError> {
     let name = state.stack.pop().into_ref().unwrap();
 
@@ -812,6 +817,11 @@ lazy_static! {
         known_natives.insert("java/io/FileOutputStream.initIDs()V", native_nop as StaticNative);
         known_natives.insert("java/io/FileDescriptor.initIDs()V", native_nop as StaticNative);
         known_natives.insert("java/io/UnixFileSystem.initIDs()V", native_nop as StaticNative);
+
+        known_natives.insert(
+            "java/util/concurrent/atomic/AtomicLong.VMSupportsCS8()Z",
+            (|state| native_push_const(state, Value::Int(1))) as StaticNative
+        );
 
         known_natives.insert(
             "sun/misc/Unsafe.arrayBaseOffset(Ljava/lang/Class;)I",
