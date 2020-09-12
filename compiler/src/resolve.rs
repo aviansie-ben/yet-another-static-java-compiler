@@ -753,6 +753,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
 fn find_with_super<T, U>(
     env: &ClassEnvironment,
     class_id: ClassId,
+    include_interfaces: bool,
     resolving_t: &[T],
     resolving_meta: &ClassMeta,
     get_class_t: &impl Fn (&Class) -> &[T],
@@ -774,6 +775,7 @@ fn find_with_super<T, U>(
                 return find_with_super(
                     env,
                     ClassId::JAVA_LANG_OBJECT,
+                    include_interfaces,
                     resolving_t,
                     resolving_meta,
                     get_class_t,
@@ -784,16 +786,22 @@ fn find_with_super<T, U>(
     };
 
     find_t(class_id, t).or_else(|| {
-        itertools::repeat_n(meta.super_id, 1)
-            .chain(meta.interface_ids.iter().copied())
-            .filter_map(|id| {
-                if id != ClassId::UNRESOLVED {
-                    find_with_super(env, id, resolving_t, resolving_meta, get_class_t, find_t)
-                } else {
-                    None
-                }
-            })
-            .next()
+        let handle_super = |id| {
+            if id != ClassId::UNRESOLVED {
+                find_with_super(env, id, include_interfaces, resolving_t, resolving_meta, get_class_t, find_t)
+            } else {
+                None
+            }
+        };
+
+        if include_interfaces {
+            itertools::repeat_n(meta.super_id, 1)
+                .chain(meta.interface_ids.iter().copied())
+                .filter_map(handle_super)
+                .next()
+        } else {
+            handle_super(meta.super_id)
+        }
     })
 }
 
@@ -807,6 +815,7 @@ fn find_field(
     find_with_super(
         env,
         class_id,
+        true,
         resolving_fields,
         resolving_meta,
         &|class| &class.fields,
@@ -851,6 +860,7 @@ fn is_compatible_method(
 fn find_method(
     env: &ClassEnvironment,
     class_id: ClassId,
+    include_interfaces: bool,
     resolving_methods: &[Method],
     resolving_meta: &ClassMeta,
     methodref: &ConstantMethodref
@@ -858,6 +868,7 @@ fn find_method(
     find_with_super(
         env,
         class_id,
+        include_interfaces,
         resolving_methods,
         resolving_meta,
         &|class| &class.methods,
@@ -932,7 +943,7 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                     let class_id = class_ids[cpe.class as usize];
 
                     cpe.method_id = if class_id != ClassId::UNRESOLVED {
-                        let method_id = find_method(env, class_id, &resolving_class.methods, &resolving_class.meta, cpe);
+                        let method_id = find_method(env, class_id, true, &resolving_class.methods, &resolving_class.meta, cpe);
 
                         if method_id == MethodId::UNRESOLVED {
                             let err = ClassResolveError::NoSuchMethod(
@@ -1065,6 +1076,7 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
             m.overrides.overrides_virtual = find_method(
                 env,
                 resolving_class.meta.super_id,
+                false,
                 &[],
                 resolving_meta,
                 &methodref
@@ -1076,7 +1088,7 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
 
             m.overrides.overrides_interface = resolving_class.meta.all_interface_ids.iter().cloned()
                 .filter_map(|interface| {
-                    let method = find_method(env, interface, &[], resolving_meta, &methodref);
+                    let method = find_method(env, interface, true, &[], resolving_meta, &methodref);
                     if method != MethodId::UNRESOLVED {
                         Some(method)
                     } else {
