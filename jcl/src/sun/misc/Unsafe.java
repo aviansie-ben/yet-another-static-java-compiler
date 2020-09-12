@@ -95,8 +95,25 @@ public final class Unsafe {
     public native boolean compareAndSwapLong(Object obj, long offset, long expectedVal, long newVal);
     public native boolean compareAndSwapObject(Object obj, long offset, Object expectedVal, Object newVal);
 
-    public native int getAndAddInt(Object obj, long offset, int delta);
-    public native long getAndAddLong(Object obj, long offset, long delta);
+    public int getAndAddInt(Object obj, long offset, int delta) {
+        int val = getIntVolatile(obj, offset);
+
+        while (!compareAndSwapInt(obj, offset, val, val + delta)) {
+            val = getIntVolatile(obj, offset);
+        }
+
+        return val;
+    }
+
+    public long getAndAddLong(Object obj, long offset, long delta) {
+        long val = getLongVolatile(obj, offset);
+
+        while (!compareAndSwapLong(obj, offset, val, val + delta)) {
+            val = getLongVolatile(obj, offset);
+        }
+
+        return val;
+    }
 
     public native int getAndSetInt(Object obj, long offset, int val);
     public native long getAndSetLong(Object obj, long offset, long val);
