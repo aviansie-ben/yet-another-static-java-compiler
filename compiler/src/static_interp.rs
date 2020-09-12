@@ -686,8 +686,6 @@ fn native_unsafe_get(state: &mut InterpreterState, class_id: ClassId) -> Result<
         return StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state);
     };
 
-    eprintln!("{} {}", obj, offset);
-
     if let Ok(field_id) = find_unsafe_field(state.env, &obj, offset, |type_id| state.env.can_convert(type_id, class_id)) {
         state.stack.push(obj.read_field(field_id));
         Ok(())
@@ -710,8 +708,6 @@ fn native_unsafe_put(state: &mut InterpreterState, class_id: ClassId) -> Result<
     } else {
         return StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state);
     };
-
-    eprintln!("{} {}", obj, offset);
 
     let is_convertible = |expected, actual| {
         if !state.env.can_convert(actual, expected) {
