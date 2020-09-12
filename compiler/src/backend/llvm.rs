@@ -311,14 +311,10 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
         ResolvedClass::Primitive(_) => {}
     };
 
-    let vslot_class = if liveness.may_construct.contains(&class_id) {
-        match **env.get(class_id) {
-            ResolvedClass::User(ref class) => Some(class),
-            ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
-            _ => None
-        }
-    } else {
-        None
+    let vslot_class = match **env.get(class_id) {
+        ResolvedClass::User(ref class) => Some(class),
+        ResolvedClass::Array(_) => Some(env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
+        _ => None
     };
 
     let (num_vslots, num_islots) = if let Some(vslot_class) = vslot_class {
