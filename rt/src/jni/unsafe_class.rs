@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicPtr, Ordering};
+
 use crate::obj::MochaObject;
 
 unsafe fn unsafe_get<T: Copy>(obj: *mut MochaObject, off: u64) -> T {
@@ -91,4 +93,31 @@ pub unsafe extern fn sun_misc_Unsafe_putFloat(_: *mut MochaObject, obj: *mut Moc
 #[no_mangle]
 pub unsafe extern fn sun_misc_Unsafe_putDouble(_: *mut MochaObject, obj: *mut MochaObject, off: u64, val: f64) {
     unsafe_put(obj, off, val);
+}
+
+#[no_mangle]
+pub unsafe extern fn sun_misc_Unsafe_compareAndSwapInt(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: i32, val: i32) -> i32 {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI32)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern fn sun_misc_Unsafe_compareAndSwapLong(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: i64, val: i64) -> i32 {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI64)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern fn sun_misc_Unsafe_compareAndSwapObject(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: *mut MochaObject, val: *mut MochaObject) -> i32 {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicPtr<MochaObject>)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+        1
+    } else {
+        0
+    }
 }

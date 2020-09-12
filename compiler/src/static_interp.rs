@@ -675,6 +675,46 @@ fn find_unsafe_array_offset<F: FnOnce (ClassId) -> bool>(env: &ClassEnvironment,
     }
 }
 
+fn native_unsafe_cmp_swap(state: &mut InterpreterState, class_id: ClassId) -> Result<(), StaticInterpretError> {
+    let new = state.stack.pop();
+    let expected = state.stack.pop();
+    let offset = state.stack.pop().as_long().unwrap() as u64;
+    let obj = state.stack.pop().into_ref().unwrap();
+    state.stack.pop();
+
+    let obj = if let Some(obj) = obj {
+        obj
+    } else {
+        return StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state);
+    };
+
+    if let Ok(field_id) = find_unsafe_field(state.env, &obj, offset, |type_id| state.env.can_convert(type_id, class_id)) {
+        let actual = obj.read_field(field_id);
+
+        if actual == expected {
+            obj.write_field(field_id, new);
+            state.stack.push(Value::Int(1));
+        } else {
+            state.stack.push(Value::Int(0));
+        };
+
+        Ok(())
+    } else if let Ok(index) = find_unsafe_array_offset(state.env, &obj, offset, |type_id| state.env.can_convert(type_id, class_id)) {
+        let actual = obj.read_array_element(index);
+
+        if actual == expected {
+            obj.write_array_element(index, new);
+            state.stack.push(Value::Int(1));
+        } else {
+            state.stack.push(Value::Int(0));
+        };
+
+        Ok(())
+    } else {
+        StaticInterpretError::throw(StaticInterpretErrorKind::IllegalUnsafeOperation, state)
+    }
+}
+
 fn native_unsafe_get(state: &mut InterpreterState, class_id: ClassId) -> Result<(), StaticInterpretError> {
     let offset = state.stack.pop().as_long().unwrap() as u64;
     let obj = state.stack.pop().into_ref().unwrap();
@@ -784,6 +824,19 @@ lazy_static! {
         known_natives.insert(
             "sun/misc/Unsafe.addressSize()I",
             native_unsafe_address_size as StaticNative
+        );
+
+        known_natives.insert(
+            "sun/misc/Unsafe.compareAndSwapInt(Ljava/lang/Object;JII)Z",
+            (|state| native_unsafe_cmp_swap(state, ClassId::PRIMITIVE_INT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.compareAndSwapLong(Ljava/lang/Object;JJJ)Z",
+            (|state| native_unsafe_cmp_swap(state, ClassId::PRIMITIVE_LONG)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z",
+            (|state| native_unsafe_cmp_swap(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
         );
 
         known_natives.insert(
