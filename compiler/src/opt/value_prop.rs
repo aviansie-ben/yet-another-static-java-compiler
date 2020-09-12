@@ -151,6 +151,15 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
                 MilBinOp::FSub => MilOperand::Float((lhs - rhs).to_bits()),
                 MilBinOp::FMul => MilOperand::Float((lhs * rhs).to_bits()),
                 MilBinOp::FDiv => MilOperand::Float((lhs / rhs).to_bits()),
+                MilBinOp::FCmp(mode) => MilOperand::Int(match lhs.partial_cmp(&rhs) {
+                    Some(Ordering::Equal) => 0,
+                    Some(Ordering::Greater) => 1,
+                    Some(Ordering::Less) => -1,
+                    None => match mode {
+                        MilFCmpMode::L => -1,
+                        MilFCmpMode::G => 1
+                    }
+                }),
                 _ => unreachable!()
             }
         },
@@ -163,6 +172,15 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
                 MilBinOp::DSub => MilOperand::Double((lhs - rhs).to_bits()),
                 MilBinOp::DMul => MilOperand::Double((lhs * rhs).to_bits()),
                 MilBinOp::DDiv => MilOperand::Double((lhs / rhs).to_bits()),
+                MilBinOp::DCmp(mode) => MilOperand::Int(match lhs.partial_cmp(&rhs) {
+                    Some(Ordering::Equal) => 0,
+                    Some(Ordering::Greater) => 1,
+                    Some(Ordering::Less) => -1,
+                    None => match mode {
+                        MilFCmpMode::L => -1,
+                        MilFCmpMode::G => 1
+                    }
+                }),
                 _ => unreachable!()
             }
         },

@@ -578,6 +578,12 @@ impl fmt::Display for MilUnOp {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MilFCmpMode {
+    L,
+    G
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MilBinOp {
     IAdd,
     ISub,
@@ -606,10 +612,12 @@ pub enum MilBinOp {
     FSub,
     FMul,
     FDiv,
+    FCmp(MilFCmpMode),
     DAdd,
     DSub,
     DMul,
-    DDiv
+    DDiv,
+    DCmp(MilFCmpMode)
 }
 
 impl fmt::Display for MilBinOp {
@@ -642,10 +650,14 @@ impl fmt::Display for MilBinOp {
             MilBinOp::FSub => write!(f, "fsub"),
             MilBinOp::FMul => write!(f, "fmul"),
             MilBinOp::FDiv => write!(f, "fdiv"),
+            MilBinOp::FCmp(MilFCmpMode::L) => write!(f, "fcmpl"),
+            MilBinOp::FCmp(MilFCmpMode::G) => write!(f, "fcmpg"),
             MilBinOp::DAdd => write!(f, "dadd"),
             MilBinOp::DSub => write!(f, "dsub"),
             MilBinOp::DMul => write!(f, "dmul"),
-            MilBinOp::DDiv => write!(f, "ddiv")
+            MilBinOp::DDiv => write!(f, "ddiv"),
+            MilBinOp::DCmp(MilFCmpMode::L) => write!(f, "dcmpl"),
+            MilBinOp::DCmp(MilFCmpMode::G) => write!(f, "dcmpg")
         }
     }
 }

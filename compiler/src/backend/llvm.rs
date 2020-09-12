@@ -1307,6 +1307,46 @@ unsafe fn emit_basic_block(
                         rhs,
                         register_name(tgt).as_ptr()
                     ),
+                    MilBinOp::FCmp(mode) => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealOEQ,
+                            lhs,
+                            rhs,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_int(0),
+                        match mode {
+                            MilFCmpMode::L => LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOGT,
+                                    lhs,
+                                    rhs,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(1),
+                                module.const_int(-1),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            MilFCmpMode::G => LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLT,
+                                    lhs,
+                                    rhs,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(-1),
+                                module.const_int(1),
+                                b"\0".as_ptr() as *const c_char
+                            )
+                        },
+                        register_name(tgt).as_ptr()
+                    ),
                     MilBinOp::DAdd => LLVMBuildFAdd(
                         builder.ptr(),
                         lhs,
@@ -1329,6 +1369,46 @@ unsafe fn emit_basic_block(
                         builder.ptr(),
                         lhs,
                         rhs,
+                        register_name(tgt).as_ptr()
+                    ),
+                    MilBinOp::DCmp(mode) => LLVMBuildSelect(
+                        builder.ptr(),
+                        LLVMBuildFCmp(
+                            builder.ptr(),
+                            LLVMRealPredicate::LLVMRealOEQ,
+                            lhs,
+                            rhs,
+                            b"\0".as_ptr() as *const c_char
+                        ),
+                        module.const_int(0),
+                        match mode {
+                            MilFCmpMode::L => LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOGT,
+                                    lhs,
+                                    rhs,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(1),
+                                module.const_int(-1),
+                                b"\0".as_ptr() as *const c_char
+                            ),
+                            MilFCmpMode::G => LLVMBuildSelect(
+                                builder.ptr(),
+                                LLVMBuildFCmp(
+                                    builder.ptr(),
+                                    LLVMRealPredicate::LLVMRealOLT,
+                                    lhs,
+                                    rhs,
+                                    b"\0".as_ptr() as *const c_char
+                                ),
+                                module.const_int(-1),
+                                module.const_int(1),
+                                b"\0".as_ptr() as *const c_char
+                            )
+                        },
                         register_name(tgt).as_ptr()
                     )
                 }, &module.types);

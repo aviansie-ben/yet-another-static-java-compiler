@@ -1355,16 +1355,17 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     bc
                 ));
             },
-            BytecodeInstruction::FCmpG | BytecodeInstruction::FCmpL => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                let reg = builder.allocate_reg(MilType::Int);
-                stack.pop(builder, MilType::Float);
-                stack.pop(builder, MilType::Float);
-                stack.push(builder, reg, MilType::Int);
-                builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
-                    bc
-                );
+            BytecodeInstruction::FCmpG => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FCmp(MilFCmpMode::G), MilType::Float, MilType::Float, MilType::Int);
+            },
+            BytecodeInstruction::FCmpL => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::FCmp(MilFCmpMode::L), MilType::Float, MilType::Float, MilType::Int);
+            },
+            BytecodeInstruction::DCmpG => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DCmp(MilFCmpMode::G), MilType::Double, MilType::Double, MilType::Int);
+            },
+            BytecodeInstruction::DCmpL => {
+                generate_bin_op(builder, &mut stack, bc, MilBinOp::DCmp(MilFCmpMode::L), MilType::Double, MilType::Double, MilType::Int);
             },
             BytecodeInstruction::TableSwitch(_, _, _) | BytecodeInstruction::LookupSwitch(_, _) => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
