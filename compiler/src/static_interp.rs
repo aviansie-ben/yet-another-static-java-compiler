@@ -324,6 +324,10 @@ fn do_pre_clinit(env: &ClassEnvironment, heap: &JavaStaticHeap, class_id: ClassI
         }
     };
 
+    if class.meta.super_id != ClassId::UNRESOLVED {
+        try_run_clinit_without_checkpoint(env, heap, class.meta.super_id, verbose)?;
+    };
+
     let class_obj = heap.get_class_object(class_id);
 
     for (i, field) in class.fields.iter().enumerate() {

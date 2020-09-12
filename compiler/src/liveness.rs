@@ -41,6 +41,10 @@ fn ensure_clinit_unchecked(env: &ClassEnvironment, liveness: &mut LivenessInfo, 
     };
     indent.0 += 1;
 
+    if class.meta.super_id != ClassId::UNRESOLVED {
+        ensure_clinit(env, liveness, class.meta.super_id, indent, verbose);
+    };
+
     if let Some(clinit_method) = class.meta.clinit_method {
         analyze_method(env, liveness, MethodId(class_id, clinit_method), false, indent, verbose);
     };
