@@ -1303,6 +1303,10 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
             BytecodeInstruction::Pop => {
                 state.stack.pop_slot();
             },
+            BytecodeInstruction::Pop2 => {
+                state.stack.pop_slot();
+                state.stack.pop_slot();
+            },
             BytecodeInstruction::ALoad(idx) | BytecodeInstruction::DLoad(idx) | BytecodeInstruction::FLoad(idx) |
             BytecodeInstruction::ILoad(idx) | BytecodeInstruction::LLoad(idx) => {
                 let val = state.get_local(idx as usize).clone();
@@ -1499,15 +1503,50 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1.wrapping_add(o2)));
             },
+            BytecodeInstruction::LSub => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1.wrapping_sub(o2)));
+            },
             BytecodeInstruction::LMul => {
                 let o2 = state.stack.pop().as_long().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1.wrapping_mul(o2)));
             },
+            BytecodeInstruction::LDiv => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+
+                if o2 == 0 {
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
+                };
+
+                state.stack.push(Value::Long(o1.wrapping_div(o2)));
+            },
+            BytecodeInstruction::LRem => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+
+                if o2 == 0 {
+                    return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
+                };
+
+                state.stack.push(Value::Long(o1.wrapping_rem(o2)));
+            },
             BytecodeInstruction::LAnd => {
                 let o2 = state.stack.pop().as_long().unwrap();
                 let o1 = state.stack.pop().as_long().unwrap();
                 state.stack.push(Value::Long(o1 & o2));
+            },
+            BytecodeInstruction::LOr => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1 | o2));
+            },
+            BytecodeInstruction::LXor => {
+                let o2 = state.stack.pop().as_long().unwrap();
+                let o1 = state.stack.pop().as_long().unwrap();
+                state.stack.push(Value::Long(o1 ^ o2));
             },
             BytecodeInstruction::LShr => {
                 let o2 = state.stack.pop().as_int().unwrap();
@@ -1552,6 +1591,16 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
                 let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
                 state.stack.push(Value::Float((o1 * o2).to_bits()));
+            },
+            BytecodeInstruction::FDiv => {
+                let o2 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                let o1 = f32::from_bits(state.stack.pop().as_float().unwrap());
+                state.stack.push(Value::Float((o1 / o2).to_bits()));
+            },
+            BytecodeInstruction::DAdd => {
+                let o2 = f64::from_bits(state.stack.pop().as_double().unwrap());
+                let o1 = f64::from_bits(state.stack.pop().as_double().unwrap());
+                state.stack.push(Value::Double((o1 + o2).to_bits()));
             },
             BytecodeInstruction::MonitorEnter => {
                 state.stack.pop();
