@@ -194,6 +194,7 @@ fn main() {
     };
     if heap.init_constant_strings(constant_strings.iter().map(|r| r.as_ref())).is_err() {
         eprintln!("Failed to create constant strings in static heap");
+        return;
     };
 
     println!("Constructed initial static heap in {:.3}s", start_heap.elapsed().as_secs_f32());
