@@ -1397,13 +1397,83 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::DCmpL => {
                 generate_bin_op(builder, &mut stack, bc, MilBinOp::DCmp(MilFCmpMode::L), MilType::Double, MilType::Double, MilType::Int);
             },
-            BytecodeInstruction::TableSwitch(_, _, _) | BytecodeInstruction::LookupSwitch(_, _) => {
-                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
-                stack.pop(builder, MilType::Int);
-                end_block = Some(builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
+            BytecodeInstruction::LookupSwitch(default_bc, ref table) => {
+                let value = stack.pop(builder, MilType::Int);
+
+                for &(target_value, target_bc) in table.iter() {
+                    let block = builder.append_end_instruction(
+                        MilEndInstructionKind::JumpIfICmp(
+                            MilIntComparison::Eq,
+                            MilBlockId::ENTRY,
+                            MilOperand::Register(value),
+                            MilOperand::Int(target_value)
+                        ),
+                        bc
+                    );
+
+                    fixups.push(Box::new(move |builder, blocks| {
+                        match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                            MilEndInstructionKind::JumpIfICmp(_, ref mut block, _, _) => {
+                                *block = blocks[&target_bc].blocks[0];
+                            },
+                            _ => unreachable!()
+                        };
+                    }));
+                };
+
+                let fallthrough_block = builder.append_end_instruction(
+                    MilEndInstructionKind::Jump(MilBlockId::ENTRY),
                     bc
-                ));
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&fallthrough_block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::Jump(ref mut block) => {
+                            *block = blocks[&default_bc].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(fallthrough_block);
+            },
+            BytecodeInstruction::TableSwitch(low_value, default_bc, ref table) => {
+                let value = stack.pop(builder, MilType::Int);
+
+                for (i, &target_bc) in table.iter().enumerate() {
+                    let block = builder.append_end_instruction(
+                        MilEndInstructionKind::JumpIfICmp(
+                            MilIntComparison::Eq,
+                            MilBlockId::ENTRY,
+                            MilOperand::Register(value),
+                            MilOperand::Int(low_value + (i as i32))
+                        ),
+                        bc
+                    );
+
+                    fixups.push(Box::new(move |builder, blocks| {
+                        match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
+                            MilEndInstructionKind::JumpIfICmp(_, ref mut block, _, _) => {
+                                *block = blocks[&target_bc].blocks[0];
+                            },
+                            _ => unreachable!()
+                        };
+                    }));
+                };
+
+                let fallthrough_block = builder.append_end_instruction(
+                    MilEndInstructionKind::Jump(MilBlockId::ENTRY),
+                    bc
+                );
+
+                fixups.push(Box::new(move |builder, blocks| {
+                    match builder.func.blocks.get_mut(&fallthrough_block).unwrap().end_instr.kind {
+                        MilEndInstructionKind::Jump(ref mut block) => {
+                            *block = blocks[&default_bc].blocks[0];
+                        },
+                        _ => unreachable!()
+                    };
+                }));
+                end_block = Some(fallthrough_block);
             },
             instr => {
                 panic!("Unsupported bytecode {:?} in ilgen of method {}", instr, MethodName(builder.func.id, env));
