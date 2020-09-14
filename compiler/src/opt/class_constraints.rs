@@ -307,7 +307,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             };
 
             if let Some(constraint) = constraint {
-                if block_constraints.intersect(phi.target, constraint, env) {
+                if block_constraints.set(phi.target, constraint) {
                     eprintln!("    {} <- {}", phi.target, block_constraints.find(phi.target).unwrap().pretty(env));
                     changed = true;
                 };
