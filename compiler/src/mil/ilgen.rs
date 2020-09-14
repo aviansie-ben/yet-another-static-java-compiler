@@ -1076,6 +1076,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::InvokeStatic(idx) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
+                    ConstantPoolEntry::InterfaceMethodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
 
@@ -1098,6 +1099,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::InvokeSpecial(idx) => {
                 let cpe = match cp[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) => cpe,
+                    ConstantPoolEntry::InterfaceMethodref(ref cpe) => cpe,
                     _ => unreachable!()
                 };
 
