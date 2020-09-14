@@ -15,8 +15,8 @@ pub unsafe extern fn java_lang_System_arraycopy(_: *mut MochaClass, src: *mut Mo
     let dst_vtable = dst.obj.vtable();
 
     assert_eq!(src_vtable.array_element_size(), dst_vtable.array_element_size());
-    assert!(src_pos < (src.len as usize) && len <= ((src.len as usize) - src_pos));
-    assert!(dst_pos < (dst.len as usize) && len <= ((dst.len as usize) - dst_pos));
+    assert!(src_pos <= (src.len as usize) && len <= ((src.len as usize) - src_pos));
+    assert!(dst_pos <= (dst.len as usize) && len <= ((dst.len as usize) - dst_pos));
 
     let src = src.arr_data.as_mut_ptr();
     let dst = dst.arr_data.as_mut_ptr();
