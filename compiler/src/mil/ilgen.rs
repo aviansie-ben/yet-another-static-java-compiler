@@ -1475,6 +1475,31 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 }));
                 end_block = Some(fallthrough_block);
             },
+            BytecodeInstruction::InvokeDynamic(idx) => {
+                eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);
+                let cpe = match cp[idx as usize] {
+                    ConstantPoolEntry::InvokeDynamic(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                pop_args(&mut stack, builder, &cpe.descriptor.param_types, false);
+
+                if let Some(ref return_type) = cpe.descriptor.return_type {
+                    let ty = match return_type.flat {
+                        _ if return_type.array_dims > 0 => MilType::Ref,
+                        FlatTypeDescriptor::Reference(_) => MilType::Ref,
+                        FlatTypeDescriptor::Primitive(ty) => MilType::for_class(ClassId::for_primitive_type(ty))
+                    };
+                    let reg = builder.allocate_reg(ty);
+
+                    stack.push(builder, reg, ty);
+                };
+
+                builder.append_end_instruction(
+                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    bc
+                );
+            },
             instr => {
                 panic!("Unsupported bytecode {:?} in ilgen of method {}", instr, MethodName(builder.func.id, env));
             }

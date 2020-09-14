@@ -290,9 +290,9 @@ pub struct ConstantMethodType {
 
 #[derive(Debug, Clone)]
 pub struct ConstantInvokeDynamic {
-    bootstrap_method_id: u16,
-    name: Arc<str>,
-    descriptor: MethodDescriptor
+    pub bootstrap_method_id: u16,
+    pub name: Arc<str>,
+    pub descriptor: MethodDescriptor
 }
 
 #[derive(Debug, Clone)]
