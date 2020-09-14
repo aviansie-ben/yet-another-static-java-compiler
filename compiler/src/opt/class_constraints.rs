@@ -3,6 +3,8 @@ use std::iter::FromIterator;
 
 use itertools::Itertools;
 
+use crate::log_writeln;
+use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::resolve::{ClassEnvironment, ClassId};
@@ -187,14 +189,14 @@ fn class_constraint_for_end_instr(instr: &MilEndInstructionKind) -> Option<MilCl
     }
 }
 
-pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment) -> usize {
-    eprintln!("\n===== CLASS CONSTRAINT ANALYSIS =====\n");
+pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
+    log_writeln!(log, "\n===== CLASS CONSTRAINT ANALYSIS =====\n");
 
     let mut num_changes = 0;
     let mut constraints = ClassConstraints::new();
     let mut edge_constraints = HashMap::new();
 
-    eprintln!("Collecting initial constraints...");
+    log_writeln!(log, "Collecting initial constraints...");
     for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = &func.blocks[&block_id];
 
@@ -203,7 +205,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                 let tgt = instr.target().cloned().unwrap();
 
                 if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
-                    eprintln!("  {} <- {}", tgt, constraint.pretty(env));
+                    log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
                     constraints.set(tgt, constraint);
                 };
             };
@@ -213,22 +215,22 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             let tgt = block.end_instr.target().cloned().unwrap();
 
             if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
-                eprintln!("  {} <- {}", tgt, constraint.pretty(env));
+                log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
                 constraints.set(tgt, constraint);
             };
         };
 
         match block.end_instr.kind {
             MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
-                eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
-                eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
+                log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
+                log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
 
                 edge_constraints.entry((block_id, target_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::null());
                 edge_constraints.entry((block_id, next_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::non_null());
             },
             MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
-                eprintln!("  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
-                eprintln!("  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
+                log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
+                log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
 
                 edge_constraints.entry((block_id, target_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::non_null());
                 edge_constraints.entry((block_id, next_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::null());
@@ -237,13 +239,13 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
     };
 
-    eprintln!("Updating edge constraints...");
+    log_writeln!(log, "Updating edge constraints...");
     for (&(from, to), edge_constraints) in edge_constraints.iter_mut() {
         let block_constraints = constraints.at_block(from);
         for (&reg, edge_constraint) in edge_constraints.iter_mut() {
             if let Some(constraint) = block_constraints.find(reg) {
                 *edge_constraint = MilClassConstraint::intersection(*edge_constraint, constraint, env);
-                eprintln!("  [{} -> {}] {} <- {}", from, to, reg, edge_constraint.pretty(env));
+                log_writeln!(log, "  [{} -> {}] {} <- {}", from, to, reg, edge_constraint.pretty(env));
             };
         };
 
@@ -254,9 +256,9 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
     let mut worklist = VecDeque::from_iter(func.block_order.iter().copied());
 
-    eprintln!("Performing constraint dataflow analysis...");
+    log_writeln!(log, "Performing constraint dataflow analysis...");
     while let Some(block_id) = worklist.pop_front() {
-        eprintln!("  {}:", block_id);
+        log_writeln!(log, "  {}:", block_id);
 
         let cfg_node = cfg.get(block_id);
         let block = &func.blocks[&block_id];
@@ -279,7 +281,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         // Next, intersect the unioned incoming edge constraints with the current block's constraints.
         for (reg, constraint) in incoming_constraints.into_iter() {
             if block_constraints.intersect(reg, constraint, env) {
-                eprintln!("    {} <- {}", reg, block_constraints.find(reg).unwrap().pretty(env));
+                log_writeln!(log, "    {} <- {}", reg, block_constraints.find(reg).unwrap().pretty(env));
                 changed = true;
             };
         };
@@ -308,14 +310,14 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
             if let Some(constraint) = constraint {
                 if block_constraints.set(phi.target, constraint) {
-                    eprintln!("    {} <- {}", phi.target, block_constraints.find(phi.target).unwrap().pretty(env));
+                    log_writeln!(log, "    {} <- {}", phi.target, block_constraints.find(phi.target).unwrap().pretty(env));
                     changed = true;
                 };
             };
         };
 
         if changed {
-            eprintln!("    Constraint changed detected. Updating edge constraints...");
+            log_writeln!(log, "    Constraint changed detected. Updating edge constraints...");
 
             for &succ in cfg_node.outgoing.iter() {
                 if succ != MilBlockId::EXIT {
@@ -323,7 +325,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                         for (&reg, constraint) in this_edge_constraints.iter_mut() {
                             if let Some(block_constraint) = block_constraints.find(reg) {
                                 *constraint = MilClassConstraint::intersection(*constraint, block_constraint, env);
-                                eprintln!("      [{} -> {}] {} <- {}", block_id, succ, reg, constraint.pretty(env));
+                                log_writeln!(log, "      [{} -> {}] {} <- {}", block_id, succ, reg, constraint.pretty(env));
                             };
                         };
 
@@ -340,7 +342,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
     };
 
-    eprintln!("Performing optimizations...");
+    log_writeln!(log, "Performing optimizations...");
     for block_id in func.block_order.iter().cloned() {
         let block = func.blocks.get_mut(&block_id).unwrap();
         let block_constraints = constraints.at_block(block_id);
@@ -348,7 +350,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         for instr in block.instrs.iter_mut() {
             instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
                 if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
-                    eprintln!("  Replacing {} in {} with ref:null", op.pretty(env), block_id);
+                    log_writeln!(log, "  Replacing {} in {} with ref:null", op.pretty(env), block_id);
                     *op = MilOperand::Null;
                 };
             });
@@ -356,7 +358,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
         block.end_instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
             if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
-                eprintln!("  Replacing {} in {} with ref:null", op.pretty(env), block_id);
+                log_writeln!(log, "  Replacing {} in {} with ref:null", op.pretty(env), block_id);
                 *op = MilOperand::Null;
             };
         });
@@ -366,7 +368,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Null, ref val) => {
                 if let Some(constraint) = block_constraints.find_operand(val) {
                     if !constraint.nullable() {
-                        eprintln!("  Folding conditional at end of {} since {} is never null", block_id, val.pretty(env));
+                        log_writeln!(log, "  Folding conditional at end of {} since {} is never null", block_id, val.pretty(env));
                         block.end_instr.kind = MilEndInstructionKind::JumpIfRCmp(cmp.reverse(), target_block, MilOperand::Null, MilOperand::Null);
                         num_changes += 1;
                     };
@@ -379,7 +381,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
                         for class_id in env.get_class_chain(constraint.class_id()) {
                             if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
-                                eprintln!("  Replacing interface call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
+                                log_writeln!(log, "  Replacing interface call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
                                 block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
                                 break;
                             };
@@ -394,7 +396,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
                         for class_id in env.get_class_chain(constraint.class_id()) {
                             if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
-                                eprintln!("  Replacing virtual call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
+                                log_writeln!(log, "  Replacing virtual call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
                                 block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
                                 break;
                             };
@@ -409,7 +411,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref recv, ref args) => {
                 if let Some(constraint) = block_constraints.find_operand(recv) {
                     if constraint.is_exact() {
-                        eprintln!("  Devirtualizing call to {} in {} since receiver type is known to be exact", MethodName(method_id, env), block_id);
+                        log_writeln!(log, "  Devirtualizing call to {} in {} since receiver type is known to be exact", MethodName(method_id, env), block_id);
                         block.end_instr.kind = MilEndInstructionKind::Call(return_class_id, method_id, tgt, args.clone());
                     };
                 };
@@ -419,7 +421,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
     };
 
     if num_changes != 0 {
-        eprintln!("\n===== AFTER CLASS CONSTRAINT ANALYSIS =====\n\n{}", func.pretty(env));
+        log_writeln!(log, "\n===== AFTER CLASS CONSTRAINT ANALYSIS =====\n\n{}", func.pretty(env));
     };
 
     num_changes

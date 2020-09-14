@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use smallvec::SmallVec;
 
+use crate::{log_write, log_writeln};
 use crate::classfile::FieldFlags;
+use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::mil::transform;
@@ -216,8 +218,8 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
     })
 }
 
-pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known_objects: &MilKnownObjectMap) -> usize {
-    eprintln!("\n===== CONSTANT/COPY FOLDING =====\n");
+pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known_objects: &MilKnownObjectMap, log: &Log) -> usize {
+    log_writeln!(log, "\n===== CONSTANT/COPY FOLDING =====\n");
 
     let mut num_folded = 0;
     let mut constants = HashMap::new();
@@ -234,7 +236,7 @@ pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known
                         val
                     };
 
-                    eprintln!("Replacing {} with {}", instr.target().unwrap(), val.pretty(env));
+                    log_writeln!(log, "Replacing {} with {}", instr.target().unwrap(), val.pretty(env));
                     constants.insert(*instr.target().unwrap(), val);
                     true
                 } else {
@@ -255,14 +257,14 @@ pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known
     };
 
     if num_folded != 0 {
-        eprintln!("\n===== AFTER CONSTANT/COPY FOLDING =====\n\n{}", func.pretty(env));
+        log_writeln!(log, "\n===== AFTER CONSTANT/COPY FOLDING =====\n\n{}", func.pretty(env));
     };
 
     num_folded
 }
 
-pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment) {
-    eprintln!("\n===== LOCAL TO PHI TRANSFORMATION =====\n");
+pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) {
+    log_writeln!(log, "\n===== LOCAL TO PHI TRANSFORMATION =====\n");
 
     let locals_len = func.reg_map.local_info.iter().map(|(id, _)| id.0).max().map_or(0, |i| i + 1);
     let local_types = (0..locals_len).map(|i| func.reg_map.local_info.get(&MilLocalId(i)).map_or(MilType::Void, |info| info.ty)).collect_vec();
@@ -271,7 +273,7 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
 
     for block_id in func.block_order.iter().copied() {
         let block = func.blocks.get_mut(&block_id).unwrap();
-        eprintln!("{}:", block_id);
+        log_writeln!(log, "{}:", block_id);
 
         let reg_alloc = &mut func.reg_alloc;
         let reg_map = &mut func.reg_map;
@@ -296,33 +298,33 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
             (0..locals_len).map(|_| (!0, MilOperand::Register(MilRegister::VOID))).collect_vec()
         };
 
-        eprint!("  Created local phis: [");
+        log_write!(log, "  Created local phis: [");
         for (_, val) in locals.iter() {
-            eprint!(" {}", val.pretty(env));
+            log_write!(log, " {}", val.pretty(env));
         };
-        eprintln!(" ]");
+        log_writeln!(log, " ]");
 
         for instr in block.instrs.iter_mut() {
             match instr.kind {
                 MilInstructionKind::GetLocal(local_id, tgt) => {
                     let val = locals[local_id.0 as usize].1.clone();
 
-                    eprintln!("  Replacing get_local <{}> {} with {}", local_id, tgt, val.pretty(env));
+                    log_writeln!(log, "  Replacing get_local <{}> {} with {}", local_id, tgt, val.pretty(env));
                     instr.kind = MilInstructionKind::Copy(tgt, val);
                 },
                 MilInstructionKind::SetLocal(local_id, ref val) => {
-                    eprintln!("  Found set_local <{}> {}", local_id, val.pretty(env));
+                    log_writeln!(log, "  Found set_local <{}> {}", local_id, val.pretty(env));
                     locals[local_id.0 as usize].1 = val.clone();
                 },
                 _ => {}
             };
         };
 
-        eprint!("  Final local values: [");
+        log_write!(log, "  Final local values: [");
         for (_, val) in locals.iter() {
-            eprint!(" {}", val.pretty(env));
+            log_write!(log, " {}", val.pretty(env));
         };
-        eprintln!(" ]");
+        log_writeln!(log, " ]");
 
         local_phis.insert(block_id, locals.iter().map(|&(i, _)| i).collect_vec());
         locals_out.insert(block_id, locals.into_iter().map(|(_, val)| val).collect_vec());
@@ -347,5 +349,5 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
         };
     };
 
-    eprintln!("\n===== AFTER LOCAL TO PHI TRANSFORMATION =====\n\n{}", func.pretty(env));
+    log_writeln!(log, "\n===== AFTER LOCAL TO PHI TRANSFORMATION =====\n\n{}", func.pretty(env));
 }
