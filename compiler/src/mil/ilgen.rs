@@ -672,8 +672,36 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::Dup2 => {
                 stack.push_slot(stack.read(1));
                 stack.push_slot(stack.read(1));
-            }
+            },
+            BytecodeInstruction::Dup2X1 => {
+                let val1 = stack.pop_slot();
+                let val2 = stack.pop_slot();
+                let val3 = stack.pop_slot();
+
+                stack.push_slot(val2);
+                stack.push_slot(val1);
+                stack.push_slot(val3);
+                stack.push_slot(val2);
+                stack.push_slot(val1);
+            },
+            BytecodeInstruction::Dup2X2 => {
+                let val1 = stack.pop_slot();
+                let val2 = stack.pop_slot();
+                let val3 = stack.pop_slot();
+                let val4 = stack.pop_slot();
+
+                stack.push_slot(val2);
+                stack.push_slot(val1);
+                stack.push_slot(val4);
+                stack.push_slot(val3);
+                stack.push_slot(val2);
+                stack.push_slot(val1);
+            },
             BytecodeInstruction::Pop => {
+                stack.pop_slot();
+            },
+            BytecodeInstruction::Pop2 => {
+                stack.pop_slot();
                 stack.pop_slot();
             },
             BytecodeInstruction::ALoad(idx) => {
