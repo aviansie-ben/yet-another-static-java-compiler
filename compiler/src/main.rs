@@ -224,15 +224,6 @@ fn main() {
     liveness::analyze_post_clinit(&env, main_method, &mut liveness, needs_runtime_clinit, args.is_present("verbose"));
     println!("Found {} executable methods in {:.3}s", liveness.may_call.len(), start_liveness_methods.elapsed().as_secs_f32());
 
-    for m in liveness.may_call.iter().cloned() {
-        let (class, method) = env.get_method(m);
-        if method.flags.contains(classfile::MethodFlags::NATIVE) {
-            println!("NATIVE {}.{}{}", class.meta.name, method.name, method.descriptor);
-        } else {
-            println!("JAVA   {}.{}{}", class.meta.name, method.name, method.descriptor);
-        };
-    };
-
     let mut known_objects = mil::il::MilKnownObjectMap::new();
     for obj in heap.all_objs() {
         known_objects.add(obj);
