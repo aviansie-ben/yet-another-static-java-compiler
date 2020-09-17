@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::ptr::NonNull;
@@ -95,8 +95,41 @@ impl <'a> Drop for LLVMModule<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LLVMValue<'a>(PhantomData<&'a LLVMContext>, LLVMValueRef);
+
+impl <'a> LLVMValue<'a> {
+    pub unsafe fn from_raw(ptr: LLVMValueRef) -> LLVMValue<'a> {
+        LLVMValue(PhantomData, ptr)
+    }
+
+    pub fn ptr(&self) -> LLVMValueRef {
+        self.1
+    }
+
+    pub fn add_incoming(&self, incoming: &[(LLVMBasicBlockRef, LLVMValue<'a>)]) {
+        let mut incoming_blocks = Vec::with_capacity(incoming.len());
+        let mut incoming_values = Vec::with_capacity(incoming.len());
+
+        for (block, val) in incoming.iter() {
+            incoming_blocks.push(*block);
+            incoming_values.push(val.ptr());
+        };
+
+        unsafe {
+            LLVMAddIncoming(self.ptr(), incoming_values.as_mut_ptr(), incoming_blocks.as_mut_ptr(), incoming.len() as u32);
+        };
+    }
+}
+
 #[derive(Debug)]
 pub struct LLVMBuilder<'a>(PhantomData<&'a LLVMContext>, LLVMBuilderRef);
+
+const EMPTY_VALUE_NAME: *const c_char = b"\0".as_ptr() as *const c_char;
+
+fn cstr_or_empty(cstr: &Option<CString>) -> *const c_char {
+    cstr.as_ref().map(|s| s.as_ptr()).unwrap_or(EMPTY_VALUE_NAME)
+}
 
 impl <'a> LLVMBuilder<'a> {
     pub unsafe fn from_raw(ptr: LLVMBuilderRef) -> LLVMBuilder<'a> {
@@ -105,6 +138,276 @@ impl <'a> LLVMBuilder<'a> {
 
     pub fn ptr(&self) -> LLVMBuilderRef {
         self.1
+    }
+
+    unsafe fn wrap_value(&self, val: LLVMValueRef) -> LLVMValue<'a> {
+        LLVMValue::from_raw(val)
+    }
+
+    pub fn build_struct_gep(&self, val: LLVMValue<'a>, idx: u32, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildStructGEP(self.ptr(), val.ptr(), idx, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_gep(&self, val: LLVMValue<'a>, idxs: &[LLVMValue<'a>], name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            let mut idxs = idxs.iter().map(|idx| idx.ptr()).collect_vec();
+            self.wrap_value(LLVMBuildGEP(self.ptr(), val.ptr(), idxs.as_mut_ptr(), idxs.len() as u32, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_pointer_cast(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildPointerCast(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_int_to_ptr(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildIntToPtr(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_load(&self, addr: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildLoad(self.ptr(), addr.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_store(&self, val: LLVMValue<'a>, addr: LLVMValue<'a>) {
+        unsafe {
+            self.wrap_value(LLVMBuildStore(self.ptr(), val.ptr(), addr.ptr()));
+        }
+    }
+
+    pub fn build_bit_cast(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildBitCast(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_int_cast(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildIntCast(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_int_cast_2(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, signed: bool, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildIntCast2(self.ptr(), val.ptr(), ty, signed as i32, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_sext(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSExt(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_trunc(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildTrunc(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_si_to_fp(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSIToFP(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fp_to_si(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFPToSI(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fpext(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFPExt(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fptrunc(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFPTrunc(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_phi(&self, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildPhi(self.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_neg(&self, val: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildNeg(self.ptr(), val.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fneg(&self, val: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFNeg(self.ptr(), val.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fcmp(&self, pred: LLVMRealPredicate, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFCmp(self.ptr(), pred, lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_select(&self, cond: LLVMValue<'a>, true_val: LLVMValue<'a>, false_val: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSelect(self.ptr(), cond.ptr(), true_val.ptr(), false_val.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_add(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildAdd(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_sub(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSub(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_nuw_sub(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildNUWSub(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_mul(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildMul(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_sdiv(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSDiv(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_srem(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildSRem(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_and(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildAnd(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_or(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildOr(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_xor(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildXor(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_ashr(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildAShr(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_lshr(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildLShr(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_shl(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildShl(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_icmp(&self, pred: LLVMIntPredicate, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildICmp(self.ptr(), pred, lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fadd(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFAdd(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fsub(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFSub(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fmul(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFMul(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_fdiv(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFDiv(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_call(&self, func: LLVMValue<'a>, args: &[LLVMValue<'a>], name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            let mut args = args.iter().map(|arg| arg.ptr()).collect_vec();
+            self.wrap_value(LLVMBuildCall(self.ptr(), func.ptr(), args.as_mut_ptr(), args.len() as u32, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_br(&self, block: LLVMBasicBlockRef) {
+        unsafe {
+            self.wrap_value(LLVMBuildBr(self.ptr(), block));
+        }
+    }
+
+    pub fn build_cond_br(&self, cond: LLVMValue<'a>, true_block: LLVMBasicBlockRef, false_block: LLVMBasicBlockRef) {
+        unsafe {
+            self.wrap_value(LLVMBuildCondBr(self.ptr(), cond.ptr(), true_block, false_block));
+        }
+    }
+
+    pub fn build_unreachable(&self) {
+        unsafe {
+            self.wrap_value(LLVMBuildUnreachable(self.ptr()));
+        }
+    }
+
+    pub fn build_ret_void(&self) {
+        unsafe {
+            self.wrap_value(LLVMBuildRetVoid(self.ptr()));
+        }
+    }
+
+    pub fn build_ret(&self, val: LLVMValue<'a>) {
+        unsafe {
+            self.wrap_value(LLVMBuildRet(self.ptr(), val.ptr()));
+        }
+    }
+
+    pub fn build_alloca(&self, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildAlloca(self.ptr(), ty, cstr_or_empty(&name)))
+        }
     }
 }
 
@@ -171,50 +474,50 @@ struct MochaModule<'a, 'b, 'c> {
     builtins: LLVMMochaBuiltins,
     objs: Vec<JavaStaticRef<'c>>,
     known_objs: &'a MilKnownObjectMap<'c>,
-    obj_map: HashMap<NonNull<u8>, LLVMValueRef>,
-    methods: HashMap<MethodId, LLVMValueRef>,
-    builtin_class_table: LLVMValueRef
+    obj_map: HashMap<NonNull<u8>, LLVMValue<'a>>,
+    methods: HashMap<MethodId, LLVMValue<'a>>,
+    builtin_class_table: LLVMValue<'a>
 }
 
 impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
-    fn find_known_object(&self, id: MilKnownObjectId) -> LLVMValueRef {
+    fn find_known_object(&self, id: MilKnownObjectId) -> LLVMValue<'a> {
         self.obj_map[&self.known_objs.get(id).as_ptr()]
     }
 
-    fn find_class_object(&self, class_id: ClassId) -> LLVMValueRef {
+    fn find_class_object(&self, class_id: ClassId) -> LLVMValue<'a> {
         self.find_known_object(self.known_objs.refs.classes[&class_id])
     }
 
-    fn const_obj_null(&self) -> LLVMValueRef {
-        unsafe { LLVMConstNull(self.types.any_object_pointer) }
+    fn const_obj_null(&self) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstNull(self.types.any_object_pointer)) }
     }
 
-    fn const_bool(&self, val: bool) -> LLVMValueRef {
-        unsafe { LLVMConstInt(self.types.bool, if val { 1 } else { 0 }, 0) }
+    fn const_bool(&self, val: bool) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstInt(self.types.bool, if val { 1 } else { 0 }, 0)) }
     }
 
-    fn const_byte(&self, val: i8) -> LLVMValueRef {
-        unsafe { LLVMConstInt(self.types.byte, (val as u8).into(), 0) }
+    fn const_byte(&self, val: i8) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstInt(self.types.byte, (val as u8).into(), 0)) }
     }
 
-    fn const_short(&self, val: i16) -> LLVMValueRef {
-        unsafe { LLVMConstInt(self.types.short, (val as u16).into(), 0) }
+    fn const_short(&self, val: i16) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstInt(self.types.short, (val as u16).into(), 0)) }
     }
 
-    fn const_int(&self, val: i32) -> LLVMValueRef {
-        unsafe { LLVMConstInt(self.types.int, (val as u32).into(), 0) }
+    fn const_int(&self, val: i32) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstInt(self.types.int, (val as u32).into(), 0)) }
     }
 
-    fn const_long(&self, val: i64) -> LLVMValueRef {
-        unsafe { LLVMConstInt(self.types.long, (val as u64).into(), 0) }
+    fn const_long(&self, val: i64) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstInt(self.types.long, (val as u64).into(), 0)) }
     }
 
-    fn const_float(&self, bits: u32) -> LLVMValueRef {
-        unsafe { LLVMConstBitCast(LLVMConstInt(self.types.int, bits.into(), 0), self.types.float) }
+    fn const_float(&self, bits: u32) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstBitCast(LLVMConstInt(self.types.int, bits.into(), 0), self.types.float)) }
     }
 
-    fn const_double(&self, bits: u64) -> LLVMValueRef {
-        unsafe { LLVMConstBitCast(LLVMConstInt(self.types.long, bits.into(), 0), self.types.double) }
+    fn const_double(&self, bits: u64) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstBitCast(LLVMConstInt(self.types.long, bits.into(), 0), self.types.double)) }
     }
 }
 
@@ -547,14 +850,16 @@ unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValue
     LLVMAddFunction(module.module.ptr(), name.as_ptr(), module.types.method_types[&func.id])
 }
 
-unsafe fn create_value_ref(module: &MochaModule, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValueRef>) -> LLVMValueRef {
+fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValue<'a>>) -> LLVMValue<'a> {
     match *op {
         MilOperand::Register(r) => regs[&r],
         MilOperand::Null => module.const_obj_null(),
-        MilOperand::KnownObject(object_id, _) => LLVMConstPointerCast(
-            module.find_known_object(object_id),
-            module.types.any_object_pointer
-        ),
+        MilOperand::KnownObject(object_id, _) => unsafe {
+            LLVMValue::from_raw(LLVMConstPointerCast(
+                module.find_known_object(object_id).ptr(),
+                module.types.any_object_pointer
+            ))
+        },
         MilOperand::Bool(val) => module.const_bool(val),
         MilOperand::Int(val) => module.const_int(val),
         MilOperand::Long(val) => module.const_long(val),
@@ -587,80 +892,44 @@ fn local_name(local_id: MilLocalId) -> CString {
     CString::new(format!("local_{}", local_id.0)).unwrap()
 }
 
-unsafe fn create_meta_field_gep(builder: &LLVMBuilder, field_id: FieldId, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
+fn create_meta_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValue<'a>>, types: &LLVMTypes) -> LLVMValue<'a> {
     let class_ty = &types.class_types[&field_id.0];
     let class_obj = obj_map[&known_objects.get(known_objects.refs.classes[&field_id.0]).as_ptr()];
 
-    LLVMBuildStructGEP(
-        builder.ptr(),
-        class_obj,
-        class_ty.meta_fields[&field_id] as u32,
-        b"\0".as_ptr() as *const c_char
-    )
+    builder.build_struct_gep(class_obj, class_ty.meta_fields[&field_id] as u32, None)
 }
 
-unsafe fn create_instance_field_gep(builder: &LLVMBuilder, field_id: FieldId, obj: LLVMValueRef, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValueRef>, types: &LLVMTypes) -> LLVMValueRef {
+fn create_instance_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, obj: LLVMValue<'a>, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValue<'a>>, types: &LLVMTypes) -> LLVMValue<'a> {
     let class_ty = &types.class_types[&field_id.0];
 
-    LLVMBuildStructGEP(
-        builder.ptr(),
-        LLVMBuildPointerCast(
-            builder.ptr(),
-            obj,
-            types.class_types[&field_id.0].field_ty,
-            b"\0".as_ptr() as *const c_char
-        ),
+    builder.build_struct_gep(
+        builder.build_pointer_cast(obj, types.class_types[&field_id.0].field_ty, None),
         class_ty.fields[&field_id] as u32,
-        b"\0".as_ptr() as *const c_char
+        None
     )
 }
 
-unsafe fn create_vtable_decompress(builder: &LLVMBuilder, compressed: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
-    LLVMBuildIntToPtr(
-        builder.ptr(),
-        LLVMBuildNUWSub(
-            builder.ptr(),
-            compressed,
-            LLVMConstInt(types.int, 8, 0),
-            b"\0".as_ptr() as *const c_char
-        ),
-        LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0),
-        b"\0".as_ptr() as *const c_char
+fn create_vtable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue<'a>, class_id: ClassId, types: &LLVMTypes) -> LLVMValue<'a> {
+    builder.build_int_to_ptr(
+        builder.build_nuw_sub(compressed, unsafe { LLVMValue::from_raw(LLVMConstInt(types.int, 8, 0)) }, None),
+        unsafe { LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0) },
+        None
     )
 }
 
-unsafe fn create_itable_decompress(builder: &LLVMBuilder, compressed: LLVMValueRef, types: &LLVMTypes) -> LLVMValueRef {
-    LLVMBuildIntToPtr(
-        builder.ptr(),
-        LLVMBuildNUWSub(
-            builder.ptr(),
-            compressed,
-            LLVMConstInt(types.int, 8, 0),
-            b"\0".as_ptr() as *const c_char
-        ),
-        LLVMPointerType(LLVMArrayType(types.any_function_pointer, 0), 0),
-        b"\0".as_ptr() as *const c_char
+fn create_itable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
+    builder.build_int_to_ptr(
+        builder.build_nuw_sub(compressed, unsafe { LLVMValue::from_raw(LLVMConstInt(types.int, 8, 0)) }, None),
+        unsafe { LLVMPointerType(LLVMArrayType(types.any_function_pointer, 0), 0) },
+        None
     )
 }
 
-unsafe fn create_vtable_load(builder: &LLVMBuilder, obj: LLVMValueRef, class_id: ClassId, types: &LLVMTypes) -> LLVMValueRef {
-    let obj = LLVMBuildPointerCast(
-        builder.ptr(),
-        obj,
-        types.class_types[&ClassId::JAVA_LANG_OBJECT].field_ty,
-        "\0".as_ptr() as *const c_char
-    );
+fn create_vtable_load<'a>(builder: &LLVMBuilder<'a>, obj: LLVMValue<'a>, class_id: ClassId, types: &LLVMTypes) -> LLVMValue<'a> {
+    let obj = builder.build_pointer_cast(obj, types.class_types[&ClassId::JAVA_LANG_OBJECT].field_ty, None);
+    let vtable = builder.build_load(builder.build_struct_gep(obj, 0, None), None);
 
-    create_vtable_decompress(
-        builder,
-        LLVMBuildLoad(
-            builder.ptr(),
-            LLVMBuildStructGEP(builder.ptr(), obj, 0, b"\0".as_ptr() as *const c_char),
-            "\0".as_ptr() as *const c_char
-        ),
-        class_id,
-        types
-    )
+    create_vtable_decompress(builder, vtable, class_id, types)
 }
 
 fn find_used_before_def(block: &MilBlock) -> impl Iterator<Item=MilRegister> {
@@ -692,47 +961,47 @@ fn find_used_before_def(block: &MilBlock) -> impl Iterator<Item=MilRegister> {
     used_before_def.into_iter()
 }
 
-unsafe fn set_register(builder: &LLVMBuilder, func: &MilFunction, local_regs: &mut HashMap<MilRegister, LLVMValueRef>, all_regs: &mut HashMap<MilRegister, LLVMValueRef>, reg: MilRegister, val: LLVMValueRef, types: &LLVMTypes) {
+fn set_register<'a>(builder: &LLVMBuilder<'a>, func: &MilFunction, local_regs: &mut HashMap<MilRegister, LLVMValue<'a>>, all_regs: &mut HashMap<MilRegister, LLVMValue<'a>>, reg: MilRegister, val: LLVMValue<'a>, types: &LLVMTypes) {
     if reg == MilRegister::VOID {
         return;
     };
 
     local_regs.insert(reg, val);
 
-    let val = LLVMBuildBitCast(builder.ptr(), val, native_arg_type(func.reg_map.get_reg_info(reg).ty, types), b"\0".as_ptr() as *const c_char);
+    let val = builder.build_bit_cast(val, native_arg_type(func.reg_map.get_reg_info(reg).ty, types), None);
     assert!(all_regs.insert(reg, val).is_none());
 }
 
-unsafe fn coerce_before_store(builder: &LLVMBuilder, class_id: ClassId, val: LLVMValueRef, types: &LLVMTypes) -> LLVMValueRef {
+fn coerce_before_store<'a>(builder: &LLVMBuilder<'a>, class_id: ClassId, val: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     match class_id {
         ClassId::PRIMITIVE_BYTE | ClassId::PRIMITIVE_SHORT | ClassId::PRIMITIVE_BOOLEAN | ClassId::PRIMITIVE_CHAR => {
-            LLVMBuildIntCast(builder.ptr(), val, types.class_types[&class_id].field_ty, "\0".as_ptr() as *const c_char)
+            builder.build_int_cast(val, types.class_types[&class_id].field_ty, None)
         },
         ClassId::PRIMITIVE_INT | ClassId::PRIMITIVE_LONG | ClassId::PRIMITIVE_FLOAT | ClassId::PRIMITIVE_DOUBLE => val,
         _ => {
-            LLVMBuildPointerCast(builder.ptr(), val, types.class_types[&class_id].field_ty, "\0".as_ptr() as *const c_char)
+            builder.build_pointer_cast(val, types.class_types[&class_id].field_ty, None)
         }
     }
 }
 
-unsafe fn coerce_after_load(builder: &LLVMBuilder, class_id: ClassId, val: LLVMValueRef, types: &LLVMTypes) -> LLVMValueRef {
+fn coerce_after_load<'a>(builder: &LLVMBuilder<'a>, class_id: ClassId, val: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     match class_id {
         ClassId::PRIMITIVE_BYTE | ClassId::PRIMITIVE_SHORT | ClassId::PRIMITIVE_BOOLEAN => {
-            LLVMBuildIntCast2(builder.ptr(), val, types.int, 1, "\0".as_ptr() as *const c_char)
+            builder.build_int_cast_2(val, types.int, true, None)
         },
         ClassId::PRIMITIVE_CHAR => {
-            LLVMBuildIntCast2(builder.ptr(), val, types.int, 0, "\0".as_ptr() as *const c_char)
+            builder.build_int_cast_2(val, types.int, false, None)
         },
         ClassId::PRIMITIVE_INT | ClassId::PRIMITIVE_LONG | ClassId::PRIMITIVE_FLOAT | ClassId::PRIMITIVE_DOUBLE => val,
         _ => {
-            LLVMBuildPointerCast(builder.ptr(), val, types.any_object_pointer, "\0".as_ptr() as *const c_char)
+            builder.build_pointer_cast(val, types.any_object_pointer, None)
         }
     }
 }
 
-unsafe fn undefined_register_value(module: &MochaModule, ty: MilType) -> LLVMValueRef {
+fn undefined_register_value<'a>(module: &MochaModule<'a, '_, '_>, ty: MilType) -> LLVMValue<'a> {
     match ty {
-        MilType::Void => std::ptr::null_mut(),
+        MilType::Void => module.const_obj_null(),
         MilType::Ref => module.const_obj_null(),
         MilType::Bool => module.const_bool(false),
         MilType::Int => module.const_int(0),
@@ -742,25 +1011,25 @@ unsafe fn undefined_register_value(module: &MochaModule, ty: MilType) -> LLVMVal
     }
 }
 
-unsafe fn emit_basic_block(
-    module: &MochaModule,
+unsafe fn emit_basic_block<'a>(
+    module: &MochaModule<'a, '_, '_>,
     func: &MilFunction,
     cfg: &FlowGraph<MilBlockId>,
     block_id: MilBlockId,
-    builder: &LLVMBuilder,
-    llvm_func: LLVMValueRef,
-    locals: &mut HashMap<MilLocalId, LLVMValueRef>,
-    llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, LLVMValueRef)>,
-    all_regs: &mut HashMap<MilRegister, LLVMValueRef>,
-    phis_to_add: &mut Vec<(LLVMValueRef, MilBlockId, MilOperand)>
+    builder: &LLVMBuilder<'a>,
+    llvm_func: LLVMValue<'a>,
+    locals: &mut HashMap<MilLocalId, LLVMValue<'a>>,
+    llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, Option<LLVMValue<'a>>)>,
+    all_regs: &mut HashMap<MilRegister, LLVMValue<'a>>,
+    phis_to_add: &mut Vec<(LLVMValue<'a>, MilBlockId, MilOperand)>
 ) {
     let mut local_regs = HashMap::new();
 
     let block = &func.blocks[&block_id];
     let block_name = CString::new(format!("{}", block.id)).unwrap();
-    let mut llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, block_name.as_ptr());
+    let mut llvm_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), block_name.as_ptr());
     let llvm_start_block = llvm_block;
-    let mut cond_out = std::ptr::null_mut();
+    let mut cond_out = None;
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
@@ -769,11 +1038,7 @@ unsafe fn emit_basic_block(
             if let Some(&val) = all_regs.get(&reg) {
                 local_regs.insert(reg, val);
             } else {
-                let phi = LLVMBuildPhi(
-                    builder.ptr(),
-                    native_arg_type(func.reg_map.get_reg_info(reg).ty, &module.types),
-                    register_name(reg).as_ptr()
-                );
+                let phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(reg).ty, &module.types), Some(register_name(reg)));
 
                 local_regs.insert(reg, phi);
 
@@ -790,20 +1055,16 @@ unsafe fn emit_basic_block(
 
     for phi in block.phi_nodes.iter() {
         if !phi.sources.is_empty() {
-            let llvm_phi = LLVMBuildPhi(
-                builder.ptr(),
-                native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types),
-                register_name(phi.target).as_ptr()
-            );
+            let llvm_phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types), Some(register_name(phi.target)));
 
-            set_register(&builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
+            set_register(builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
 
             for (src, pred) in phi.sources.iter().cloned() {
                 phis_to_add.push((llvm_phi, pred, src));
             };
         } else {
             let val = undefined_register_value(module, func.reg_map.get_reg_info(phi.target).ty);
-            set_register(&builder, func, &mut local_regs, all_regs, phi.target, val, &module.types);
+            set_register(builder, func, &mut local_regs, all_regs, phi.target, val, &module.types);
         };
     };
 
@@ -812,747 +1073,322 @@ unsafe fn emit_basic_block(
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(tgt, ref src) => {
                 let src = create_value_ref(&module, src, &local_regs);
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, src, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, src, &module.types);
             },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
                 let val = create_value_ref(&module, val, &local_regs);
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
-                    MilUnOp::INeg => LLVMBuildNeg(
-                        builder.ptr(),
-                        val,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::IExtB => LLVMBuildSExt(
-                        builder.ptr(),
-                        LLVMBuildTrunc(
-                            builder.ptr(),
-                            val,
-                            module.types.byte,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                set_register(builder, func, &mut local_regs, all_regs, tgt, match op {
+                    MilUnOp::INeg => builder.build_neg(val, Some(register_name(tgt))),
+                    MilUnOp::IExtB => builder.build_sext(
+                        builder.build_trunc(val, module.types.byte, None),
                         module.types.int,
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::IExtS => LLVMBuildSExt(
-                        builder.ptr(),
-                        LLVMBuildTrunc(
-                            builder.ptr(),
-                            val,
-                            module.types.short,
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        module.types.int,
-                        register_name(tgt).as_ptr()
+                    MilUnOp::IExtS => builder.build_sext(
+                        builder.build_trunc(val, module.types.byte, None),
+                        module.types.short,
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::LNeg => LLVMBuildNeg(
-                        builder.ptr(),
-                        val,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::FNeg => LLVMBuildFNeg(
-                        builder.ptr(),
-                        val,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::DNeg => LLVMBuildFNeg(
-                        builder.ptr(),
-                        val,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::I2L => LLVMBuildSExt(
-                        builder.ptr(),
-                        val,
-                        module.types.long,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::I2F => LLVMBuildSIToFP(
-                        builder.ptr(),
-                        val,
-                        module.types.float,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::I2D => LLVMBuildSIToFP(
-                        builder.ptr(),
-                        val,
-                        module.types.double,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::L2I => LLVMBuildTrunc(
-                        builder.ptr(),
-                        val,
-                        module.types.int,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::L2F => LLVMBuildSIToFP(
-                        builder.ptr(),
-                        val,
-                        module.types.float,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::L2D => LLVMBuildSIToFP(
-                        builder.ptr(),
-                        val,
-                        module.types.double,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::F2I => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealUNO,
-                            val,
-                            val,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilUnOp::LNeg => builder.build_neg(val, Some(register_name(tgt))),
+                    MilUnOp::FNeg => builder.build_fneg(val, Some(register_name(tgt))),
+                    MilUnOp::DNeg => builder.build_fneg(val, Some(register_name(tgt))),
+                    MilUnOp::I2L => builder.build_sext(val, module.types.long, Some(register_name(tgt))),
+                    MilUnOp::I2F => builder.build_si_to_fp(val, module.types.float, Some(register_name(tgt))),
+                    MilUnOp::I2D => builder.build_si_to_fp(val, module.types.double, Some(register_name(tgt))),
+                    MilUnOp::L2I => builder.build_trunc(val, module.types.int, Some(register_name(tgt))),
+                    MilUnOp::L2F => builder.build_si_to_fp(val, module.types.float, Some(register_name(tgt))),
+                    MilUnOp::L2D => builder.build_si_to_fp(val, module.types.double, Some(register_name(tgt))),
+                    MilUnOp::F2I => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealUNO, val, val, None),
                         module.const_int(0),
-                        LLVMBuildSelect(
-                            builder.ptr(),
-                            LLVMBuildFCmp(
-                                builder.ptr(),
-                                LLVMRealPredicate::LLVMRealOGE,
-                                val,
-                                module.const_float((i32::MAX as f32).to_bits()),
-                                b"\0".as_ptr() as *const c_char
-                            ),
+                        builder.build_select(
+                            builder.build_fcmp(LLVMRealPredicate::LLVMRealOGE, val, module.const_float((i32::MAX as f32).to_bits()), None),
                             module.const_int(i32::MAX),
-                            LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLE,
-                                    val,
-                                    module.const_float((i32::MIN as f32).to_bits()),
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLE, val, module.const_float((i32::MIN as f32).to_bits()), None),
                                 module.const_int(i32::MIN),
-                                LLVMBuildFPToSI(
-                                    builder.ptr(),
-                                    val,
-                                    module.types.int,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
-                                b"\0".as_ptr() as *const c_char
+                                builder.build_fp_to_si(val, module.types.int, None),
+                                None
                             ),
-                            b"\0".as_ptr() as *const c_char
+                            None
                         ),
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::F2L => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealUNO,
-                            val,
-                            val,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilUnOp::F2L => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealUNO, val, val, None),
                         module.const_long(0),
-                        LLVMBuildSelect(
-                            builder.ptr(),
-                            LLVMBuildFCmp(
-                                builder.ptr(),
-                                LLVMRealPredicate::LLVMRealOGE,
-                                val,
-                                module.const_float((i64::MAX as f32).to_bits()),
-                                b"\0".as_ptr() as *const c_char
-                            ),
+                        builder.build_select(
+                            builder.build_fcmp(LLVMRealPredicate::LLVMRealOGE, val, module.const_float((i64::MAX as f32).to_bits()), None),
                             module.const_long(i64::MAX),
-                            LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLE,
-                                    val,
-                                    module.const_float((i64::MIN as f32).to_bits()),
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLE, val, module.const_float((i64::MIN as f32).to_bits()), None),
                                 module.const_long(i64::MIN),
-                                LLVMBuildFPToSI(
-                                    builder.ptr(),
-                                    val,
-                                    module.types.long,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
-                                b"\0".as_ptr() as *const c_char
+                                builder.build_fp_to_si(val, module.types.long, None),
+                                None
                             ),
-                            b"\0".as_ptr() as *const c_char
+                            None
                         ),
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::F2D => LLVMBuildFPExt(
-                        builder.ptr(),
-                        val,
-                        module.types.double,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilUnOp::D2I => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealUNO,
-                            val,
-                            val,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilUnOp::F2D => builder.build_fpext(val, module.types.double, Some(register_name(tgt))),
+                    MilUnOp::D2I => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealUNO, val, val, None),
                         module.const_int(0),
-                        LLVMBuildSelect(
-                            builder.ptr(),
-                            LLVMBuildFCmp(
-                                builder.ptr(),
-                                LLVMRealPredicate::LLVMRealOGE,
-                                val,
-                                module.const_double((i32::MAX as f64).to_bits()),
-                                b"\0".as_ptr() as *const c_char
-                            ),
+                        builder.build_select(
+                            builder.build_fcmp(LLVMRealPredicate::LLVMRealOGE, val, module.const_double((i32::MAX as f64).to_bits()), None),
                             module.const_int(i32::MAX),
-                            LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLE,
-                                    val,
-                                    module.const_double((i32::MIN as f64).to_bits()),
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLE, val, module.const_double((i32::MIN as f64).to_bits()), None),
                                 module.const_int(i32::MIN),
-                                LLVMBuildFPToSI(
-                                    builder.ptr(),
-                                    val,
-                                    module.types.int,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
-                                b"\0".as_ptr() as *const c_char
+                                builder.build_fp_to_si(val, module.types.int, None),
+                                None
                             ),
-                            b"\0".as_ptr() as *const c_char
+                            None
                         ),
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::D2L => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealUNO,
-                            val,
-                            val,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilUnOp::D2L => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealUNO, val, val, None),
                         module.const_long(0),
-                        LLVMBuildSelect(
-                            builder.ptr(),
-                            LLVMBuildFCmp(
-                                builder.ptr(),
-                                LLVMRealPredicate::LLVMRealOGE,
-                                val,
-                                module.const_double((i64::MAX as f64).to_bits()),
-                                b"\0".as_ptr() as *const c_char
-                            ),
+                        builder.build_select(
+                            builder.build_fcmp(LLVMRealPredicate::LLVMRealOGE, val, module.const_double((i64::MAX as f64).to_bits()), None),
                             module.const_long(i64::MAX),
-                            LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLE,
-                                    val,
-                                    module.const_double((i64::MIN as f64).to_bits()),
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLE, val, module.const_double((i64::MIN as f64).to_bits()), None),
                                 module.const_long(i64::MIN),
-                                LLVMBuildFPToSI(
-                                    builder.ptr(),
-                                    val,
-                                    module.types.long,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
-                                b"\0".as_ptr() as *const c_char
+                                builder.build_fp_to_si(val, module.types.long, None),
+                                None
                             ),
-                            b"\0".as_ptr() as *const c_char
+                            None
                         ),
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilUnOp::D2F => LLVMBuildFPTrunc(
-                        builder.ptr(),
-                        val,
-                        module.types.float,
-                        register_name(tgt).as_ptr()
-                    )
+                    MilUnOp::D2F => builder.build_fptrunc(val, module.types.float, Some(register_name(tgt)))
                 }, &module.types);
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
                 let lhs = create_value_ref(&module, lhs, &local_regs);
                 let rhs = create_value_ref(&module, rhs, &local_regs);
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, match op {
-                    MilBinOp::IAdd => LLVMBuildAdd(
-                        builder.ptr(),
+                set_register(builder, func, &mut local_regs, all_regs, tgt, match op {
+                    MilBinOp::IAdd => builder.build_add(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::ISub => builder.build_sub(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IMul => builder.build_mul(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IDivS => builder.build_sdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IRemS => builder.build_srem(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IAnd => builder.build_and(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IOr => builder.build_or(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IXor => builder.build_xor(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::IShrS => builder.build_ashr(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x1f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::ISub => LLVMBuildSub(
-                        builder.ptr(),
+                    MilBinOp::IShrU => builder.build_lshr(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x1f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::IMul => LLVMBuildMul(
-                        builder.ptr(),
+                    MilBinOp::IShl => builder.build_shl(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x1f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::IDivS => LLVMBuildSDiv(
-                        builder.ptr(),
+                    MilBinOp::LAdd => builder.build_add(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LSub => builder.build_sub(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LMul => builder.build_mul(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LDivS => builder.build_sdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LRemS => builder.build_srem(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LAnd => builder.build_and(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LOr => builder.build_or(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LXor => builder.build_xor(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::LShrS => builder.build_ashr(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::IRemS => LLVMBuildSRem(
-                        builder.ptr(),
+                    MilBinOp::LShrU => builder.build_lshr(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::IAnd => LLVMBuildAnd(
-                        builder.ptr(),
+                    MilBinOp::LShl => builder.build_shl(
                         lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
+                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::IOr => LLVMBuildOr(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::IXor => LLVMBuildXor(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::IShrS => LLVMBuildAShr(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildAnd(
-                            builder.ptr(),
-                            rhs,
-                            module.const_int(0x1f),
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::IShrU => LLVMBuildLShr(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildAnd(
-                            builder.ptr(),
-                            rhs,
-                            module.const_int(0x1f),
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::IShl => LLVMBuildShl(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildAnd(
-                            builder.ptr(),
-                            rhs,
-                            module.const_int(0x1f),
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LAdd => LLVMBuildAdd(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LSub => LLVMBuildSub(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LMul => LLVMBuildMul(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LDivS => LLVMBuildSDiv(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LRemS => LLVMBuildSRem(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LAnd => LLVMBuildAnd(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LOr => LLVMBuildOr(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LXor => LLVMBuildXor(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LShrS => LLVMBuildAShr(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildZExt(
-                            builder.ptr(),
-                            LLVMBuildAnd(
-                                builder.ptr(),
-                                rhs,
-                                module.const_int(0x3f),
-                                b"\0".as_ptr() as *const c_char
-                            ),
-                            module.types.long,
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LShrU => LLVMBuildLShr(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildZExt(
-                            builder.ptr(),
-                            LLVMBuildAnd(
-                                builder.ptr(),
-                                rhs,
-                                module.const_int(0x3f),
-                                b"\0".as_ptr() as *const c_char
-                            ),
-                            module.types.long,
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LShl => LLVMBuildShl(
-                        builder.ptr(),
-                        lhs,
-                        LLVMBuildZExt(
-                            builder.ptr(),
-                            LLVMBuildAnd(
-                                builder.ptr(),
-                                rhs,
-                                module.const_int(0x3f),
-                                b"\0".as_ptr() as *const c_char
-                            ),
-                            module.types.long,
-                            b"\0".as_ptr() as *const c_char
-                        ),
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::LCmp => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildICmp(
-                            builder.ptr(),
-                            LLVMIntPredicate::LLVMIntEQ,
-                            lhs,
-                            rhs,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilBinOp::LCmp => builder.build_select(
+                        builder.build_icmp(LLVMIntPredicate::LLVMIntEQ, lhs, rhs, None),
                         module.const_int(0),
-                        LLVMBuildSelect(
-                            builder.ptr(),
-                            LLVMBuildICmp(
-                                builder.ptr(),
-                                LLVMIntPredicate::LLVMIntSGT,
-                                lhs,
-                                rhs,
-                                b"\0".as_ptr() as *const c_char
-                            ),
+                        builder.build_select(
+                            builder.build_icmp(LLVMIntPredicate::LLVMIntSGT, lhs, rhs, None),
                             module.const_int(1),
                             module.const_int(-1),
-                            b"\0".as_ptr() as *const c_char
+                            None
                         ),
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::FAdd => LLVMBuildFAdd(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::FSub => LLVMBuildFSub(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::FMul => LLVMBuildFMul(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::FDiv => LLVMBuildFDiv(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::FCmp(mode) => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealOEQ,
-                            lhs,
-                            rhs,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilBinOp::FAdd => builder.build_fadd(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::FSub => builder.build_fsub(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::FMul => builder.build_fmul(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::FDiv => builder.build_fdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::FCmp(mode) => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealOEQ, lhs, rhs, None),
                         module.const_int(0),
                         match mode {
-                            MilFCmpMode::L => LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOGT,
-                                    lhs,
-                                    rhs,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            MilFCmpMode::L => builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOGT, lhs, rhs, None),
                                 module.const_int(1),
                                 module.const_int(-1),
-                                b"\0".as_ptr() as *const c_char
+                                None
                             ),
-                            MilFCmpMode::G => LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLT,
-                                    lhs,
-                                    rhs,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            MilFCmpMode::G => builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLT, lhs, rhs, None),
                                 module.const_int(-1),
                                 module.const_int(1),
-                                b"\0".as_ptr() as *const c_char
+                                None
                             )
                         },
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     ),
-                    MilBinOp::DAdd => LLVMBuildFAdd(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::DSub => LLVMBuildFSub(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::DMul => LLVMBuildFMul(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::DDiv => LLVMBuildFDiv(
-                        builder.ptr(),
-                        lhs,
-                        rhs,
-                        register_name(tgt).as_ptr()
-                    ),
-                    MilBinOp::DCmp(mode) => LLVMBuildSelect(
-                        builder.ptr(),
-                        LLVMBuildFCmp(
-                            builder.ptr(),
-                            LLVMRealPredicate::LLVMRealOEQ,
-                            lhs,
-                            rhs,
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                    MilBinOp::DAdd => builder.build_fadd(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::DSub => builder.build_fsub(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::DMul => builder.build_fmul(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::DDiv => builder.build_fdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::DCmp(mode) => builder.build_select(
+                        builder.build_fcmp(LLVMRealPredicate::LLVMRealOEQ, lhs, rhs, None),
                         module.const_int(0),
                         match mode {
-                            MilFCmpMode::L => LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOGT,
-                                    lhs,
-                                    rhs,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            MilFCmpMode::L => builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOGT, lhs, rhs, None),
                                 module.const_int(1),
                                 module.const_int(-1),
-                                b"\0".as_ptr() as *const c_char
+                                None
                             ),
-                            MilFCmpMode::G => LLVMBuildSelect(
-                                builder.ptr(),
-                                LLVMBuildFCmp(
-                                    builder.ptr(),
-                                    LLVMRealPredicate::LLVMRealOLT,
-                                    lhs,
-                                    rhs,
-                                    b"\0".as_ptr() as *const c_char
-                                ),
+                            MilFCmpMode::G => builder.build_select(
+                                builder.build_fcmp(LLVMRealPredicate::LLVMRealOLT, lhs, rhs, None),
                                 module.const_int(-1),
                                 module.const_int(1),
-                                b"\0".as_ptr() as *const c_char
+                                None
                             )
                         },
-                        register_name(tgt).as_ptr()
+                        Some(register_name(tgt))
                     )
                 }, &module.types);
             },
             MilInstructionKind::GetParam(idx, _, tgt) => {
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMGetParam(llvm_func, idx as u32), &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, LLVMValue::from_raw(LLVMGetParam(llvm_func.ptr(), idx as u32)), &module.types);
             },
             MilInstructionKind::GetLocal(local_id, tgt) => {
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildLoad(
-                    builder.ptr(),
-                    locals[&local_id],
-                    register_name(tgt).as_ptr() as *const c_char
-                ), &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, builder.build_load(locals[&local_id], Some(register_name(tgt))), &module.types);
             },
             MilInstructionKind::SetLocal(local_id, ref src) => {
                 let src = create_value_ref(&module, src, &local_regs);
                 let local_ptr = locals[&local_id];
 
-                LLVMBuildStore(
-                    builder.ptr(),
-                    src,
-                    local_ptr
-                );
+                builder.build_store(src, local_ptr);
             },
             MilInstructionKind::GetField(field_id, class_id, tgt, ref obj) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
 
-                let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
-                    builder.ptr(),
-                    create_instance_field_gep(&builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types),
-                    register_name(tgt).as_ptr() as *const c_char
-                ), &module.types);
+                let val = builder.build_load(
+                    create_instance_field_gep(builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types),
+                    Some(register_name(tgt))
+                );
+                let val = coerce_after_load(builder, class_id, val, &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutField(field_id, class_id, ref obj, ref val) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
                 let val = create_value_ref(&module, val, &local_regs);
 
-                LLVMBuildStore(
-                    builder.ptr(),
+                builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
-                    create_instance_field_gep(&builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types)
+                    create_instance_field_gep(builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types)
                 );
             },
             MilInstructionKind::GetArrayLength(tgt, ref obj) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildLoad(
-                    builder.ptr(),
-                    create_instance_field_gep(&builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, &module.known_objs, &module.obj_map, &module.types),
-                    register_name(tgt).as_ptr() as *const c_char
-                ), &module.types);
+                let val = builder.build_load(
+                    create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, &module.known_objs, &module.obj_map, &module.types),
+                    Some(register_name(tgt))
+                );
+
+                set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
                 let idx = create_value_ref(&module, idx, &local_regs);
 
-                let arr_data = create_instance_field_gep(&builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
+                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
 
-                let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
-                    builder.ptr(),
-                    LLVMBuildGEP(
-                        builder.ptr(),
-                        arr_data,
-                        [module.const_int(0), idx].as_mut_ptr(),
-                        2,
-                        "\0".as_ptr() as *const c_char
-                    ),
-                    register_name(tgt).as_ptr() as *const c_char
-                ), &module.types);
+                let val = builder.build_load(
+                    builder.build_gep(arr_data, &[module.const_int(0), idx], None),
+                    Some(register_name(tgt))
+                );
+                let val = coerce_after_load(builder, class_id, val, &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutArrayElement(class_id, ref obj, ref idx, ref val) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
                 let idx = create_value_ref(&module, idx, &local_regs);
                 let val = create_value_ref(&module, val, &local_regs);
 
-                let arr_data = create_instance_field_gep(&builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
+                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
 
-                LLVMBuildStore(
-                    builder.ptr(),
+                builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
-                    LLVMBuildGEP(
-                        builder.ptr(),
-                        arr_data,
-                        [module.const_int(0), idx].as_mut_ptr(),
-                        2,
-                        "\0".as_ptr() as *const c_char
-                    )
+                    builder.build_gep(arr_data, &[module.const_int(0), idx], None)
                 );
             },
             MilInstructionKind::GetStatic(field_id, class_id, tgt) => {
-                let val = coerce_after_load(builder, class_id, LLVMBuildLoad(
-                    builder.ptr(),
-                    create_meta_field_gep(&builder, field_id, &module.known_objs, &module.obj_map, &module.types),
-                    register_name(tgt).as_ptr() as *const c_char
-                ), &module.types);
+                let val = builder.build_load(
+                    create_meta_field_gep(builder, field_id, &module.known_objs, &module.obj_map, &module.types),
+                    Some(register_name(tgt))
+                );
+                let val = coerce_after_load(builder, class_id, val, &module.types);
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutStatic(field_id, class_id, ref val) => {
                 let val = create_value_ref(&module, val, &local_regs);
 
-                LLVMBuildStore(
-                    builder.ptr(),
+                builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
-                    create_meta_field_gep(&builder, field_id, &module.known_objs, &module.obj_map, &module.types)
+                    create_meta_field_gep(builder, field_id, &module.known_objs, &module.obj_map, &module.types)
                 );
             },
             MilInstructionKind::AllocObj(class_id, tgt) => {
-                let obj = LLVMBuildCall(
-                    builder.ptr(),
-                    module.builtins.alloc_obj,
-                    [
-                        LLVMConstPointerCast(
+                let obj = builder.build_call(
+                    LLVMValue::from_raw(module.builtins.alloc_obj),
+                    &[
+                        LLVMValue::from_raw(LLVMConstPointerCast(
                             module.types.class_types[&class_id].vtable,
                             module.types.any_raw_pointer
-                        )
-                    ].as_mut_ptr(),
-                    1,
-                    register_name(tgt).as_ptr() as *const c_char
+                        ))
+                    ],
+                    Some(register_name(tgt))
                 );
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
                 let len = create_value_ref(&module, len, &local_regs);
-                let obj = LLVMBuildCall(
-                    builder.ptr(),
-                    module.builtins.alloc_array,
-                    [
-                        LLVMConstPointerCast(
+                let obj = builder.build_call(
+                    LLVMValue::from_raw(module.builtins.alloc_array),
+                    &[
+                        LLVMValue::from_raw(LLVMConstPointerCast(
                             module.types.class_types[&class_id].vtable,
                             module.types.any_raw_pointer
-                        ),
+                        )),
                         len
-                    ].as_mut_ptr(),
-                    2,
-                    register_name(tgt).as_ptr() as *const c_char
+                    ],
+                    Some(register_name(tgt))
                 );
 
-                set_register(&builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             }
         };
     };
@@ -1560,113 +1396,79 @@ unsafe fn emit_basic_block(
     match block.end_instr.kind {
         MilEndInstructionKind::Nop => {},
         MilEndInstructionKind::Unreachable => {
-            LLVMBuildUnreachable(builder.ptr());
+            builder.build_unreachable();
         },
         MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
-            let mut args = args.iter()
+            let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
-            set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
-                builder.ptr(),
+            let val = builder.build_call(
                 module.methods[&method_id],
-                args.as_mut_ptr(),
-                args.len() as u32,
-                register_name(tgt).as_ptr() as *const c_char
-            ), &module.types);
+                &args[..],
+                Some(register_name(tgt))
+            );
+
+            set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
         },
         MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
             let (_, method) = module.env.get_method(method_id);
             let obj = create_value_ref(&module, obj, &local_regs);
-            let mut args = args.iter()
+            let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
-            let vslot = LLVMBuildLoad(
-                builder.ptr(),
-                LLVMBuildStructGEP(
-                    builder.ptr(),
-                    create_vtable_load(&builder, obj, method_id.0, &module.types),
-                    VTABLE_FIRST_VSLOT_FIELD as u32 + method.virtual_slot,
-                    b"\0".as_ptr() as *const c_char
-                ),
-                "\0".as_ptr() as *const c_char
-            );
+            let vtable = create_vtable_load(builder, obj, method_id.0, &module.types);
+            let vslot = builder.build_struct_gep(vtable, VTABLE_FIRST_VSLOT_FIELD as u32 + method.virtual_slot, None);
+            let vslot = builder.build_load(vslot, None);
+            let vslot = builder.build_pointer_cast(vslot, LLVMPointerType(module.types.method_types[&method_id], 0), None);
 
-            set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
-                builder.ptr(),
-                LLVMBuildPointerCast(
-                    builder.ptr(),
-                    vslot,
-                    LLVMPointerType(module.types.method_types[&method_id], 0),
-                    "\0".as_ptr() as *const c_char
-                ),
-                args.as_mut_ptr(),
-                args.len() as u32,
-                register_name(tgt).as_ptr() as *const c_char
-            ), &module.types);
+            let return_val = builder.build_call(vslot, &args[..], Some(register_name(tgt)));
+
+            set_register(builder, func, &mut local_regs, all_regs, tgt, return_val, &module.types);
         },
         MilEndInstructionKind::CallInterface(_, method_id, tgt, ref obj, ref args) => {
-            let interface_vtable = LLVMConstIntCast(
+            let interface_vtable = LLVMValue::from_raw(LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(module.types.class_types[&method_id.0].vtable, module.types.long),
-                    module.const_long(8)
+                    module.const_long(8).ptr()
                 ),
                 module.types.int,
                 0
-            );
+            ));
 
             let (_, method) = module.env.get_method(method_id);
             let obj = create_value_ref(&module, obj, &local_regs);
-            let mut args = args.iter()
+            let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
-            let first_islot = LLVMBuildStructGEP(
-                builder.ptr(),
-                LLVMBuildLoad(
-                    builder.ptr(),
-                    LLVMBuildStructGEP(
-                        builder.ptr(),
-                        create_vtable_load(&builder, obj, ClassId::JAVA_LANG_OBJECT, &module.types),
+            let first_islot = builder.build_struct_gep(
+                builder.build_load(
+                    builder.build_struct_gep(
+                        create_vtable_load(builder, obj, ClassId::JAVA_LANG_OBJECT, &module.types),
                         VTABLE_ITABLE_FIELD as u32,
-                        b"\0".as_ptr() as *const c_char
+                        None
                     ),
-                    b"\0".as_ptr() as *const c_char
+                    None
                 ),
                 0,
-                b"\0".as_ptr() as *const c_char
+                None
             );
 
-            let loop_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"\0".as_ptr() as *const c_char);
-            LLVMBuildBr(builder.ptr(), loop_block);
+            let loop_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+            builder.build_br(loop_block);
             LLVMPositionBuilderAtEnd(builder.ptr(), loop_block);
 
-            let islot = LLVMBuildPhi(builder.ptr(), LLVMPointerType(module.types.itable_entry, 0), b"\0".as_ptr() as *const c_char);
-            let islot_interface = LLVMBuildLoad(
-                builder.ptr(),
-                LLVMBuildStructGEP(
-                    builder.ptr(),
-                    islot,
-                    0,
-                    b"\0".as_ptr() as *const c_char
-                ),
-                b"\0".as_ptr() as *const c_char
-            );
-            let next_islot = LLVMBuildGEP(builder.ptr(), islot, [module.const_int(1)].as_mut_ptr(), 1, b"\0".as_ptr() as *const c_char);
+            let islot = builder.build_phi(LLVMPointerType(module.types.itable_entry, 0), None);
+            let islot_interface = builder.build_load(builder.build_struct_gep(islot, 0, None), None);
+            let next_islot = builder.build_gep(islot, &[module.const_int(0)], None);
 
-            LLVMAddIncoming(islot, [first_islot, next_islot].as_mut_ptr(), [llvm_block, loop_block].as_mut_ptr(), 2);
+            islot.add_incoming(&[(llvm_block, first_islot), (loop_block, next_islot)]);
 
-            let call_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"\0".as_ptr() as *const c_char);
-            LLVMBuildCondBr(
-                builder.ptr(),
-                LLVMBuildICmp(
-                    builder.ptr(),
-                    LLVMIntPredicate::LLVMIntNE,
-                    islot_interface,
-                    interface_vtable,
-                    b"\0".as_ptr() as *const c_char
-                ),
+            let call_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+            builder.build_cond_br(
+                builder.build_icmp(LLVMIntPredicate::LLVMIntNE, islot_interface, interface_vtable, None),
                 loop_block,
                 call_block
             );
@@ -1674,46 +1476,30 @@ unsafe fn emit_basic_block(
             llvm_block = call_block;
             LLVMPositionBuilderAtEnd(builder.ptr(), call_block);
 
-            let islot = LLVMBuildLoad(
-                builder.ptr(),
-                LLVMBuildStructGEP(
-                    builder.ptr(),
+            let islot = builder.build_load(
+                builder.build_struct_gep(
                     create_itable_decompress(
-                        &builder,
-                        LLVMBuildLoad(
-                            builder.ptr(),
-                            LLVMBuildStructGEP(
-                                builder.ptr(),
-                                islot,
-                                1,
-                                b"\0".as_ptr() as *const c_char
-                            ),
-                            b"\0".as_ptr() as *const c_char
-                        ),
+                        builder,
+                        builder.build_load(builder.build_struct_gep(islot, 1, None), None),
                         &module.types
                     ),
                     method.virtual_slot,
-                    b"\0".as_ptr() as *const c_char
+                    None
                 ),
-                b"\0".as_ptr() as *const c_char
+                None
             );
 
-            set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
-                builder.ptr(),
-                LLVMBuildPointerCast(
-                    builder.ptr(),
-                    islot,
-                    LLVMPointerType(module.types.method_types[&method_id], 0),
-                    "\0".as_ptr() as *const c_char
-                ),
-                args.as_mut_ptr(),
-                args.len() as u32,
-                register_name(tgt).as_ptr() as *const c_char
-            ), &module.types);
+            let return_val = builder.build_call(
+                builder.build_pointer_cast(islot, LLVMPointerType(module.types.method_types[&method_id], 0), None),
+                &args[..],
+                Some(register_name(tgt))
+            );
+
+            set_register(builder, func, &mut local_regs, all_regs, tgt, return_val, &module.types);
         },
         MilEndInstructionKind::CallNative(ret_ty, ref name, tgt, ref args) => {
             let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), &module.types)).collect_vec();
-            let mut args = args.iter()
+            let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
@@ -1724,40 +1510,29 @@ unsafe fn emit_basic_block(
                 0
             );
             let name = CString::new(name.as_str()).unwrap();
-            let native_func = LLVMAddFunction(module.module.ptr(), name.as_ptr(), func_ty);
+            let native_func = LLVMValue::from_raw(LLVMAddFunction(module.module.ptr(), name.as_ptr(), func_ty));
 
-            set_register(&builder, func, &mut local_regs, all_regs, tgt, LLVMBuildCall(
-                builder.ptr(),
-                native_func,
-                args.as_mut_ptr(),
-                args.len() as u32,
-                register_name(tgt).as_ptr() as *const c_char
-            ), &module.types);
+            let return_val = builder.build_call(native_func, &args[..], Some(register_name(tgt)));
+
+            set_register(builder, func, &mut local_regs, all_regs, tgt, return_val, &module.types);
         },
         MilEndInstructionKind::Throw(ref exception) => {
             let exception = create_value_ref(&module, exception, &local_regs);
 
-            LLVMBuildCall(
-                builder.ptr(),
-                module.builtins.throw,
-                [exception].as_mut_ptr(),
-                1,
-                "\0".as_ptr() as *const c_char
-            );
-            LLVMBuildUnreachable(builder.ptr());
+            builder.build_call(LLVMValue::from_raw(module.builtins.throw), &[exception], None);
+            builder.build_unreachable();
         },
         MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)) => {
-            LLVMBuildRetVoid(builder.ptr());
+            builder.build_ret_void();
         },
         MilEndInstructionKind::Return(ref val) => {
-            let val = LLVMBuildBitCast(
-                builder.ptr(),
+            let val = builder.build_bit_cast(
                 create_value_ref(&module, val, &local_regs),
                 LLVMGetReturnType(module.types.method_types[&func.id]),
-                b"\0".as_ptr() as *const c_char
+                None
             );
 
-            LLVMBuildRet(builder.ptr(), val);
+            builder.build_ret(val);
         },
         MilEndInstructionKind::Jump(_) => {},
         MilEndInstructionKind::JumpIfRCmp(cond, _, ref lhs, ref rhs) => {
@@ -1769,7 +1544,7 @@ unsafe fn emit_basic_block(
                 MilRefComparison::Ne => LLVMIntPredicate::LLVMIntNE
             };
 
-            cond_out = LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
+            cond_out = Some(builder.build_icmp(cond, lhs, rhs, None));
         },
         MilEndInstructionKind::JumpIfICmp(cond, _, ref lhs, ref rhs) => {
             let lhs = create_value_ref(&module, lhs, &local_regs);
@@ -1784,7 +1559,7 @@ unsafe fn emit_basic_block(
                 MilIntComparison::Le => LLVMIntPredicate::LLVMIntSLE
             };
 
-            cond_out = LLVMBuildICmp(builder.ptr(), cond, lhs, rhs, b"\0".as_ptr() as *const c_char);
+            cond_out = Some(builder.build_icmp(cond, lhs, rhs, None));
         }
     };
 
@@ -1797,20 +1572,18 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let llvm_func = module.methods[&func.id];
     let builder = module.ctx.create_builder();
 
+    LLVMSetGC(llvm_func.ptr(), "statepoint-example\0".as_ptr() as *const c_char);
+
     let mut llvm_blocks = HashMap::new();
 
     let mut locals = HashMap::new();
-    let start_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func, b"start\0".as_ptr() as *const c_char);
+    let start_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"start\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
 
     for (&local_id, local) in func.reg_map.local_info.iter() {
         locals.insert(
             local_id,
-            LLVMBuildAlloca(
-                builder.ptr(),
-                native_arg_type(local.ty, &module.types),
-                local_name(local_id).as_ptr() as *const c_char
-            )
+            builder.build_alloca(native_arg_type(local.ty, &module.types), Some(local_name(local_id)))
         );
     };
 
@@ -1828,16 +1601,11 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     };
 
     for (phi, pred, val) in phis_to_add {
-        LLVMAddIncoming(
-            phi,
-            &mut create_value_ref(module, &val, &all_regs) as *mut LLVMValueRef,
-            &llvm_blocks[&pred].1 as *const LLVMBasicBlockRef as *mut LLVMBasicBlockRef,
-            1
-        );
+        phi.add_incoming(&[(llvm_blocks[&pred].1, create_value_ref(module, &val, &all_regs))]);
     };
 
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
-    LLVMBuildBr(builder.ptr(), llvm_blocks[&func.block_order[0]].0);
+    builder.build_br(llvm_blocks[&func.block_order[0]].0);
 
     for (block_id, next_block_id) in func.block_order.iter().cloned().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = &func.blocks[&block_id];
@@ -1848,21 +1616,21 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         match block.end_instr.kind {
             MilEndInstructionKind::Unreachable => {},
             MilEndInstructionKind::Jump(tgt) => {
-                LLVMBuildBr(builder.ptr(), llvm_blocks[&tgt].0);
+                builder.build_br(llvm_blocks[&tgt].0);
             },
             MilEndInstructionKind::JumpIfICmp(_, tgt, _, _) | MilEndInstructionKind::JumpIfRCmp(_, tgt, _, _) => {
-                LLVMBuildCondBr(builder.ptr(), cond, llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
+                builder.build_cond_br(cond.unwrap(), llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
             },
             MilEndInstructionKind::Throw(_) => {},
             MilEndInstructionKind::Return(_) => {},
             _ => {
-                LLVMBuildBr(builder.ptr(), llvm_blocks[&next_block_id].0);
+                builder.build_br(llvm_blocks[&next_block_id].0);
             }
         };
     };
 }
 
-unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
+unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) -> LLVMValueRef {
     let main_func = LLVMAddFunction(
         module.module.ptr(),
         b"main\0".as_ptr() as *const c_char,
@@ -1878,31 +1646,18 @@ unsafe fn emit_main_function(module: &MochaModule, main_method: MethodId) {
     let main_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), main_func, b"main\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), main_block);
 
-    let env = LLVMBuildCall(
-        builder.ptr(),
-        module.builtins.init,
-        [LLVMConstPointerCast(module.builtin_class_table, module.types.any_raw_pointer)].as_mut_ptr(),
-        1,
-        b"env\0".as_ptr() as *const c_char
+    let env = builder.build_call(
+        LLVMValue::from_raw(module.builtins.init),
+        &[LLVMValue::from_raw(LLVMConstPointerCast(module.builtin_class_table.ptr(), module.types.any_raw_pointer))],
+        Some(CStr::from_ptr(b"env\0".as_ptr() as *const c_char).to_owned())
     );
 
-    LLVMBuildCall(
-        builder.ptr(),
-        module.methods[&main_method],
-        [module.const_obj_null()].as_mut_ptr(),
-        1,
-        b"\0".as_ptr() as *const c_char
-    );
+    builder.build_call(module.methods[&main_method], &[module.const_obj_null()], None);
+    builder.build_call(LLVMValue::from_raw(module.builtins.shutdown), &[env], None);
 
-    LLVMBuildCall(
-        builder.ptr(),
-        module.builtins.shutdown,
-        [env].as_mut_ptr(),
-        1,
-        b"\0".as_ptr() as *const c_char
-    );
+    builder.build_ret(module.const_int(0));
 
-    LLVMBuildRet(builder.ptr(), module.const_int(0));
+    main_func
 }
 
 unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
@@ -1921,7 +1676,7 @@ unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &Livene
                 let mut islots = islots.iter().cloned().map(|method_id| {
                     module.methods.get(&method_id).cloned().map_or_else(
                         || LLVMConstNull(module.types.any_function_pointer),
-                        |f| LLVMConstBitCast(f, module.types.any_function_pointer)
+                        |f| LLVMConstBitCast(f.ptr(), module.types.any_function_pointer)
                     )
                 }).collect_vec();
 
@@ -1929,13 +1684,13 @@ unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &Livene
                 LLVMConstIntCast(
                     LLVMConstAdd(
                         LLVMConstPointerCast(itable_entry, module.types.long),
-                        module.const_long(8)
+                        module.const_long(8).ptr()
                     ),
                     module.types.int,
                     0
                 )
             } else {
-                module.const_int(16)
+                module.const_int(16).ptr()
             };
 
             LLVMConstStruct(
@@ -1943,7 +1698,7 @@ unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &Livene
                     LLVMConstIntCast(
                         LLVMConstAdd(
                             LLVMConstPointerCast(module.types.class_types[&interface_id].vtable, module.types.long),
-                            module.const_long(8)
+                            module.const_long(8).ptr()
                         ),
                         module.types.int,
                         0
@@ -1966,7 +1721,7 @@ unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &Livene
 }
 
 unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
-    let class_obj = module.find_class_object(class_id);
+    let class_obj = module.find_class_object(class_id).ptr();
     let vslot_class = match **module.env.get(class_id) {
         ResolvedClass::User(ref class) => Some(class),
         ResolvedClass::Array(_) => Some(module.env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
@@ -1977,7 +1732,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
         vslot_class.layout.virtual_slots.iter().cloned().map(|method_id| {
             module.methods.get(&method_id).cloned().map_or_else(
                 || LLVMConstNull(module.types.any_function_pointer),
-                |f| LLVMConstBitCast(f, module.types.any_function_pointer)
+                |f| LLVMConstBitCast(f.ptr(), module.types.any_function_pointer)
             )
         }).collect_vec()
     } else {
@@ -1985,7 +1740,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
     };
 
     let (flags, size, type_specific_info) = match **module.env.get(class_id) {
-        ResolvedClass::User(ref class) => (0x0000, class.layout.size, module.const_long(0)),
+        ResolvedClass::User(ref class) => (0x0000, class.layout.size, module.const_long(0).ptr()),
         ResolvedClass::Array(elem_id) => (
             0x0002,
             layout::get_array_header_size(
@@ -1994,39 +1749,39 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
             LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(module.types.class_types[&elem_id].vtable, module.types.long),
-                    module.const_long(8)
+                    module.const_long(8).ptr()
                 ),
                 module.types.long,
                 0
             )
         ),
-        ResolvedClass::Primitive(None) => (0x0001, 0, module.const_long(b'V'.into())),
-        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, module.const_long(ty.as_char().into()))
+        ResolvedClass::Primitive(None) => (0x0001, 0, module.const_long(b'V'.into()).ptr()),
+        ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, module.const_long(ty.as_char().into()).ptr())
     };
 
     let ty = &module.types.class_types[&class_id];
 
     let mut vtable_fields = [
-        module.const_int(size as i32),
-        module.const_short(0),
-        module.const_short(flags),
-        module.const_short(0),
-        module.const_short(0),
+        module.const_int(size as i32).ptr(),
+        module.const_short(0).ptr(),
+        module.const_short(flags).ptr(),
+        module.const_short(0).ptr(),
+        module.const_short(0).ptr(),
         if let Some(array_class_id) = module.env.try_find_array(class_id) {
             if liveness.may_construct.contains(&array_class_id) {
                 LLVMConstIntCast(
                     LLVMConstAdd(
                         LLVMConstPointerCast(module.types.class_types[&array_class_id].vtable, module.types.long),
-                        module.const_long(8)
+                        module.const_long(8).ptr()
                     ),
                     module.types.int,
                     0
                 )
             } else {
-                module.const_int(0)
+                module.const_int(0).ptr()
             }
         } else {
-            module.const_int(0)
+            module.const_int(0).ptr()
         },
         type_specific_info,
         LLVMConstNull(LLVMPointerType(module.types.int, 0)),
@@ -2047,17 +1802,17 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
 
 unsafe fn value_to_llvm(module: &MochaModule, val: Value, class_id: ClassId) -> LLVMValueRef {
     match class_id {
-        ClassId::PRIMITIVE_BYTE => module.const_byte(val.as_int().unwrap() as i8),
-        ClassId::PRIMITIVE_CHAR => module.const_short(val.as_int().unwrap() as i16),
-        ClassId::PRIMITIVE_DOUBLE => module.const_double(val.as_double().unwrap()),
-        ClassId::PRIMITIVE_FLOAT => module.const_float(val.as_float().unwrap()),
-        ClassId::PRIMITIVE_INT => module.const_int(val.as_int().unwrap()),
-        ClassId::PRIMITIVE_LONG => module.const_long(val.as_long().unwrap()),
-        ClassId::PRIMITIVE_SHORT => module.const_short(val.as_int().unwrap() as i16),
-        ClassId::PRIMITIVE_BOOLEAN => module.const_byte(val.as_int().unwrap() as i8),
+        ClassId::PRIMITIVE_BYTE => module.const_byte(val.as_int().unwrap() as i8).ptr(),
+        ClassId::PRIMITIVE_CHAR => module.const_short(val.as_int().unwrap() as i16).ptr(),
+        ClassId::PRIMITIVE_DOUBLE => module.const_double(val.as_double().unwrap()).ptr(),
+        ClassId::PRIMITIVE_FLOAT => module.const_float(val.as_float().unwrap()).ptr(),
+        ClassId::PRIMITIVE_INT => module.const_int(val.as_int().unwrap()).ptr(),
+        ClassId::PRIMITIVE_LONG => module.const_long(val.as_long().unwrap()).ptr(),
+        ClassId::PRIMITIVE_SHORT => module.const_short(val.as_int().unwrap() as i16).ptr(),
+        ClassId::PRIMITIVE_BOOLEAN => module.const_byte(val.as_int().unwrap() as i8).ptr(),
         _ => val.as_ref().unwrap().map_or_else(
             || LLVMConstNull(module.types.class_types[&class_id].field_ty),
-            |r| LLVMConstPointerCast(module.obj_map[&r.as_ptr()], module.types.class_types[&class_id].field_ty)
+            |r| LLVMConstPointerCast(module.obj_map[&r.as_ptr()].ptr(), module.types.class_types[&class_id].field_ty)
         )
     }
 }
@@ -2085,15 +1840,15 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
     field_values[0] = LLVMConstIntCast(
         LLVMConstAdd(
             LLVMConstPointerCast(class_type.vtable, module.types.long),
-            module.const_long(8)
+            module.const_long(8).ptr()
         ),
         module.types.int,
         0
     );
-    field_values[1] = module.const_int(obj.flags().bits() as i32);
+    field_values[1] = module.const_int(obj.flags().bits() as i32).ptr();
 
     let array_data = if let Some(elem_class) = elem_class {
-        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = module.const_int(obj.read_array_length());
+        field_values[class_type.fields[&FieldId(obj.class_id(), 0)] as usize] = module.const_int(obj.read_array_length()).ptr();
         field_values[class_type.fields[&FieldId(obj.class_id(), 1)] as usize] = LLVMConstArray(module.types.class_types[&elem_class].field_ty, std::ptr::null_mut(), 0);
 
         let mut elements = (0..obj.read_array_length())
@@ -2115,7 +1870,7 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
     };
 
     for (i, size) in class_type.pads.iter().cloned() {
-        let mut data = vec![module.const_byte(0); size as usize];
+        let mut data = vec![module.const_byte(0).ptr(); size as usize];
         field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
     };
 
@@ -2123,12 +1878,12 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
 
     if let Some(meta_class) = meta_class {
         let vtable_value = if meta_class.vtable.is_null() {
-            module.const_int(0)
+            module.const_int(0).ptr()
         } else {
             LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(meta_class.vtable, module.types.long),
-                    module.const_long(8)
+                    module.const_long(8).ptr()
                 ),
                 module.types.int,
                 0
@@ -2148,7 +1903,7 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
         };
 
         for (i, size) in meta_class.meta_pads.iter().cloned() {
-            let mut data = vec![module.const_byte(0); size as usize];
+            let mut data = vec![module.const_byte(0).ptr(); size as usize];
             field_values[i as usize] = LLVMConstArray(module.types.byte, data.as_mut_ptr(), size);
         };
 
@@ -2163,7 +1918,7 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
         value
     };
 
-    LLVMSetInitializer(module.obj_map[&obj.as_ptr()], value);
+    LLVMSetInitializer(module.obj_map[&obj.as_ptr()].ptr(), value);
 }
 
 unsafe fn define_static_heap_object<'a>(module: &MochaModule, name: &CString, obj: &JavaStaticRef<'a>) -> LLVMValueRef {
@@ -2201,7 +1956,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
     unsafe {
         let builtins = declare_builtins(&module, &types);
-        let builtin_class_table = create_builtin_class_table(env, ctx, &module, &types);
+        let builtin_class_table = LLVMValue::from_raw(create_builtin_class_table(env, ctx, &module, &types));
 
         let mut module = MochaModule {
             env,
@@ -2221,7 +1976,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
             module.obj_map.insert(
                 obj.as_ptr(),
-                define_static_heap_object(&module, &name, obj)
+                LLVMValue::from_raw(define_static_heap_object(&module, &name, obj))
             );
         };
 
@@ -2229,7 +1984,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             if let Some(func) = program.funcs.get(&method_id) {
                 module.methods.insert(
                     method_id,
-                    define_function(&module, func)
+                    LLVMValue::from_raw(define_function(&module, func))
                 );
             };
         };
