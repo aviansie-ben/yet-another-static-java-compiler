@@ -106,6 +106,19 @@ impl <'a> LLVMValue<'a> {
     pub fn ptr(&self) -> LLVMValueRef {
         self.1
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LLVMPhiValue<'a>(LLVMValue<'a>);
+
+impl <'a> LLVMPhiValue<'a> {
+    pub unsafe fn from_val_unchecked(val: LLVMValue<'a>) -> LLVMPhiValue<'a> {
+        LLVMPhiValue(val)
+    }
+
+    pub fn into_val(self) -> LLVMValue<'a> {
+        self.0
+    }
 
     pub fn add_incoming(&self, incoming: &[(LLVMBasicBlockRef, LLVMValue<'a>)]) {
         let mut incoming_blocks = Vec::with_capacity(incoming.len());
@@ -117,7 +130,7 @@ impl <'a> LLVMValue<'a> {
         };
 
         unsafe {
-            LLVMAddIncoming(self.ptr(), incoming_values.as_mut_ptr(), incoming_blocks.as_mut_ptr(), incoming.len() as u32);
+            LLVMAddIncoming(self.into_val().ptr(), incoming_values.as_mut_ptr(), incoming_blocks.as_mut_ptr(), incoming.len() as u32);
         };
     }
 }
@@ -235,9 +248,9 @@ impl <'a> LLVMBuilder<'a> {
         }
     }
 
-    pub fn build_phi(&self, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+    pub fn build_phi(&self, ty: LLVMTypeRef, name: Option<CString>) -> LLVMPhiValue<'a> {
         unsafe {
-            self.wrap_value(LLVMBuildPhi(self.ptr(), ty, cstr_or_empty(&name)))
+            LLVMPhiValue::from_val_unchecked(self.wrap_value(LLVMBuildPhi(self.ptr(), ty, cstr_or_empty(&name))))
         }
     }
 
@@ -1021,7 +1034,7 @@ unsafe fn emit_basic_block<'a>(
     locals: &mut HashMap<MilLocalId, LLVMValue<'a>>,
     llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, Option<LLVMValue<'a>>)>,
     all_regs: &mut HashMap<MilRegister, LLVMValue<'a>>,
-    phis_to_add: &mut Vec<(LLVMValue<'a>, MilBlockId, MilOperand)>
+    phis_to_add: &mut Vec<(LLVMPhiValue<'a>, MilBlockId, MilOperand)>
 ) {
     let mut local_regs = HashMap::new();
 
@@ -1040,7 +1053,7 @@ unsafe fn emit_basic_block<'a>(
             } else {
                 let phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(reg).ty, &module.types), Some(register_name(reg)));
 
-                local_regs.insert(reg, phi);
+                local_regs.insert(reg, phi.into_val());
 
                 for pred in cfg.get(block_id).incoming.iter().cloned() {
                     phis_to_add.push((phi, pred, MilOperand::Register(reg)));
@@ -1057,7 +1070,7 @@ unsafe fn emit_basic_block<'a>(
         if !phi.sources.is_empty() {
             let llvm_phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types), Some(register_name(phi.target)));
 
-            set_register(builder, func, &mut local_regs, all_regs, phi.target, llvm_phi, &module.types);
+            set_register(builder, func, &mut local_regs, all_regs, phi.target, llvm_phi.into_val(), &module.types);
 
             for (src, pred) in phi.sources.iter().cloned() {
                 phis_to_add.push((llvm_phi, pred, src));
@@ -1461,8 +1474,8 @@ unsafe fn emit_basic_block<'a>(
             LLVMPositionBuilderAtEnd(builder.ptr(), loop_block);
 
             let islot = builder.build_phi(LLVMPointerType(module.types.itable_entry, 0), None);
-            let islot_interface = builder.build_load(builder.build_struct_gep(islot, 0, None), None);
-            let next_islot = builder.build_gep(islot, &[module.const_int(0)], None);
+            let islot_interface = builder.build_load(builder.build_struct_gep(islot.into_val(), 0, None), None);
+            let next_islot = builder.build_gep(islot.into_val(), &[module.const_int(0)], None);
 
             islot.add_incoming(&[(llvm_block, first_islot), (loop_block, next_islot)]);
 
@@ -1480,7 +1493,7 @@ unsafe fn emit_basic_block<'a>(
                 builder.build_struct_gep(
                     create_itable_decompress(
                         builder,
-                        builder.build_load(builder.build_struct_gep(islot, 1, None), None),
+                        builder.build_load(builder.build_struct_gep(islot.into_val(), 1, None), None),
                         &module.types
                     ),
                     method.virtual_slot,
