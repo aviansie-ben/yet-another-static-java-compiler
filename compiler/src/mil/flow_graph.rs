@@ -3,7 +3,6 @@ use std::fmt;
 use std::hash::Hash;
 
 use itertools::Itertools;
-use smallvec::SmallVec;
 
 use super::il::*;
 

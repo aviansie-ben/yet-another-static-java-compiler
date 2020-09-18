@@ -10,7 +10,7 @@ use std::sync::Arc;
 use bitflags::bitflags;
 use itertools::Itertools;
 
-use crate::classfile::{Class, ConstantPoolEntry, Field, FieldFlags, PrimitiveType};
+use crate::classfile::{Class, ConstantPoolEntry, Field, FieldFlags};
 use crate::layout;
 use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, ResolvedClass};
 use crate::static_interp::Value;
@@ -924,15 +924,6 @@ impl <'a> Drop for JavaStaticHeap<'a> {
 mod tests {
     use super::*;
 
-    use std::sync::Arc;
-
-    use itertools::Itertools;
-    use lazy_static::lazy_static;
-
-    use crate::resolve;
-    use crate::classfile::{ClassFlags, ClassMeta, ConstantClass, ConstantPoolEntry, Field, FieldFlags, TypeDescriptor};
-    use crate::layout::{compute_all_layouts, ObjectLayout};
-    use crate::liveness;
     use crate::test_util::TEST_ENV;
 
     #[test]

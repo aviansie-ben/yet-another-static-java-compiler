@@ -2,10 +2,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Clone)]
-pub struct Log<'a>(Option<Arc<Mutex<&'a mut dyn std::io::Write>>>);
+pub struct Log<'a>(Option<Arc<Mutex<&'a mut dyn Write>>>);
 
 impl <'a> Log<'a> {
-    pub fn new(w: &'a mut dyn std::io::Write) -> Log<'a> {
+    pub fn new(w: &'a mut dyn Write) -> Log<'a> {
         Log(Some(Arc::new(Mutex::new(w))))
     }
 
@@ -13,7 +13,7 @@ impl <'a> Log<'a> {
         Log(None)
     }
 
-    pub fn lock(&self) -> Option<MutexGuard<&'a mut dyn std::io::Write>> {
+    pub fn lock(&self) -> Option<MutexGuard<&'a mut dyn Write>> {
         if let Some(ref mutex) = self.0 {
             Some(mutex.lock().unwrap())
         } else {
