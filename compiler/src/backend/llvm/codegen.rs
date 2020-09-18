@@ -27,7 +27,8 @@ unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValue
 fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValue<'a>>) -> LLVMValue<'a> {
     match *op {
         MilOperand::Register(r) => regs[&r],
-        MilOperand::Null => module.const_obj_null(),
+        MilOperand::AddrNull => module.const_addr_null(),
+        MilOperand::RefNull => module.const_obj_null(),
         MilOperand::KnownObject(object_id, _) => unsafe {
             LLVMValue::from_raw(LLVMConstPointerCast(
                 module.find_known_object(object_id).ptr(),
@@ -45,6 +46,7 @@ fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs:
 fn native_arg_type(ty: MilType, types: &LLVMTypes) -> LLVMTypeRef {
     match ty {
         MilType::Void => types.void,
+        MilType::Addr => types.any_raw_pointer,
         MilType::Ref => types.any_object_pointer,
         MilType::Bool => unreachable!(),
         MilType::Int => types.int,
@@ -83,10 +85,10 @@ fn create_instance_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, o
     )
 }
 
-fn create_vtable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue<'a>, class_id: ClassId, types: &LLVMTypes) -> LLVMValue<'a> {
+fn create_vtable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     builder.build_int_to_ptr(
         builder.build_nuw_sub(compressed, unsafe { LLVMValue::from_raw(LLVMConstInt(types.int, 8, 0)) }, None),
-        unsafe { LLVMPointerType(LLVMGlobalGetValueType(types.class_types[&class_id].vtable), 0) },
+        types.any_raw_pointer,
         None
     )
 }
@@ -99,11 +101,11 @@ fn create_itable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue
     )
 }
 
-fn create_vtable_load<'a>(builder: &LLVMBuilder<'a>, obj: LLVMValue<'a>, class_id: ClassId, types: &LLVMTypes) -> LLVMValue<'a> {
+fn create_vtable_load<'a>(builder: &LLVMBuilder<'a>, obj: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     let obj = builder.build_pointer_cast(obj, types.class_types[&ClassId::JAVA_LANG_OBJECT].field_ty, None);
     let vtable = builder.build_load(builder.build_struct_gep(obj, 0, None), None);
 
-    create_vtable_decompress(builder, vtable, class_id, types)
+    create_vtable_decompress(builder, vtable, types)
 }
 
 fn find_used_before_def(block: &MilBlock) -> impl Iterator<Item=MilRegister> {
@@ -175,7 +177,8 @@ fn coerce_after_load<'a>(builder: &LLVMBuilder<'a>, class_id: ClassId, val: LLVM
 
 fn undefined_register_value<'a>(module: &MochaModule<'a, '_, '_>, ty: MilType) -> LLVMValue<'a> {
     match ty {
-        MilType::Void => module.const_obj_null(),
+        MilType::Void => module.const_addr_null(),
+        MilType::Addr => module.const_addr_null(),
         MilType::Ref => module.const_obj_null(),
         MilType::Bool => module.const_bool(false),
         MilType::Int => module.const_int(0),
@@ -563,6 +566,12 @@ unsafe fn emit_basic_block<'a>(
                 );
 
                 set_register(builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
+            },
+            MilInstructionKind::GetVTable(tgt, ref obj) => {
+                let obj = create_value_ref(&module, obj, &local_regs);
+                let vtable = create_vtable_load(builder, obj, &module.types);
+
+                set_register(builder, func, &mut local_regs, all_regs, tgt, vtable, &module.types);
             }
         };
     };
@@ -585,14 +594,18 @@ unsafe fn emit_basic_block<'a>(
 
             set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
         },
-        MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
+        MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref vtable, ref args) => {
             let (_, method) = module.env.get_method(method_id);
-            let obj = create_value_ref(&module, obj, &local_regs);
+            let vtable = create_value_ref(&module, vtable, &local_regs);
             let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
-            let vtable = create_vtable_load(builder, obj, method_id.0, &module.types);
+            let vtable = builder.build_pointer_cast(
+                vtable,
+                LLVMPointerType(LLVMGlobalGetValueType(module.types.class_types[&method_id.0].vtable), 0),
+                None
+            );
             let vslot = builder.build_struct_gep(vtable, VTABLE_FIRST_VSLOT_FIELD as u32 + method.virtual_slot, None);
             let vslot = builder.build_load(vslot, None);
             let vslot = builder.build_pointer_cast(vslot, LLVMPointerType(module.types.method_types[&method_id], 0), None);
@@ -601,7 +614,7 @@ unsafe fn emit_basic_block<'a>(
 
             set_register(builder, func, &mut local_regs, all_regs, tgt, return_val, &module.types);
         },
-        MilEndInstructionKind::CallInterface(_, method_id, tgt, ref obj, ref args) => {
+        MilEndInstructionKind::CallInterface(_, method_id, tgt, ref vtable, ref args) => {
             let interface_vtable = LLVMValue::from_raw(LLVMConstIntCast(
                 LLVMConstAdd(
                     LLVMConstPointerCast(module.types.class_types[&method_id.0].vtable, module.types.long),
@@ -612,20 +625,19 @@ unsafe fn emit_basic_block<'a>(
             ));
 
             let (_, method) = module.env.get_method(method_id);
-            let obj = create_value_ref(&module, obj, &local_regs);
+            let vtable = create_value_ref(&module, vtable, &local_regs);
             let args = args.iter()
                 .map(|o| create_value_ref(&module, o, &local_regs))
                 .collect_vec();
 
+            let vtable = builder.build_pointer_cast(
+                vtable,
+                LLVMPointerType(LLVMGlobalGetValueType(module.types.class_types[&method_id.0].vtable), 0),
+                None
+            );
+
             let first_islot = builder.build_struct_gep(
-                builder.build_load(
-                    builder.build_struct_gep(
-                        create_vtable_load(builder, obj, ClassId::JAVA_LANG_OBJECT, &module.types),
-                        VTABLE_ITABLE_FIELD as u32,
-                        None
-                    ),
-                    None
-                ),
+                builder.build_load(builder.build_struct_gep(vtable, VTABLE_ITABLE_FIELD as u32, None), None),
                 0,
                 None
             );

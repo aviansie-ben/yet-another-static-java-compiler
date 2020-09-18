@@ -197,6 +197,7 @@ impl BitVecIndex for MilBlockId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MilType {
     Void,
+    Addr,
     Ref,
     Bool,
     Int,
@@ -226,6 +227,7 @@ impl fmt::Display for MilType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             MilType::Void => write!(f, "void"),
+            MilType::Addr => write!(f, "addr"),
             MilType::Ref => write!(f, "ref"),
             MilType::Bool => write!(f, "bool"),
             MilType::Int => write!(f, "int"),
@@ -292,7 +294,8 @@ pub struct MilKnownObjectId(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MilOperand {
     Register(MilRegister),
-    Null,
+    AddrNull,
+    RefNull,
     KnownObject(MilKnownObjectId, ClassId),
     Bool(bool),
     Int(i32),
@@ -305,7 +308,8 @@ impl MilOperand {
     pub fn get_const_type(&self) -> Option<MilType> {
         match *self {
             MilOperand::Register(_) => None,
-            MilOperand::Null => Some(MilType::Ref),
+            MilOperand::AddrNull => Some(MilType::Addr),
+            MilOperand::RefNull => Some(MilType::Ref),
             MilOperand::KnownObject(_, _) => Some(MilType::Ref),
             MilOperand::Bool(_) => Some(MilType::Bool),
             MilOperand::Int(_) => Some(MilType::Int),
@@ -321,7 +325,7 @@ impl MilOperand {
             Value::Long(val) => MilOperand::Long(val),
             Value::Float(val) => MilOperand::Float(val),
             Value::Double(val) => MilOperand::Double(val),
-            Value::Ref(None) => MilOperand::Null,
+            Value::Ref(None) => MilOperand::RefNull,
             Value::Ref(Some(val)) => {
                 let class_id = val.class_id();
                 MilOperand::KnownObject(known_objects.id_of(&val), class_id)
@@ -355,7 +359,8 @@ impl <'a> fmt::Display for PrettyMilOperand<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.0 {
             MilOperand::Register(reg) => write!(f, "{}", reg),
-            MilOperand::Null => write!(f, "ref:null"),
+            MilOperand::AddrNull => write!(f, "addr:null"),
+            MilOperand::RefNull => write!(f, "ref:null"),
             MilOperand::KnownObject(id, cls) => write!(f, "ref:<obj_{} {}>", id.0, self.1.get(cls).name(self.1)),
             MilOperand::Bool(val) => write!(f, "bool:{}", val),
             MilOperand::Int(val) => write!(f, "int:{}", val),
@@ -679,7 +684,8 @@ pub enum MilInstructionKind {
     GetStatic(FieldId, ClassId, MilRegister),
     PutStatic(FieldId, ClassId, MilOperand),
     AllocObj(ClassId, MilRegister),
-    AllocArray(ClassId, MilRegister, MilOperand)
+    AllocArray(ClassId, MilRegister, MilOperand),
+    GetVTable(MilRegister, MilOperand)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -780,6 +786,9 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
                 write!(f, "alloc_array <{}> {}, {}", self.1.get(class_id).name(self.1), tgt, len.pretty(self.1))?;
+            },
+            MilInstructionKind::GetVTable(tgt, ref obj) => {
+                write!(f, "get_vtable {}, {}", tgt, obj.pretty(self.1))?;
             }
         }
 
@@ -809,7 +818,8 @@ impl MilInstruction {
             MilInstructionKind::GetStatic(_, _, ref tgt) => Some(tgt),
             MilInstructionKind::PutStatic(_, _, _) => None,
             MilInstructionKind::AllocObj(_, ref tgt) => Some(tgt),
-            MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt)
+            MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt),
+            MilInstructionKind::GetVTable(ref tgt, _) => Some(tgt)
         }
     }
 
@@ -857,6 +867,9 @@ impl MilInstruction {
             MilInstructionKind::AllocObj(_, _) => {},
             MilInstructionKind::AllocArray(_, _, ref len) => {
                 f(len);
+            },
+            MilInstructionKind::GetVTable(_, ref obj) => {
+                f(obj);
             }
         };
     }
@@ -905,6 +918,9 @@ impl MilInstruction {
             MilInstructionKind::AllocObj(_, _) => {},
             MilInstructionKind::AllocArray(_, _, ref mut len) => {
                 f(len);
+            },
+            MilInstructionKind::GetVTable(_, ref mut obj) => {
+                f(obj);
             }
         };
     }

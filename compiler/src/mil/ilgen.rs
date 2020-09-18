@@ -281,7 +281,7 @@ fn read_param(builder: &mut MilBuilder, i: u16, param_constraint: MilClassConstr
         if param_constraint.class_id() != ClassId::UNRESOLVED {
             MilInstructionKind::GetParam(i.try_into().unwrap(), param_constraint, reg)
         } else {
-            MilInstructionKind::Copy(reg, MilOperand::Null)
+            MilInstructionKind::Copy(reg, MilOperand::RefNull)
         },
         0
     );
@@ -501,7 +501,7 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
 fn emit_npe_throw(builder: &mut MilBuilder, bc: u32) {
     // TODO Create an actual exception
     builder.append_end_instruction(
-        MilEndInstructionKind::Throw(MilOperand::Null),
+        MilEndInstructionKind::Throw(MilOperand::RefNull),
         bc
     );
 }
@@ -513,7 +513,7 @@ fn emit_null_check(builder: &mut MilBuilder, val: MilOperand, bc: u32) {
     let not_null_block = builder.end_block();
     builder.insert_end_instruction(
         check_block,
-        MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, not_null_block, val, MilOperand::Null),
+        MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, not_null_block, val, MilOperand::RefNull),
         bc
     );
 }
@@ -611,7 +611,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::AConstNull => {
                 let reg = builder.allocate_reg(MilType::Ref);
                 builder.append_instruction(
-                    MilInstructionKind::Copy(reg, MilOperand::Null),
+                    MilInstructionKind::Copy(reg, MilOperand::RefNull),
                     bc
                 );
                 stack.push(builder, reg, MilType::Ref);
@@ -1135,13 +1135,20 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let args = pop_args(&mut stack, builder, &cpe.descriptor.param_types, true);
 
                 emit_null_check(builder, args[0].clone(), bc);
+
+                let vtable = builder.allocate_reg(MilType::Addr);
+                builder.append_instruction(
+                    MilInstructionKind::GetVTable(vtable, args[0].clone()),
+                    bc
+                );
+
                 if class.flags.contains(ClassFlags::INTERFACE) {
                     builder.append_end_instruction(
                         MilEndInstructionKind::CallInterface(
                             ret_class,
                             cpe.method_id,
                             reg,
-                            args[0].clone(),
+                            MilOperand::Register(vtable),
                             args
                         ),
                         bc
@@ -1152,7 +1159,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                             ret_class,
                             cpe.method_id,
                             reg,
-                            args[0].clone(),
+                            MilOperand::Register(vtable),
                             args
                         ),
                         bc
@@ -1301,7 +1308,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                         MilRefComparison::Ne,
                         MilBlockId::ENTRY,
                         MilOperand::Register(stack.pop(builder, MilType::Ref)),
-                        MilOperand::Null
+                        MilOperand::RefNull
                     ),
                     bc
                 );
@@ -1322,7 +1329,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                         MilRefComparison::Eq,
                         MilBlockId::ENTRY,
                         MilOperand::Register(stack.pop(builder, MilType::Ref)),
-                        MilOperand::Null
+                        MilOperand::RefNull
                     ),
                     bc
                 );
@@ -1496,7 +1503,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 };
 
                 builder.append_end_instruction(
-                    MilEndInstructionKind::Throw(MilOperand::Null),
+                    MilEndInstructionKind::Throw(MilOperand::RefNull),
                     bc
                 );
             },

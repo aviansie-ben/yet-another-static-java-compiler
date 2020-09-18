@@ -10,6 +10,7 @@ use crate::mil::il::*;
 use crate::resolve::{ClassEnvironment, ClassId};
 
 pub struct ClassConstraints {
+    vtables: HashMap<MilRegister, MilOperand>,
     global: HashMap<MilRegister, MilClassConstraint>,
     blocks: HashMap<MilBlockId, BTreeMap<MilRegister, MilClassConstraint>>
 }
@@ -17,17 +18,18 @@ pub struct ClassConstraints {
 impl ClassConstraints {
     pub fn new() -> ClassConstraints {
         ClassConstraints {
+            vtables: HashMap::new(),
             global: HashMap::new(),
             blocks: HashMap::new()
         }
     }
 
     pub fn at_block(&self, block_id: MilBlockId) -> BlockClassConstraints {
-        BlockClassConstraints(self.blocks.get(&block_id), &self.global)
+        BlockClassConstraints(self.blocks.get(&block_id), &self.global, &self.vtables)
     }
 
     pub fn at_block_mut(&mut self, block_id: MilBlockId) -> BlockClassConstraintsMut {
-        BlockClassConstraintsMut(self.blocks.entry(block_id).or_insert_with(BTreeMap::new), &self.global)
+        BlockClassConstraintsMut(self.blocks.entry(block_id).or_insert_with(BTreeMap::new), &self.global, &self.vtables)
     }
 
     pub fn find(&self, reg: MilRegister) -> Option<MilClassConstraint> {
@@ -37,10 +39,14 @@ impl ClassConstraints {
     pub fn set(&mut self, reg: MilRegister, constraint: MilClassConstraint) -> bool {
         self.global.insert(reg, constraint) != Some(constraint)
     }
+
+    pub fn set_vtable_of(&mut self, reg: MilRegister, obj: MilOperand) {
+        self.vtables.insert(reg, obj);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BlockClassConstraints<'a>(Option<&'a BTreeMap<MilRegister, MilClassConstraint>>, &'a HashMap<MilRegister, MilClassConstraint>);
+pub struct BlockClassConstraints<'a>(Option<&'a BTreeMap<MilRegister, MilClassConstraint>>, &'a HashMap<MilRegister, MilClassConstraint>, &'a HashMap<MilRegister, MilOperand>);
 
 impl <'a> BlockClassConstraints<'a> {
     pub fn find(&self, reg: MilRegister) -> Option<MilClassConstraint> {
@@ -55,13 +61,22 @@ impl <'a> BlockClassConstraints<'a> {
         match *val {
             MilOperand::Register(reg) => self.find(reg),
             MilOperand::KnownObject(_, class_id) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-            MilOperand::Null => Some(MilClassConstraint::null()),
+            MilOperand::RefNull => Some(MilClassConstraint::null()),
             _ => None
         }
     }
 
+    pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
+        let val = match *val {
+            MilOperand::Register(reg) => self.2.get(&reg),
+            _ => None
+        };
+
+        val.and_then(|val| self.find_operand(&val))
+    }
+
     pub fn with_edge_constraints<'b>(self, edge_constraints: &'b BTreeMap<MilRegister, MilClassConstraint>) -> BlockWithEdgeClassConstraints<'b> where 'a: 'b {
-        BlockWithEdgeClassConstraints(edge_constraints, BlockClassConstraints(self.0, self.1))
+        BlockWithEdgeClassConstraints(edge_constraints, self)
     }
 
     pub fn remove_unneeded_edge_constraints(&self, edge_constraints: &mut BTreeMap<MilRegister, MilClassConstraint>) {
@@ -88,6 +103,15 @@ impl <'a> BlockWithEdgeClassConstraints<'a> {
         }
     }
 
+    pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
+        let val = match *val {
+            MilOperand::Register(reg) => (self.1).2.get(&reg),
+            _ => None
+        };
+
+        val.and_then(|val| self.find_operand(&val))
+    }
+
     pub fn union_into(&self, result: &mut BTreeMap<MilRegister, MilClassConstraint>, env: &ClassEnvironment) {
         for (&reg, &edge_constraint) in self.0.iter() {
             result.entry(reg)
@@ -110,11 +134,11 @@ impl <'a> BlockWithEdgeClassConstraints<'a> {
 }
 
 #[derive(Debug)]
-pub struct BlockClassConstraintsMut<'a>(&'a mut BTreeMap<MilRegister, MilClassConstraint>, &'a HashMap<MilRegister, MilClassConstraint>);
+pub struct BlockClassConstraintsMut<'a>(&'a mut BTreeMap<MilRegister, MilClassConstraint>, &'a HashMap<MilRegister, MilClassConstraint>, &'a HashMap<MilRegister, MilOperand>);
 
 impl BlockClassConstraintsMut<'_> {
     pub fn as_ref(&self) -> BlockClassConstraints {
-        BlockClassConstraints(Some(self.0), self.1)
+        BlockClassConstraints(Some(self.0), self.1, self.2)
     }
 
     pub fn find(&self, reg: MilRegister) -> Option<MilClassConstraint> {
@@ -123,6 +147,15 @@ impl BlockClassConstraintsMut<'_> {
 
     pub fn find_operand(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         self.as_ref().find_operand(val)
+    }
+
+    pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
+        let val = match *val {
+            MilOperand::Register(reg) => self.2.get(&reg),
+            _ => None
+        };
+
+        val.and_then(|val| self.find_operand(&val))
     }
 
     pub fn set(&mut self, reg: MilRegister, constraint: MilClassConstraint) -> bool {
@@ -169,7 +202,8 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::GetStatic(_, class_id, _) => Some(MilClassConstraint::for_class(class_id)),
         MilInstructionKind::PutStatic(_, _, _) => None,
         MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-        MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact())
+        MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
+        MilInstructionKind::GetVTable(_, _) => None
     }
 }
 
@@ -209,6 +243,14 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                     constraints.set(tgt, constraint);
                 };
             };
+
+            match instr.kind {
+                MilInstructionKind::GetVTable(tgt, ref obj) => {
+                    log_writeln!(log, "  {} <- vtable of {}", tgt, obj.pretty(env));
+                    constraints.set_vtable_of(tgt, obj.clone());
+                },
+                _ => {}
+            }
         };
 
         if let Some(constraint) = class_constraint_for_end_instr(&block.end_instr.kind) {
@@ -221,14 +263,14 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
 
         match block.end_instr.kind {
-            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, target_block_id, MilOperand::Register(lhs), MilOperand::RefNull) => {
                 log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
                 log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
 
                 edge_constraints.entry((block_id, target_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::null());
                 edge_constraints.entry((block_id, next_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::non_null());
             },
-            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::Null) => {
+            MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, target_block_id, MilOperand::Register(lhs), MilOperand::RefNull) => {
                 log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
                 log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
 
@@ -264,7 +306,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         let block = &func.blocks[&block_id];
 
         let mut block_constraints_owned = constraints.at_block(block_id).0.unwrap_or(&empty_constraints).clone();
-        let mut block_constraints = BlockClassConstraintsMut(&mut block_constraints_owned, &constraints.global);
+        let mut block_constraints = BlockClassConstraintsMut(&mut block_constraints_owned, &constraints.global, &constraints.vtables);
         let mut changed = false;
 
         // First, gather constraints from incoming edges and figure out what registers need to be updated based on this
@@ -349,55 +391,55 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
         for instr in block.instrs.iter_mut() {
             instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
-                if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+                if op != &MilOperand::RefNull && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
                     log_writeln!(log, "  Replacing {} in {} with ref:null", op.pretty(env), block_id);
-                    *op = MilOperand::Null;
+                    *op = MilOperand::RefNull;
                 };
             });
         };
 
         block.end_instr.for_operands_mut(|op| if let Some(constraint) = block_constraints.find_operand(op) {
-            if op != &MilOperand::Null && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
+            if op != &MilOperand::RefNull && constraint.nullable() && constraint.class_id() == ClassId::UNRESOLVED {
                 log_writeln!(log, "  Replacing {} in {} with ref:null", op.pretty(env), block_id);
-                *op = MilOperand::Null;
+                *op = MilOperand::RefNull;
             };
         });
 
         match block.end_instr.kind {
-            MilEndInstructionKind::JumpIfRCmp(cmp, target_block, ref val, MilOperand::Null)
-            | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Null, ref val) => {
+            MilEndInstructionKind::JumpIfRCmp(cmp, target_block, ref val, MilOperand::RefNull)
+            | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::RefNull, ref val) => {
                 if let Some(constraint) = block_constraints.find_operand(val) {
                     if !constraint.nullable() {
                         log_writeln!(log, "  Folding conditional at end of {} since {} is never null", block_id, val.pretty(env));
-                        block.end_instr.kind = MilEndInstructionKind::JumpIfRCmp(cmp.reverse(), target_block, MilOperand::Null, MilOperand::Null);
+                        block.end_instr.kind = MilEndInstructionKind::JumpIfRCmp(cmp.reverse(), target_block, MilOperand::RefNull, MilOperand::RefNull);
                         num_changes += 1;
                     };
                 };
             },
-            MilEndInstructionKind::CallInterface(return_class_id, method_id, tgt, ref recv, ref args) => {
-                if let Some(constraint) = block_constraints.find_operand(recv) {
+            MilEndInstructionKind::CallInterface(return_class_id, method_id, tgt, ref vtable, ref args) => {
+                if let Some(constraint) = block_constraints.find_vtable_of(vtable) {
                     if constraint.class_id() != ClassId::UNRESOLVED {
                         let method = env.get_method(method_id).1;
 
                         for class_id in env.get_class_chain(constraint.class_id()) {
                             if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
                                 log_writeln!(log, "  Replacing interface call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
-                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
+                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, vtable.clone(), args.clone());
                                 break;
                             };
                         };
                     };
                 };
             },
-            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref recv, ref args) => {
-                if let Some(constraint) = block_constraints.find_operand(recv) {
+            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref vtable, ref args) => {
+                if let Some(constraint) = block_constraints.find_vtable_of(vtable) {
                     if constraint.class_id() != ClassId::UNRESOLVED {
                         let method = env.get_method(method_id).1;
 
                         for class_id in env.get_class_chain(constraint.class_id()) {
                             if let Some(overrider_id) = method.overrides.overridden_by.iter().find(|&overrider_id| overrider_id.0 == class_id).copied() {
                                 log_writeln!(log, "  Replacing virtual call to {} in {} with virtual call to {}", MethodName(method_id, env), block_id, MethodName(overrider_id, env));
-                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, recv.clone(), args.clone());
+                                block.end_instr.kind = MilEndInstructionKind::CallVirtual(return_class_id, overrider_id, tgt, vtable.clone(), args.clone());
                                 break;
                             };
                         };
@@ -408,8 +450,8 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
 
         match block.end_instr.kind {
-            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref recv, ref args) => {
-                if let Some(constraint) = block_constraints.find_operand(recv) {
+            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, ref vtable, ref args) => {
+                if let Some(constraint) = block_constraints.find_vtable_of(vtable) {
                     if constraint.is_exact() {
                         log_writeln!(log, "  Devirtualizing call to {} in {} since receiver type is known to be exact", MethodName(method_id, env), block_id);
                         block.end_instr.kind = MilEndInstructionKind::Call(return_class_id, method_id, tgt, args.clone());

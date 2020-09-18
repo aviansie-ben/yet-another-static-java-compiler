@@ -174,12 +174,12 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
 
 fn try_fold_constant_jump(instr: &mut MilEndInstructionKind, fallthrough_block: MilBlockId) -> Option<MilBlockId> {
     Some(match *instr {
-        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Null, MilOperand::Null) => match cmp {
+        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::RefNull, MilOperand::RefNull) => match cmp {
             MilRefComparison::Eq => target_block,
             MilRefComparison::Ne => fallthrough_block
         },
-        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::Null, MilOperand::KnownObject(_, _))
-        | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::KnownObject(_, _), MilOperand::Null) => match cmp {
+        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::RefNull, MilOperand::KnownObject(_, _))
+        | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::KnownObject(_, _), MilOperand::RefNull) => match cmp {
             MilRefComparison::Eq => fallthrough_block,
             MilRefComparison::Ne => target_block
         },
@@ -309,8 +309,8 @@ mod tests {
     fn test_eliminate_trivial_dead_block() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
-        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
         let mut cfg = FlowGraph::for_function(&func);
@@ -328,7 +328,7 @@ mod tests {
     fn test_eliminate_dead_block_with_edge_to_live_block() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(0))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -353,7 +353,7 @@ mod tests {
             MilBlockId(1),
             &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(2), MilBlockId(2))] }],
             &[],
-            MilEndInstructionKind::Return(MilOperand::Null)
+            MilEndInstructionKind::Return(MilOperand::RefNull)
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
@@ -376,7 +376,7 @@ mod tests {
     fn test_eliminate_dead_block_single_loop() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -394,7 +394,7 @@ mod tests {
     fn test_eliminate_dead_block_multi_loop() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
@@ -415,11 +415,11 @@ mod tests {
     fn test_no_eliminate_live_blocks() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, MilBlockId(3), MilOperand::Null, MilOperand::Null)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, MilBlockId(3), MilOperand::RefNull, MilOperand::RefNull)));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(3), create_test_block(MilBlockId(3), &[], &[], MilEndInstructionKind::Jump(MilBlockId(2))));
-        func.blocks.insert(MilBlockId(4), create_test_block(MilBlockId(4), &[], &[], MilEndInstructionKind::Return(MilOperand::Null)));
+        func.blocks.insert(MilBlockId(4), create_test_block(MilBlockId(4), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
 
         let mut cfg = FlowGraph::for_function(&func);

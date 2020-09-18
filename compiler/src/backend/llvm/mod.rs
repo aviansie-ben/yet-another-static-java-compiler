@@ -45,6 +45,10 @@ impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
         self.find_known_object(self.known_objs.refs.classes[&class_id])
     }
 
+    fn const_addr_null(&self) -> LLVMValue<'a> {
+        unsafe { LLVMValue::from_raw(LLVMConstNull(self.types.any_raw_pointer)) }
+    }
+
     fn const_obj_null(&self) -> LLVMValue<'a> {
         unsafe { LLVMValue::from_raw(LLVMConstNull(self.types.any_object_pointer)) }
     }
