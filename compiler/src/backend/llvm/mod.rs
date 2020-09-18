@@ -143,7 +143,7 @@ unsafe fn declare_builtins(module: &LLVMModule, types: &LLVMTypes) -> LLVMMochaB
     }
 }
 
-unsafe fn create_builtin_class_table(env: &ClassEnvironment, ctx: &LLVMContext, module: &LLVMModule, types: &LLVMTypes) -> LLVMValueRef {
+unsafe fn create_builtin_class_table(module: &LLVMModule, types: &LLVMTypes) -> LLVMValueRef {
     let mut builtin_classes = ClassId::special_classes().map(|id| {
         // HACK: MethodHandle doesn't work yet, so don't try to use it
         if id != ClassId::JAVA_LANG_INVOKE_METHODHANDLE {
@@ -207,7 +207,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
     unsafe {
         let builtins = declare_builtins(&module, &types);
-        let builtin_class_table = LLVMValue::from_raw(create_builtin_class_table(env, ctx, &module, &types));
+        let builtin_class_table = LLVMValue::from_raw(create_builtin_class_table(&module, &types));
 
         let mut module = MochaModule {
             env,

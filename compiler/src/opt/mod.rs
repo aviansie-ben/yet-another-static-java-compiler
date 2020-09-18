@@ -12,10 +12,10 @@ pub mod class_constraints;
 pub mod value_prop;
 
 pub struct OptimizationEnvironment<'a, 'b, 'c> {
-    env: &'a ClassEnvironment,
-    heap: &'a JavaStaticHeap<'b>,
-    known_objects: &'a MilKnownObjectMap<'b>,
-    log: &'a Log<'c>
+    pub env: &'a ClassEnvironment,
+    pub heap: &'a JavaStaticHeap<'b>,
+    pub known_objects: &'a MilKnownObjectMap<'b>,
+    pub log: &'a Log<'c>
 }
 
 fn run_block_cleanup_group(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &OptimizationEnvironment) {

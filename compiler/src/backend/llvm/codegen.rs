@@ -73,7 +73,7 @@ fn create_meta_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, known
     builder.build_struct_gep(class_obj, class_ty.meta_fields[&field_id] as u32, None)
 }
 
-fn create_instance_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, obj: LLVMValue<'a>, known_objects: &MilKnownObjectMap, obj_map: &HashMap<NonNull<u8>, LLVMValue<'a>>, types: &LLVMTypes) -> LLVMValue<'a> {
+fn create_instance_field_gep<'a>(builder: &LLVMBuilder<'a>, field_id: FieldId, obj: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     let class_ty = &types.class_types[&field_id.0];
 
     builder.build_struct_gep(
@@ -465,7 +465,7 @@ unsafe fn emit_basic_block<'a>(
                 let obj = create_value_ref(&module, obj, &local_regs);
 
                 let val = builder.build_load(
-                    create_instance_field_gep(builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types),
+                    create_instance_field_gep(builder, field_id, obj, &module.types),
                     Some(register_name(tgt))
                 );
                 let val = coerce_after_load(builder, class_id, val, &module.types);
@@ -478,14 +478,14 @@ unsafe fn emit_basic_block<'a>(
 
                 builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
-                    create_instance_field_gep(builder, field_id, obj, &module.known_objs, &module.obj_map, &module.types)
+                    create_instance_field_gep(builder, field_id, obj, &module.types)
                 );
             },
             MilInstructionKind::GetArrayLength(tgt, ref obj) => {
                 let obj = create_value_ref(&module, obj, &local_regs);
 
                 let val = builder.build_load(
-                    create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj, &module.known_objs, &module.obj_map, &module.types),
+                    create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj,&module.types),
                     Some(register_name(tgt))
                 );
 
@@ -495,7 +495,7 @@ unsafe fn emit_basic_block<'a>(
                 let obj = create_value_ref(&module, obj, &local_regs);
                 let idx = create_value_ref(&module, idx, &local_regs);
 
-                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
+                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.types);
 
                 let val = builder.build_load(
                     builder.build_gep(arr_data, &[module.const_int(0), idx], None),
@@ -510,7 +510,7 @@ unsafe fn emit_basic_block<'a>(
                 let idx = create_value_ref(&module, idx, &local_regs);
                 let val = create_value_ref(&module, val, &local_regs);
 
-                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.known_objs, &module.obj_map, &module.types);
+                let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.types);
 
                 builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),

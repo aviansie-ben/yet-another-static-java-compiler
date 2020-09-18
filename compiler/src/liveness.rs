@@ -60,7 +60,7 @@ fn ensure_clinit(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: 
     ensure_clinit_unchecked(env, liveness, class_id, indent, verbose);
 }
 
-fn may_call_parent_virtual(env: &ClassEnvironment, liveness: &LivenessInfo, method: &Method) -> bool {
+fn may_call_parent_virtual(liveness: &LivenessInfo, method: &Method) -> bool {
     itertools::repeat_n(method.overrides.overrides_virtual, 1).chain(
         method.overrides.overrides_interface.iter().cloned()
     ).any(|parent_id| liveness.may_virtual_call.contains(&parent_id))
@@ -89,7 +89,7 @@ fn ensure_constructed(env: &ClassEnvironment, liveness: &mut LivenessInfo, class
     };
 
     for (i, m) in class.methods.iter().enumerate() {
-        if may_call_parent_virtual(env, liveness, m) {
+        if may_call_parent_virtual(liveness, m) {
             analyze_method(env, liveness, MethodId(class_id, i as u16), true, indent, verbose);
         };
     };

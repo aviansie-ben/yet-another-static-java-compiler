@@ -1200,5 +1200,6 @@ mod tests {
 
         let java_ref = heap.allocate_object(ClassId::JAVA_LANG_OBJECT);
         heap.rollback();
+        std::mem::drop(java_ref);
     }
 }

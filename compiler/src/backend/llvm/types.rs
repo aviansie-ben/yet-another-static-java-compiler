@@ -129,7 +129,7 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
                 let mut fields = vec![types.int, types.int, types.int];
                 let mut pads = vec![];
                 let mut field_map = HashMap::new();
-                let mut current_size = 12;
+                let current_size = 12;
 
                 field_map.insert(FieldId(class_id, 0), 2);
 
@@ -137,7 +137,6 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
                     let pad = align - (current_size % align);
                     pads.push((fields.len() as u32, pad));
                     fields.push(LLVMArrayType(types.byte, pad));
-                    current_size += pad;
                 };
 
                 field_map.insert(FieldId(class_id, 1), fields.len());
@@ -295,7 +294,7 @@ pub fn create_types(env: &ClassEnvironment, liveness: &LivenessInfo, ctx: &LLVMC
     }
 }
 
-unsafe fn emit_itable(module: &MochaModule, class_id: ClassId, liveness: &LivenessInfo) {
+unsafe fn emit_itable(module: &MochaModule, class_id: ClassId) {
     let islot_class = match **module.env.get(class_id) {
         ResolvedClass::User(ref class) => Some(class),
         ResolvedClass::Array(_) => Some(module.env.get(ClassId::JAVA_LANG_OBJECT).as_user_class()),
@@ -438,7 +437,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
 pub(super) fn emit_vtables(module: &MochaModule, liveness: &LivenessInfo) {
     for class_id in liveness.needs_class_object.iter().cloned() {
         unsafe {
-            emit_itable(module, class_id, liveness);
+            emit_itable(module, class_id);
             emit_vtable(module, class_id, liveness);
         };
     };

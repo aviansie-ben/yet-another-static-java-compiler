@@ -25,7 +25,7 @@ impl MilBuilder {
         }
     }
 
-    pub fn append_phi_node(&mut self, srcs: impl IntoIterator<Item=(MilRegister, MilBlockId)>, bc: u32) -> MilRegister {
+    pub fn append_phi_node(&mut self, srcs: impl IntoIterator<Item=(MilRegister, MilBlockId)>) -> MilRegister {
         assert!(self.current_block.instrs.is_empty());
 
         let mut ty = None;
@@ -316,7 +316,7 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
     };
 }
 
-fn generate_native_thunk(env: &ClassEnvironment, name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs) -> MilFunction {
+fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs) -> MilFunction {
     let mut builder = MilBuilder::new(method_id);
 
     let mut args = vec![];
@@ -578,13 +578,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
     let mut stack = MilVirtualStack::new(if !incoming_stacks.is_empty() {
         assert!(incoming_stacks.iter().skip(1).all(|(_, s)| s.len() == incoming_stacks[0].1.len()));
         (0..incoming_stacks[0].1.len()).map(|i| {
-            builder.append_phi_node(incoming_stacks.iter().map(|&(b, s)| (s[i], b)), off as u32)
+            builder.append_phi_node(incoming_stacks.iter().map(|&(b, s)| (s[i], b)))
         }).collect_vec()
     } else {
         vec![]
     });
 
-    let start_block = builder.end_block();
+    builder.end_block();
     let mut end_block = None;
 
     for (bc, instr) in BytecodeIterator(&code.code, off).take_while(|&(bc, _)| bc == off || !blocks.contains_key(&bc)) {
@@ -1571,7 +1571,7 @@ fn lower_il_in_method(env: &ClassEnvironment, func: &mut MilFunction, liveness: 
                     block.end_instr.kind = MilEndInstructionKind::Call(return_ty, method_id, result_reg, args);
                 };
             },
-            MilEndInstructionKind::CallInterface(return_ty, method_id, result_reg, _, _) => {
+            MilEndInstructionKind::CallInterface(_, method_id, _, _, _) => {
                 if !liveness.may_construct.contains(&method_id.0) {
                     block.end_instr.kind = MilEndInstructionKind::Unreachable;
                     truncated_blocks.push(block_id);
@@ -1605,7 +1605,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
 
     if method.flags.contains(MethodFlags::NATIVE) {
         let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
-        return Some(generate_native_thunk(env, name, method, method_id, known_objects));
+        return Some(generate_native_thunk(name, method, method_id, known_objects));
     } else if method.flags.contains(MethodFlags::ABSTRACT) {
         return None;
     };

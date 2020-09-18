@@ -12,17 +12,6 @@ use crate::mil::il::*;
 use crate::mil::transform;
 use crate::resolve::{ClassEnvironment, ResolvedClass};
 
-fn const_compare<T: Ord>(cmp: MilIntComparison, lhs: T, rhs: T) -> bool {
-    match cmp {
-        MilIntComparison::Eq => lhs == rhs,
-        MilIntComparison::Ne => lhs != rhs,
-        MilIntComparison::Gt => lhs > rhs,
-        MilIntComparison::Lt => lhs < rhs,
-        MilIntComparison::Ge => lhs >= rhs,
-        MilIntComparison::Le => lhs <= rhs
-    }
-}
-
 fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, known_objects: &MilKnownObjectMap) -> Option<MilOperand> {
     Some(match *instr {
         MilInstructionKind::Copy(_, ref val) => val.clone(),

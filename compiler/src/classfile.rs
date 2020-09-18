@@ -682,7 +682,7 @@ fn process_constant_pool(raw_constant_pool: Vec<RawConstantPoolEntry>) -> Result
                 resolve_utf8(&raw_constant_pool, i, type_index)?
             )),
             RawConstantPoolEntry::Utf8(ref val) => ConstantPoolEntry::Utf8(val.clone()),
-            RawConstantPoolEntry::MethodHandle { reference_kind, reference_index } => ConstantPoolEntry::MethodHandle({
+            RawConstantPoolEntry::MethodHandle { reference_kind: _, reference_index: _ } => ConstantPoolEntry::MethodHandle({
                 // TODO Implement this
                 ConstantMethodHandle {}
             }),

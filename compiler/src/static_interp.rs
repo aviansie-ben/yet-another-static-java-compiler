@@ -56,7 +56,7 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
 
                 add_may_construct(&mut summary, cpe.array_class_id);
             },
-            BytecodeInstruction::GetField(cpe) => {
+            BytecodeInstruction::GetField(_) => {
                 // TODO
             },
             BytecodeInstruction::GetStatic(cpe) => {
@@ -112,7 +112,7 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
                     ConstantPoolEntry::Class(ref cpe) => {
                         add_may_clinit(&mut summary, cpe.class_id);
                     },
-                    ConstantPoolEntry::String(ref cpe) => {
+                    ConstantPoolEntry::String(_) => {
                         if !summary.uses_strings.contains(&ConstantId(method_id.0, idx)) {
                             summary.uses_strings.push(ConstantId(method_id.0, idx));
                         };
@@ -135,7 +135,7 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
             BytecodeInstruction::NewArray(_) => {
                 // TODO
             },
-            BytecodeInstruction::PutField(cpe) => {
+            BytecodeInstruction::PutField(_) => {
                 // TODO
             },
             BytecodeInstruction::PutStatic(cpe) => {
@@ -275,7 +275,7 @@ pub enum StaticInterpretErrorKind {
 }
 
 impl From<AllocErr> for StaticInterpretErrorKind {
-    fn from(err: AllocErr) -> StaticInterpretErrorKind {
+    fn from(_: AllocErr) -> StaticInterpretErrorKind {
         StaticInterpretErrorKind::OutOfMemory
     }
 }
@@ -1039,10 +1039,6 @@ impl <'b> InterpreterStack<'b> {
         &self.stack[self.len() - 1 - depth]
     }
 
-    fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
-
     fn len(&self) -> usize {
         self.stack.len()
     }
@@ -1092,7 +1088,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         }
     }
 
-    fn find_virtual_target(&mut self, method_id: MethodId, receiver: JavaStaticRef<'b>, verbose: bool) -> Result<MethodId, StaticInterpretError> {
+    fn find_virtual_target(&mut self, method_id: MethodId, receiver: JavaStaticRef<'b>) -> Result<MethodId, StaticInterpretError> {
         let (decl_class, decl_method) = self.env.get_method(method_id);
 
         if decl_class.flags.contains(ClassFlags::INTERFACE) {
@@ -1118,7 +1114,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
         }
     }
 
-    fn find_receiver(&self, method_id: MethodId, verbose: bool) -> Result<Option<&JavaStaticRef<'b>>, StaticInterpretError> {
+    fn find_receiver(&self, method_id: MethodId) -> Result<Option<&JavaStaticRef<'b>>, StaticInterpretError> {
         let decl_method = self.env.get_method(method_id).1;
 
         let num_param_slots = decl_method.descriptor.param_types.iter().map(|t| {
@@ -1830,11 +1826,11 @@ fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: Metho
                 };
             },
             BytecodeInstruction::InvokeVirtual(idx) | BytecodeInstruction::InvokeInterface(idx, _) => {
-                let method_id = match state.class.constant_pool[idx as usize] {
+                match state.class.constant_pool[idx as usize] {
                     ConstantPoolEntry::Methodref(ref cpe) | ConstantPoolEntry::InterfaceMethodref(ref cpe) => {
-                        if let Some(receiver) = state.find_receiver(cpe.method_id, verbose)? {
+                        if let Some(receiver) = state.find_receiver(cpe.method_id)? {
                             let receiver = receiver.clone();
-                            let real_method_id = state.find_virtual_target(cpe.method_id, receiver, verbose)?;
+                            let real_method_id = state.find_virtual_target(cpe.method_id, receiver)?;
                             state.enter_method(real_method_id, verbose)?;
                         } else {
                             return StaticInterpretError::throw(StaticInterpretErrorKind::WouldThrowException(ClassId::JAVA_LANG_OBJECT), &state);
