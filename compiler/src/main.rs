@@ -2,7 +2,6 @@
 #![feature(btree_drain_filter)]
 #![feature(drain_filter)]
 #![feature(try_blocks)]
-#![feature(vec_remove_item)]
 
 pub mod log;
 
