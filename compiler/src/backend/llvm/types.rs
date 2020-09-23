@@ -310,7 +310,7 @@ unsafe fn emit_itable(module: &MochaModule, class_id: ClassId) {
                 let mut islots = islots.iter().cloned().map(|method_id| {
                     module.methods.get(&method_id).cloned().map_or_else(
                         || LLVMConstNull(module.types.any_function_pointer),
-                        |f| LLVMConstBitCast(f.ptr(), module.types.any_function_pointer)
+                        |f| LLVMConstBitCast(f.into_val().ptr(), module.types.any_function_pointer)
                     )
                 }).collect_vec();
 
@@ -366,7 +366,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
         vslot_class.layout.virtual_slots.iter().cloned().map(|method_id| {
             module.methods.get(&method_id).cloned().map_or_else(
                 || LLVMConstNull(module.types.any_function_pointer),
-                |f| LLVMConstBitCast(f.ptr(), module.types.any_function_pointer)
+                |f| LLVMConstBitCast(f.into_val().ptr(), module.types.any_function_pointer)
             )
         }).collect_vec()
     } else {

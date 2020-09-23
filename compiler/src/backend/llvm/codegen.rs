@@ -6,6 +6,7 @@ use std::ptr::NonNull;
 use itertools::Itertools;
 use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate};
 use llvm_sys::core::*;
+use llvm_sys::debuginfo::LLVMDIFlags;
 use llvm_sys::prelude::*;
 
 use crate::liveness::LivenessInfo;
@@ -17,11 +18,45 @@ use super::MochaModule;
 use super::types::{LLVMTypes, VTABLE_FIRST_VSLOT_FIELD, VTABLE_ITABLE_FIELD};
 use super::wrapper::*;
 
-unsafe fn define_function(module: &MochaModule, func: &MilFunction) -> LLVMValueRef {
+struct DebugLocationMap<'a, 'b> {
+    map: &'b MilLineMap,
+    di_builder: &'b LLVMDIBuilder<'a>,
+    dbg_func: LLVMMetadata<'a>,
+    locs: HashMap<u32, LLVMMetadata<'a>>
+}
+
+impl <'a, 'b> DebugLocationMap<'a, 'b> {
+    pub fn new(map: &'b MilLineMap, di_builder: &'b LLVMDIBuilder<'a>, dbg_func: LLVMMetadata<'a>) -> DebugLocationMap<'a, 'b> {
+        DebugLocationMap {
+            map,
+            di_builder,
+            dbg_func,
+            locs: HashMap::new()
+        }
+    }
+
+    pub fn get_or_add_loc(&mut self, bc: u32) -> LLVMMetadata<'a> {
+        let map = self.map;
+        let di_builder = self.di_builder;
+        let dbg_func = self.dbg_func;
+
+        *self.locs.entry(bc).or_insert_with(|| {
+            let line = if bc != !0 {
+                map.get_line(bc).unwrap_or(0)
+            } else {
+                0
+            };
+
+            di_builder.create_debug_location(line, 0, dbg_func, None)
+        })
+    }
+}
+
+fn define_function<'a>(module: &MochaModule<'a, '_, '_>, func: &MilFunction) -> LLVMFunctionValue<'a> {
     let (class, method) = module.env.get_method(func.id);
     let name = CString::new(format!("{}.{}{}", class.meta.name, method.name, method.descriptor)).unwrap();
 
-    LLVMAddFunction(module.module.ptr(), name.as_ptr(), module.types.method_types[&func.id])
+    module.module.add_function(&name, module.types.method_types[&func.id])
 }
 
 fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValue<'a>>) -> LLVMValue<'a> {
@@ -198,7 +233,8 @@ unsafe fn emit_basic_block<'a>(
     locals: &mut HashMap<MilLocalId, LLVMValue<'a>>,
     llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, Option<LLVMValue<'a>>)>,
     all_regs: &mut HashMap<MilRegister, LLVMValue<'a>>,
-    phis_to_add: &mut Vec<(LLVMPhiValue<'a>, MilBlockId, MilOperand)>
+    phis_to_add: &mut Vec<(LLVMPhiValue<'a>, MilBlockId, MilOperand)>,
+    debug_locs: &mut DebugLocationMap<'_, 'a>
 ) {
     let mut local_regs = HashMap::new();
 
@@ -209,6 +245,7 @@ unsafe fn emit_basic_block<'a>(
     let mut cond_out = None;
 
     LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
+    builder.set_current_debug_location(None);
 
     if !cfg.get(block_id).incoming.is_empty() {
         for reg in find_used_before_def(block) {
@@ -246,6 +283,7 @@ unsafe fn emit_basic_block<'a>(
     };
 
     for instr in block.instrs.iter() {
+        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(instr.bytecode.1)));
         match instr.kind {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(tgt, ref src) => {
@@ -576,6 +614,7 @@ unsafe fn emit_basic_block<'a>(
         };
     };
 
+    builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(block.end_instr.bytecode.1)));
     match block.end_instr.kind {
         MilEndInstructionKind::Nop => {},
         MilEndInstructionKind::Unreachable => {
@@ -587,7 +626,7 @@ unsafe fn emit_basic_block<'a>(
                 .collect_vec();
 
             let val = builder.build_call(
-                module.methods[&method_id],
+                module.methods[&method_id].into_val(),
                 &args[..],
                 Some(register_name(tgt))
             );
@@ -758,12 +797,32 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let llvm_func = module.methods[&func.id];
     let builder = module.ctx.create_builder();
 
-    LLVMSetGC(llvm_func.ptr(), "statepoint-example\0".as_ptr() as *const c_char);
+    let (ref dir, ref file) = func.source_file;
+    let dbg_file = module.di_builder.create_file(file, dir);
+
+    let dbg_func = module.di_builder.create_function(
+        module.compile_unit,
+        dbg_file,
+        func.line_map.get_line(0).unwrap_or(0),
+        &format!("{}", MethodName(func.id, module.env)),
+        "",
+        None,
+        &[],
+        true,
+        LLVMDIFlags::LLVMDIFlagZero,
+        true
+    );
+
+    llvm_func.set_subprogram(dbg_func);
+
+    let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, dbg_func);
+
+    LLVMSetGC(llvm_func.into_val().ptr(), "statepoint-example\0".as_ptr() as *const c_char);
 
     let mut llvm_blocks = HashMap::new();
 
     let mut locals = HashMap::new();
-    let start_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"start\0".as_ptr() as *const c_char);
+    let start_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.into_val().ptr(), b"start\0".as_ptr() as *const c_char);
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
 
     for (&local_id, local) in func.reg_map.local_info.iter() {
@@ -777,8 +836,10 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let mut phis_to_add = vec![];
 
     for block_id in func.block_order.iter().cloned() {
-        emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func, &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add);
+        emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func.into_val(), &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add, &mut debug_locs);
     };
+
+    builder.set_current_debug_location(None);
 
     for (reg, info) in func.reg_map.all_regs() {
         if !all_regs.contains_key(&reg) && info.ty != MilType::Void {
@@ -790,6 +851,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         phi.add_incoming(&[(llvm_blocks[&pred].1, create_value_ref(module, &val, &all_regs))]);
     };
 
+    builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(0)));
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
     builder.build_br(llvm_blocks[&func.block_order[0]].0);
 
@@ -799,6 +861,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
         LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
+        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(block.end_instr.bytecode.1)));
         match block.end_instr.kind {
             MilEndInstructionKind::Unreachable => {},
             MilEndInstructionKind::Jump(tgt) => {
@@ -821,7 +884,7 @@ pub(super) fn define_functions(program: &MilProgram, module: &mut MochaModule, l
         if let Some(func) = program.funcs.get(&method_id) {
             module.methods.insert(
                 method_id,
-                unsafe { LLVMValue::from_raw(define_function(&module, func)) }
+                define_function(&module, func)
             );
         };
     };

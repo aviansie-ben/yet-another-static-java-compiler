@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use smallvec::SmallVec;
 
@@ -1213,13 +1214,42 @@ impl <'a> fmt::Display for PrettyMilBlock<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilLineMap {
+    table: Option<Arc<[(u16, u16)]>>
+}
+
+impl MilLineMap {
+    pub fn from_table(table: Option<Arc<[(u16, u16)]>>) -> MilLineMap {
+        MilLineMap { table }
+    }
+
+    pub fn empty() -> MilLineMap {
+        MilLineMap::from_table(None)
+    }
+
+    pub fn get_line(&self, bc: u32) -> Option<u32> {
+        if let Some(ref table) = self.table {
+            match table.binary_search_by_key(&bc, |&(bc, _)| bc as u32) {
+                Ok(idx) => Some(table[idx].1 as u32),
+                Err(0) => None,
+                Err(idx) => Some(table[idx - 1].1 as u32)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MilFunction {
     pub id: MethodId,
     pub reg_alloc: MilRegisterAllocator,
     pub reg_map: MilRegisterMap,
     pub block_alloc: MilBlockIdAllocator,
     pub blocks: HashMap<MilBlockId, MilBlock>,
-    pub block_order: Vec<MilBlockId>
+    pub block_order: Vec<MilBlockId>,
+    pub source_file: (String, String),
+    pub line_map: MilLineMap
 }
 
 impl MilFunction {
@@ -1230,7 +1260,9 @@ impl MilFunction {
             reg_map: MilRegisterMap::new(),
             block_alloc: MilBlockIdAllocator::new(),
             blocks: HashMap::new(),
-            block_order: vec![]
+            block_order: vec![],
+            source_file: (String::new(), String::new()),
+            line_map: MilLineMap::empty()
         }
     }
 

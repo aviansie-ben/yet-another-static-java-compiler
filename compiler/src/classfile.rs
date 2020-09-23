@@ -435,11 +435,27 @@ pub struct AttributeCode {
     pub attributes: Vec<Attribute>
 }
 
+impl AttributeCode {
+    pub fn line_table(&self) -> Option<&Arc<[(u16, u16)]>> {
+        for attr in self.attributes.iter() {
+            match attr.data {
+                AttributeData::LineNumberTable(ref table) => {
+                    return Some(table);
+                },
+                _ => {}
+            }
+        };
+        None
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AttributeData {
     Unknown(Box<[u8]>),
     Code(AttributeCode),
-    ConstantData(u16)
+    ConstantData(u16),
+    LineNumberTable(Arc<[(u16, u16)]>),
+    SourceFile(u16)
 }
 
 #[derive(Debug, Clone)]
@@ -457,7 +473,8 @@ pub struct ClassMeta {
     pub extra_interface_overrides: Vec<(MethodId, MethodId)>,
     pub clinit_method: Option<u16>,
 
-    pub name: Arc<str>
+    pub name: Arc<str>,
+    pub source_file: Option<Arc<str>>
 }
 
 #[derive(Debug, Clone)]
@@ -496,7 +513,8 @@ impl Class {
                 all_interface_ids: vec![],
                 extra_interface_overrides: vec![],
                 clinit_method: None,
-                name: Arc::from(String::new().into_boxed_str())
+                name: Arc::from(String::new().into_boxed_str()),
+                source_file: None
             }
         }
     }
@@ -762,6 +780,24 @@ fn parse_attribute<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Resu
         "ConstantData" => {
             AttributeData::ConstantData(r.read_u16::<BigEndian>()?)
         },
+        "LineNumberTable" => {
+            let len = r.read_u16::<BigEndian>()?;
+            let mut table = Vec::with_capacity(len as usize);
+
+            for _ in 0..len {
+                let bc = r.read_u16::<BigEndian>()?;
+                let line = r.read_u16::<BigEndian>()?;
+
+                table.push((bc, line));
+            };
+
+            table.sort_by_key(|&(bc, _)| bc);
+
+            AttributeData::LineNumberTable(Arc::from(table.into_boxed_slice()))
+        },
+        "SourceFile" => {
+            AttributeData::SourceFile(r.read_u16::<BigEndian>()?)
+        },
         _ => {
             let mut data = vec![0_u8; len].into_boxed_slice();
             r.read_exact(&mut data)?;
@@ -925,7 +961,7 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
 
     let clinit_method = find_clinit_method(&methods);
 
-    Result::Ok(Class {
+    let mut class = Class {
         version: (version_major, version_minor),
         constant_pool,
         flags,
@@ -943,7 +979,22 @@ pub fn parse_class_file<R: Read>(r: &mut R) -> Result<Class, ClassFileReadError>
             all_interface_ids: vec![],
             extra_interface_overrides: vec![],
             clinit_method,
-            name: Arc::from(String::new().into_boxed_str())
+            name: Arc::from(String::new().into_boxed_str()),
+            source_file: None
         }
-    })
+    };
+
+    for attr in class.attributes.iter() {
+        match attr.data {
+            AttributeData::SourceFile(idx) => {
+                class.meta.source_file = match class.constant_pool.get(idx as usize) {
+                    Some(ConstantPoolEntry::Utf8(ref val)) => Some(Arc::clone(&val)),
+                    _ => None
+                };
+            },
+            _ => {}
+        };
+    };
+
+    Ok(class)
 }

@@ -1,11 +1,12 @@
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::os::raw::c_char;
 
 use itertools::Itertools;
-use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate};
+use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate, LLVMModuleFlagBehavior};
 use llvm_sys::bit_writer::*;
 use llvm_sys::core::*;
+use llvm_sys::debuginfo::*;
 use llvm_sys::prelude::*;
 
 #[derive(Debug)]
@@ -30,6 +31,7 @@ impl LLVMContext {
         let name = CString::new(name).unwrap();
         unsafe {
             LLVMModule::from_raw(
+                self,
                 LLVMModuleCreateWithNameInContext(name.as_ptr(), self.ptr()),
                 name
             )
@@ -38,7 +40,7 @@ impl LLVMContext {
 
     pub fn create_builder(&self) -> LLVMBuilder {
         unsafe {
-            LLVMBuilder::from_raw(LLVMCreateBuilderInContext(self.ptr()))
+            LLVMBuilder::from_raw(self, LLVMCreateBuilderInContext(self.ptr()))
         }
     }
 }
@@ -52,15 +54,33 @@ impl Drop for LLVMContext {
 }
 
 #[derive(Debug)]
-pub struct LLVMModule<'a>(PhantomData<&'a LLVMContext>, LLVMModuleRef, CString);
+pub struct LLVMModule<'a>(&'a LLVMContext, LLVMModuleRef, CString);
 
 impl <'a> LLVMModule<'a> {
-    pub unsafe fn from_raw(ptr: LLVMModuleRef, name: CString) -> LLVMModule<'a> {
-        LLVMModule(PhantomData, ptr, name)
+    pub unsafe fn from_raw(ctx: &'a LLVMContext, ptr: LLVMModuleRef, name: CString) -> LLVMModule<'a> {
+        LLVMModule(ctx, ptr, name)
+    }
+
+    pub fn ctx(&self) -> &'a LLVMContext {
+        self.0
     }
 
     pub fn ptr(&self) -> LLVMModuleRef {
         self.1
+    }
+
+    pub fn add_function(&self, name: &CStr, func_ty: LLVMTypeRef) -> LLVMFunctionValue<'a> {
+        unsafe {
+            LLVMFunctionValue::from_val_unchecked(LLVMValue::from_raw(
+                LLVMAddFunction(self.ptr(), name.as_ptr(), func_ty)
+            ))
+        }
+    }
+
+    pub fn add_flag(&self, behavior: LLVMModuleFlagBehavior, name: &str, metadata: LLVMMetadata<'a>) {
+        unsafe {
+            LLVMAddModuleFlag(self.ptr(), behavior, name.as_ptr() as *const c_char, name.len(), metadata.ptr())
+        }
     }
 
     pub fn write_bitcode_to_file(&self, file: &str) -> Result<(), i32> {
@@ -70,6 +90,12 @@ impl <'a> LLVMModule<'a> {
                 0 => Result::Ok(()),
                 err => Result::Err(err)
             }
+        }
+    }
+
+    pub fn create_di_builder(&self) -> LLVMDIBuilder<'a> {
+        unsafe {
+            LLVMDIBuilder::from_raw(self.ctx(), LLVMCreateDIBuilder(self.ptr()))
         }
     }
 }
@@ -122,8 +148,165 @@ impl <'a> LLVMPhiValue<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LLVMFunctionValue<'a>(LLVMValue<'a>);
+
+impl <'a> LLVMFunctionValue<'a> {
+    pub unsafe fn from_val_unchecked(val: LLVMValue<'a>) -> LLVMFunctionValue<'a> {
+        LLVMFunctionValue(val)
+    }
+
+    pub fn into_val(self) -> LLVMValue<'a> {
+        self.0
+    }
+
+    pub fn set_subprogram(&self, subprogram: LLVMMetadata<'a>) {
+        unsafe {
+            LLVMSetSubprogram(self.into_val().ptr(), subprogram.ptr());
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LLVMMetadata<'a>(PhantomData<&'a LLVMContext>, LLVMMetadataRef);
+
+impl <'a> LLVMMetadata<'a> {
+    pub unsafe fn from_raw(ptr: LLVMMetadataRef) -> LLVMMetadata<'a> {
+        LLVMMetadata(PhantomData, ptr)
+    }
+
+    pub fn from_value(val: LLVMValue<'a>) -> LLVMMetadata<'a> {
+        unsafe {
+            LLVMMetadata::from_raw(LLVMValueAsMetadata(val.ptr()))
+        }
+    }
+
+    pub fn ptr(&self) -> LLVMMetadataRef {
+        self.1
+    }
+}
+
 #[derive(Debug)]
-pub struct LLVMBuilder<'a>(PhantomData<&'a LLVMContext>, LLVMBuilderRef);
+pub struct LLVMDIBuilder<'a>(&'a LLVMContext, LLVMDIBuilderRef);
+
+impl <'a> LLVMDIBuilder<'a> {
+    pub unsafe fn from_raw(ctx: &'a LLVMContext, ptr: LLVMDIBuilderRef) -> LLVMDIBuilder<'a> {
+        LLVMDIBuilder(ctx, ptr)
+    }
+
+    pub fn ctx(&self) -> &'a LLVMContext {
+        self.0
+    }
+
+    pub fn ptr(&self) -> LLVMDIBuilderRef {
+        self.1
+    }
+
+    unsafe fn wrap_metadata(&self, metadata: LLVMMetadataRef) -> LLVMMetadata<'a> {
+        LLVMMetadata::from_raw(metadata)
+    }
+
+    pub fn create_file(&self, file: &str, dir: &str) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateFile(
+                self.ptr(),
+                file.as_ptr() as *const c_char,
+                file.len(),
+                dir.as_ptr() as *const c_char,
+                dir.len()
+            ))
+        }
+    }
+
+    pub fn create_compile_unit(&self, lang: LLVMDWARFSourceLanguage, file: LLVMMetadata<'a>, producer: &str, is_optimized: bool, kind: LLVMDWARFEmissionKind) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateCompileUnit(
+                self.ptr(),
+                lang,
+                file.ptr(),
+                producer.as_ptr() as *const c_char,
+                producer.len(),
+                if is_optimized { 1 } else { 0 },
+                std::ptr::null_mut(),
+                0,
+                0,
+                std::ptr::null_mut(),
+                0,
+                kind,
+                0,
+                0,
+                0
+            ))
+        }
+    }
+
+    pub fn create_function(
+        &self,
+        scope: LLVMMetadata<'a>,
+        file: LLVMMetadata<'a>,
+        line: u32,
+        name: &str,
+        linkage_name: &str,
+        return_type: Option<LLVMMetadata<'a>>,
+        param_types: &[LLVMMetadata<'a>],
+        is_definition: bool,
+        flags: LLVMDIFlags,
+        is_optimized: bool
+    ) -> LLVMMetadata<'a> {
+        unsafe {
+            let mut types = itertools::repeat_n(return_type.map_or(std::ptr::null_mut(), |ty| ty.ptr()), 1)
+                .chain(param_types.iter().map(|ty| ty.ptr()))
+                .collect_vec();
+            let ty = LLVMDIBuilderCreateSubroutineType(self.ptr(), file.ptr(), types.as_mut_ptr(), types.len() as u32, LLVMDIFlags::LLVMDIFlagZero);
+
+            self.wrap_metadata(LLVMDIBuilderCreateFunction(
+                self.ptr(),
+                scope.ptr(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                linkage_name.as_ptr() as *const c_char,
+                linkage_name.len(),
+                file.ptr(),
+                line,
+                ty,
+                0,
+                if is_definition { 1 } else { 0 },
+                line,
+                flags,
+                if is_optimized { 1 } else { 0 }
+            ))
+        }
+    }
+
+    pub fn create_debug_location(&self, line: u32, col: u32, scope: LLVMMetadata<'a>, inlined_at: Option<LLVMMetadata<'a>>) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateDebugLocation(
+                self.0.ptr(),
+                line,
+                col,
+                scope.ptr(),
+                inlined_at.map_or(std::ptr::null_mut(), |m| m.ptr())
+            ))
+        }
+    }
+
+    pub fn finalize(&self) {
+        unsafe {
+            LLVMDIBuilderFinalize(self.ptr());
+        }
+    }
+}
+
+impl <'a> Drop for LLVMDIBuilder<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeDIBuilder(self.ptr())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LLVMBuilder<'a>(&'a LLVMContext, LLVMBuilderRef);
 
 const EMPTY_VALUE_NAME: *const c_char = b"\0".as_ptr() as *const c_char;
 
@@ -132,8 +315,8 @@ fn cstr_or_empty(cstr: &Option<CString>) -> *const c_char {
 }
 
 impl <'a> LLVMBuilder<'a> {
-    pub unsafe fn from_raw(ptr: LLVMBuilderRef) -> LLVMBuilder<'a> {
-        LLVMBuilder(PhantomData, ptr)
+    pub unsafe fn from_raw(ctx: &'a LLVMContext, ptr: LLVMBuilderRef) -> LLVMBuilder<'a> {
+        LLVMBuilder(ctx, ptr)
     }
 
     pub fn ptr(&self) -> LLVMBuilderRef {
@@ -142,6 +325,12 @@ impl <'a> LLVMBuilder<'a> {
 
     unsafe fn wrap_value(&self, val: LLVMValueRef) -> LLVMValue<'a> {
         LLVMValue::from_raw(val)
+    }
+
+    pub fn set_current_debug_location(&self, loc: Option<LLVMMetadata<'a>>) {
+        unsafe {
+            LLVMSetCurrentDebugLocation(self.ptr(), loc.map_or(std::ptr::null_mut(), |loc| LLVMMetadataAsValue(self.0.ptr(), loc.ptr())));
+        }
     }
 
     pub fn build_struct_gep(&self, val: LLVMValue<'a>, idx: u32, name: Option<CString>) -> LLVMValue<'a> {

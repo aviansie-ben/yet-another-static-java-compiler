@@ -340,7 +340,10 @@ fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, kno
     );
     builder.append_end_instruction(MilEndInstructionKind::Return(MilOperand::Register(reg)), 0);
 
-    builder.finish()
+    let mut func = builder.finish();
+    func.source_file = (String::from(""), String::from("<native thunk>"));
+
+    func
 }
 
 struct GenBlockInfo {
@@ -1647,6 +1650,17 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
 
     let mut func = builder.finish();
     lower_il_in_method(env, &mut func, liveness);
+
+    func.source_file = if let Some(ref source_file) = class.meta.source_file {
+        (
+            String::from(class.meta.name.rsplit_once('/').map_or("", |(dir, _)| dir)),
+            String::from(&source_file[..])
+        )
+    } else {
+        (String::from(""), String::from("<unknown>"))
+    };
+
+    func.line_map = MilLineMap::from_table(code.line_table().cloned());
 
     if verbose {
         eprintln!("{}", func.pretty(env));
