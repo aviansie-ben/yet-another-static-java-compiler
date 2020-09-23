@@ -263,7 +263,7 @@ unsafe fn emit_basic_block<'a>(
                     ),
                     MilUnOp::IExtS => builder.build_sext(
                         builder.build_trunc(val, module.types.byte, None),
-                        module.types.short,
+                        module.types.int,
                         Some(register_name(tgt))
                     ),
                     MilUnOp::LNeg => builder.build_neg(val, Some(register_name(tgt))),
