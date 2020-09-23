@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter::FromIterator;
 
 use itertools::Itertools;
@@ -229,18 +229,26 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
     let mut num_changes = 0;
     let mut constraints = ClassConstraints::new();
     let mut edge_constraints = HashMap::new();
+    let mut killed = HashMap::new();
 
     log_writeln!(log, "Collecting initial constraints...");
     for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = &func.blocks[&block_id];
+        let killed = killed.entry(block_id).or_insert_with(HashSet::new);
+
+        for phi in block.phi_nodes.iter() {
+            killed.insert(phi.target);
+        };
 
         for instr in block.instrs.iter() {
-            if let Some(constraint) = class_constraint_for_instr(&instr.kind) {
-                let tgt = instr.target().cloned().unwrap();
+            if let Some(tgt) = instr.target().copied() {
+                killed.insert(tgt);
 
-                if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
-                    log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
-                    constraints.set(tgt, constraint);
+                if let Some(constraint) = class_constraint_for_instr(&instr.kind) {
+                    if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
+                        log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
+                        constraints.set(tgt, constraint);
+                    };
                 };
             };
 
@@ -253,12 +261,16 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             }
         };
 
-        if let Some(constraint) = class_constraint_for_end_instr(&block.end_instr.kind) {
-            let tgt = block.end_instr.target().cloned().unwrap();
+        if let Some(tgt) = block.end_instr.target().copied() {
+            killed.insert(tgt);
 
-            if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
-                log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
-                constraints.set(tgt, constraint);
+            if let Some(constraint) = class_constraint_for_end_instr(&block.end_instr.kind) {
+                let tgt = block.end_instr.target().cloned().unwrap();
+
+                if tgt != MilRegister::VOID && !constraint.class_id().is_primitive_type() {
+                    log_writeln!(log, "  {} <- {}", tgt, constraint.pretty(env));
+                    constraints.set(tgt, constraint);
+                };
             };
         };
 
@@ -304,6 +316,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
         let cfg_node = cfg.get(block_id);
         let block = &func.blocks[&block_id];
+        let killed = &killed[&block_id];
 
         let mut block_constraints_owned = constraints.at_block(block_id).0.unwrap_or(&empty_constraints).clone();
         let mut block_constraints = BlockClassConstraintsMut(&mut block_constraints_owned, &constraints.global, &constraints.vtables);
@@ -322,7 +335,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
         // Next, intersect the unioned incoming edge constraints with the current block's constraints.
         for (reg, constraint) in incoming_constraints.into_iter() {
-            if block_constraints.intersect(reg, constraint, env) {
+            if !killed.contains(&reg) && block_constraints.intersect(reg, constraint, env) {
                 log_writeln!(log, "    {} <- {}", reg, block_constraints.find(reg).unwrap().pretty(env));
                 changed = true;
             };
