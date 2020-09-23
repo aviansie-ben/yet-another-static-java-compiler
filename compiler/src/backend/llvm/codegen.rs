@@ -648,7 +648,7 @@ unsafe fn emit_basic_block<'a>(
 
             let islot = builder.build_phi(LLVMPointerType(module.types.itable_entry, 0), None);
             let islot_interface = builder.build_load(builder.build_struct_gep(islot.into_val(), 0, None), None);
-            let next_islot = builder.build_gep(islot.into_val(), &[module.const_int(0)], None);
+            let next_islot = builder.build_gep(islot.into_val(), &[module.const_int(1)], None);
 
             islot.add_incoming(&[(llvm_block, first_islot), (loop_block, next_islot)]);
 
