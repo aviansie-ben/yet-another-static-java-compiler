@@ -57,3 +57,13 @@ pub fn remove_incoming_phis(block: &mut MilBlock, pred: MilBlockId) {
         );
     };
 }
+
+pub fn remove_nops(block: &mut MilBlock) {
+    block.instrs.drain_filter(|instr| {
+        if let MilInstructionKind::Nop = instr.kind {
+            true
+        } else {
+            false
+        }
+    });
+}

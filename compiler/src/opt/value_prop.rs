@@ -304,10 +304,13 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
                 MilInstructionKind::SetLocal(local_id, ref val) => {
                     log_writeln!(log, "  Found set_local <{}> {}", local_id, val.pretty(env));
                     locals[local_id.0 as usize].1 = val.clone();
+                    instr.kind = MilInstructionKind::Nop;
                 },
                 _ => {}
             };
         };
+
+        transform::remove_nops(block);
 
         log_write!(log, "  Final local values: [");
         for (_, val) in locals.iter() {
