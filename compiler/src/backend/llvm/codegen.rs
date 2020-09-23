@@ -380,17 +380,17 @@ unsafe fn emit_basic_block<'a>(
                     MilBinOp::LXor => builder.build_xor(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::LShrS => builder.build_ashr(
                         lhs,
-                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        builder.build_int_cast(builder.build_and(rhs, module.const_int(0x3f), None), module.types.long, None),
                         Some(register_name(tgt))
                     ),
                     MilBinOp::LShrU => builder.build_lshr(
                         lhs,
-                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        builder.build_int_cast(builder.build_and(rhs, module.const_int(0x3f), None), module.types.long, None),
                         Some(register_name(tgt))
                     ),
                     MilBinOp::LShl => builder.build_shl(
                         lhs,
-                        builder.build_and(rhs, module.const_int(0x3f), None),
+                        builder.build_int_cast(builder.build_and(rhs, module.const_int(0x3f), None), module.types.long, None),
                         Some(register_name(tgt))
                     ),
                     MilBinOp::LCmp => builder.build_select(
