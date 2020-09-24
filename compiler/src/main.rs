@@ -47,6 +47,11 @@ fn parse_args<'a>() -> ArgMatches<'a> {
                 .required(true)
         )
         .arg(
+            Arg::with_name("optimize")
+                .long("optimize")
+                .help("Perform optimizations on Java code before emitting LLVM bitcode")
+        )
+        .arg(
             Arg::with_name("verbose")
                 .short("v")
                 .help("Enables verbose logging during resolution")
@@ -246,16 +251,18 @@ fn main() {
     };
     println!("Generated MIL for {} functions in {:.3}s", program.funcs.len(), start_ilgen.elapsed().as_secs_f32());
 
-    let mut stdout = std::io::stdout();
-    let log = if args.is_present("verbose") {
-        log::Log::new(&mut stdout)
-    } else {
-        log::Log::none()
-    };
+    if args.is_present("optimize") {
+        let mut stdout = std::io::stdout();
+        let log = if args.is_present("verbose") {
+            log::Log::new(&mut stdout)
+        } else {
+            log::Log::none()
+        };
 
-    let start_opt = std::time::Instant::now();
-    opt::optimize_program(&mut program, &env, &heap, &log);
-    println!("Optimized MIL in {:.3}s", start_opt.elapsed().as_secs_f32());
+        let start_opt = std::time::Instant::now();
+        opt::optimize_program(&mut program, &env, &heap, &log);
+        println!("Optimized MIL in {:.3}s", start_opt.elapsed().as_secs_f32());
+    };
 
     let start_codegen = std::time::Instant::now();
     let llvm_ctx = backend::llvm::LLVMContext::new();
