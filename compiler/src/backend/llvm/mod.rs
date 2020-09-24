@@ -22,7 +22,7 @@ use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 use crate::static_heap::*;
 
 use self::codegen::{define_functions, emit_functions};
-use self::types::{LLVMTypes, create_types, define_static_heap, emit_vtables, emit_static_heap};
+use self::types::{LLVMTypes, create_debug_types, create_types, define_static_heap, emit_vtables, emit_static_heap};
 use self::wrapper::*;
 
 struct MochaModule<'a, 'b, 'c> {
@@ -37,7 +37,8 @@ struct MochaModule<'a, 'b, 'c> {
     methods: HashMap<MethodId, LLVMFunctionValue<'a>>,
     builtin_class_table: LLVMValue<'a>,
     di_builder: &'a LLVMDIBuilder<'b>,
-    compile_unit: LLVMMetadata<'a>
+    compile_unit: LLVMMetadata<'a>,
+    debug_types: HashMap<ClassId, LLVMMetadata<'a>>
 }
 
 impl <'a, 'b, 'c> MochaModule<'a, 'b, 'c> {
@@ -177,8 +178,6 @@ unsafe fn create_builtin_class_table(module: &LLVMModule, types: &LLVMTypes) -> 
     global
 }
 
-
-
 unsafe fn emit_main_function<'a>(module: &MochaModule<'a, '_, '_>, main_method: MethodId) -> LLVMFunctionValue<'a> {
     let main_func = module.module.add_function(
         CStr::from_bytes_with_nul(b"main\0").unwrap(),
@@ -217,6 +216,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
         let builtin_class_table = LLVMValue::from_raw(create_builtin_class_table(&module, &types));
 
         let di_builder = module.create_di_builder();
+        let debug_types = create_debug_types(&di_builder, env);
 
         let mut module = MochaModule {
             env,
@@ -238,7 +238,8 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
                     true,
                     LLVMDWARFEmissionKind::LLVMDWARFEmissionKindFull
                 )
-            }
+            },
+            debug_types
         };
 
         module.module.add_flag(

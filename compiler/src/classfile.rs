@@ -427,6 +427,16 @@ pub struct ExceptionTableEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct LocalVariableTableEntry {
+    pub start_pc: u16,
+    pub len: u16,
+    pub slot: u16,
+    pub name: Arc<str>,
+    pub signature: TypeDescriptor,
+    pub class_id: ClassId
+}
+
+#[derive(Debug, Clone)]
 pub struct AttributeCode {
     pub max_stack: u16,
     pub max_locals: u16,
@@ -447,6 +457,18 @@ impl AttributeCode {
         };
         None
     }
+
+    pub fn local_variable_table(&self) -> Option<&[LocalVariableTableEntry]> {
+        for attr in self.attributes.iter() {
+            match attr.data {
+                AttributeData::LocalVariableTable(ref table) => {
+                    return Some(table);
+                },
+                _ => {}
+            }
+        };
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -455,6 +477,7 @@ pub enum AttributeData {
     Code(AttributeCode),
     ConstantData(u16),
     LineNumberTable(Arc<[(u16, u16)]>),
+    LocalVariableTable(Vec<LocalVariableTableEntry>),
     SourceFile(u16)
 }
 
@@ -794,6 +817,50 @@ fn parse_attribute<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Resu
             table.sort_by_key(|&(bc, _)| bc);
 
             AttributeData::LineNumberTable(Arc::from(table.into_boxed_slice()))
+        },
+        "LocalVariableTable" => {
+            let len = r.read_u16::<BigEndian>()?;
+            let mut table = Vec::with_capacity(len as usize);
+
+            for _ in 0..len {
+                let start_pc = r.read_u16::<BigEndian>()?;
+                let len = r.read_u16::<BigEndian>()?;
+                let name_idx = r.read_u16::<BigEndian>()?;
+                let descriptor_idx = r.read_u16::<BigEndian>()?;
+                let slot = r.read_u16::<BigEndian>()?;
+
+                let name = match cp[name_idx as usize] {
+                    ConstantPoolEntry::Utf8(ref name) => Arc::clone(name),
+                    _ => {
+                        continue;
+                    }
+                };
+
+                let descriptor = match cp[descriptor_idx as usize] {
+                    ConstantPoolEntry::Utf8(ref desc) => match TypeDescriptor::parse(desc) {
+                        Some(desc) => desc,
+                        _ => {
+                            continue;
+                        }
+                    },
+                    _ => {
+                        continue;
+                    }
+                };
+
+                table.push(LocalVariableTableEntry {
+                    start_pc,
+                    len,
+                    slot,
+                    name,
+                    signature: descriptor,
+                    class_id: ClassId::UNRESOLVED
+                });
+            };
+
+            table.sort_by_key(|entry| (entry.start_pc, -(entry.len as i32)));
+
+            AttributeData::LocalVariableTable(table)
         },
         "SourceFile" => {
             AttributeData::SourceFile(r.read_u16::<BigEndian>()?)

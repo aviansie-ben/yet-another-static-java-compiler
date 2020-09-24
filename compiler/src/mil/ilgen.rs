@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use smallvec::*;
@@ -8,7 +9,7 @@ use super::flow_graph::*;
 use super::il::*;
 use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{AttributeCode, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, Method, MethodFlags, PrimitiveType, TypeDescriptor};
+use crate::classfile::{AttributeCode, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, LocalVariableTableEntry, Method, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
@@ -146,6 +147,10 @@ impl MilLocals {
             MilType::Double => 4,
             _ => panic!("Unsupported type {:?} for locals", ty)
         }
+    }
+
+    fn get(&self, local: u16, ty: MilType) -> Option<MilLocalId> {
+        self.locals[local as usize][MilLocals::type_index(ty)]
     }
 
     fn get_or_add(&mut self, local: u16, ty: MilType, map: &mut MilRegisterMap) -> MilLocalId {
@@ -1454,6 +1459,50 @@ fn lower_il_in_method(env: &ClassEnvironment, func: &mut MilFunction, liveness: 
     };
 }
 
+fn is_in_range(bc: u32, range: (u32, u32)) -> bool {
+    bc >= range.0 && bc < range.1
+}
+
+fn build_local_debug_map(code: &AttributeCode, table: &[LocalVariableTableEntry], locals: &MilLocals) -> Result<MilLocalDebugMap, ()> {
+    let mut scope_stack = vec![MilLocalDebugScope::new(0, code.code.len() as u32)];
+
+    for entry in table.iter().filter(|e| e.class_id != ClassId::UNRESOLVED) {
+        let local = if let Some(local) = locals.get(entry.slot, MilType::for_class(entry.class_id)) {
+            local
+        } else {
+            continue;
+        };
+
+        while !is_in_range(entry.start_pc as u32, scope_stack.last().unwrap().range()) {
+            let scope = scope_stack.pop().unwrap();
+            scope_stack.last_mut().unwrap().sub_scopes.push(scope);
+        };
+
+        let range = (entry.start_pc as u32, entry.start_pc as u32 + entry.len as u32);
+
+        let scope = scope_stack.last_mut().unwrap();
+        let scope = if range.1 > scope.range().1 {
+            return Err(());
+        } else if range == scope.range() {
+            scope
+        } else {
+            scope_stack.push(MilLocalDebugScope::new(range.0, range.1));
+            scope_stack.last_mut().unwrap()
+        };
+
+        scope.locals.push(MilLocalDebugMapEntry {
+            name: Arc::clone(&entry.name),
+            ty: entry.class_id,
+            local
+        });
+    };
+
+    Ok(MilLocalDebugMap::new(scope_stack.into_iter().rev().fold1(|sub_scope, mut scope| {
+        scope.sub_scopes.push(sub_scope);
+        scope
+    }).unwrap()))
+}
+
 pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, liveness: &LivenessInfo, verbose: bool) -> Option<MilFunction> {
     let (class, method) = env.get_method(method_id);
 
@@ -1505,6 +1554,17 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
     };
 
     func.line_map = MilLineMap::from_table(code.line_table().cloned());
+    func.local_map = if let Some(table) = code.local_variable_table() {
+        match build_local_debug_map(code, table, &locals) {
+            Ok(local_map) => Some(local_map),
+            Err(_) => {
+                eprintln!("WARNING: Local variable map on {}.{}{} discarded due to not being well-nested", class.meta.name, method.name, method.descriptor);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     if verbose {
         eprintln!("{}", func.pretty(env));

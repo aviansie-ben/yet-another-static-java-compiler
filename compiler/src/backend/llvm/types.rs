@@ -5,6 +5,7 @@ use std::os::raw::c_char;
 
 use itertools::Itertools;
 use llvm_sys::core::*;
+use llvm_sys::debuginfo::LLVMDIFlags;
 use llvm_sys::prelude::*;
 
 use crate::classfile::PrimitiveType;
@@ -610,4 +611,31 @@ pub(super) fn emit_static_heap(module: &MochaModule) {
             emit_static_heap_object(&module, obj);
         };
     };
+}
+
+pub(super) fn create_debug_types<'a>(di_builder: &LLVMDIBuilder<'a>, env: &ClassEnvironment) -> HashMap<ClassId, LLVMMetadata<'a>> {
+    let mut map = HashMap::new();
+
+    for class_id in env.class_ids() {
+        map.insert(class_id, match **env.get(class_id) {
+            ref class @ ResolvedClass::Array(_) | ref class @ ResolvedClass::User(_) => di_builder.create_pointer_type(
+                di_builder.create_unspecified_type(&class.name(env)),
+                64,
+                64,
+                0,
+                None
+            ),
+            ResolvedClass::Primitive(None) => di_builder.create_unspecified_type("void"),
+            ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => di_builder.create_basic_type("byte", 8, 0x05, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => di_builder.create_basic_type("boolean", 8, 0x02, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Short)) => di_builder.create_basic_type("short", 16, 0x05, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Char)) => di_builder.create_basic_type("char", 16, 0x08, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Int)) => di_builder.create_basic_type("int", 32, 0x05, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Long)) => di_builder.create_basic_type("long", 64, 0x05, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Float)) => di_builder.create_basic_type("float", 32, 0x04, LLVMDIFlags::LLVMDIFlagZero),
+            ResolvedClass::Primitive(Some(PrimitiveType::Double)) => di_builder.create_basic_type("double", 64, 0x04, LLVMDIFlags::LLVMDIFlagZero)
+        });
+    };
+
+    map
 }

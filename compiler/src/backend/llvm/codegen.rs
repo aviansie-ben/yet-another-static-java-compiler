@@ -18,18 +18,69 @@ use super::MochaModule;
 use super::types::{LLVMTypes, VTABLE_FIRST_VSLOT_FIELD, VTABLE_ITABLE_FIELD};
 use super::wrapper::*;
 
+#[derive(Debug)]
+struct DebugLocal<'a> {
+    meta: LLVMMetadata<'a>,
+    local_id: MilLocalId
+}
+
+#[derive(Debug)]
+struct DebugScope<'a> {
+    start_bc: u32,
+    end_bc: u32,
+    meta: LLVMMetadata<'a>,
+    sub_scopes: Vec<DebugScope<'a>>,
+    locals: Vec<DebugLocal<'a>>
+}
+
+impl <'a> DebugScope<'a> {
+    pub fn new(module: &MochaModule<'a, '_, '_>, scope: &MilLocalDebugScope, parent_meta: LLVMMetadata<'a>, file: LLVMMetadata<'a>) -> DebugScope<'a> {
+        let meta = module.di_builder.create_lexical_block(parent_meta, Some(file), 0, 0);
+        DebugScope {
+            start_bc: scope.range().0,
+            end_bc: scope.range().1,
+            meta,
+            sub_scopes: scope.sub_scopes.iter().map(|ss| DebugScope::new(module, ss, meta, file)).collect_vec(),
+            locals: scope.locals.iter().map(|e| DebugLocal {
+                meta: module.di_builder.create_auto_variable(meta, &e.name, Some(file), 0, module.debug_types[&e.ty], false, LLVMDIFlags::LLVMDIFlagZero, 0),
+                local_id: e.local
+            }).collect_vec()
+        }
+    }
+
+    pub fn find_scope(&self, bc: u32) -> &DebugScope<'a> {
+        self.sub_scopes.iter().find(|ss| bc >= ss.start_bc && bc < ss.end_bc).map_or(self, |ss| ss.find_scope(bc))
+    }
+
+    pub fn visit_all_locals<F: FnMut (&DebugScope, &DebugLocal)>(&self, mut f: F) {
+        fn visit_all_locals<F: FnMut (&DebugScope, &DebugLocal)>(scope: &DebugScope, f: &mut F) {
+            for local in scope.locals.iter() {
+                f(scope, local);
+            };
+
+            for sub_scope in scope.sub_scopes.iter() {
+                visit_all_locals(sub_scope, f);
+            };
+        }
+
+        visit_all_locals(self, &mut f);
+    }
+}
+
 struct DebugLocationMap<'a, 'b> {
     map: &'b MilLineMap,
     di_builder: &'b LLVMDIBuilder<'a>,
+    scope: Option<&'b DebugScope<'a>>,
     dbg_func: LLVMMetadata<'a>,
     locs: HashMap<u32, LLVMMetadata<'a>>
 }
 
 impl <'a, 'b> DebugLocationMap<'a, 'b> {
-    pub fn new(map: &'b MilLineMap, di_builder: &'b LLVMDIBuilder<'a>, dbg_func: LLVMMetadata<'a>) -> DebugLocationMap<'a, 'b> {
+    pub fn new(map: &'b MilLineMap, di_builder: &'b LLVMDIBuilder<'a>, scope: Option<&'b DebugScope<'a>>, dbg_func: LLVMMetadata<'a>) -> DebugLocationMap<'a, 'b> {
         DebugLocationMap {
             map,
             di_builder,
+            scope,
             dbg_func,
             locs: HashMap::new()
         }
@@ -38,7 +89,8 @@ impl <'a, 'b> DebugLocationMap<'a, 'b> {
     pub fn get_or_add_loc(&mut self, bc: u32) -> LLVMMetadata<'a> {
         let map = self.map;
         let di_builder = self.di_builder;
-        let dbg_func = self.dbg_func;
+
+        let scope = self.scope.map_or(self.dbg_func, |s| s.find_scope(bc).meta);
 
         *self.locs.entry(bc).or_insert_with(|| {
             let line = if bc != !0 {
@@ -47,7 +99,7 @@ impl <'a, 'b> DebugLocationMap<'a, 'b> {
                 0
             };
 
-            di_builder.create_debug_location(line, 0, dbg_func, None)
+            di_builder.create_debug_location(line, 0, scope, None)
         })
     }
 }
@@ -816,7 +868,8 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
     llvm_func.set_subprogram(dbg_func);
 
-    let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, dbg_func);
+    let debug_scope = dbg!(func.local_map.as_ref().map(|local_map| DebugScope::new(module, dbg!(local_map.top_scope()), dbg_func, dbg_file)));
+    let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, debug_scope.as_ref(), dbg_func);
 
     LLVMSetGC(llvm_func.into_val().ptr(), "statepoint-example\0".as_ptr() as *const c_char);
 
@@ -831,6 +884,18 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
             local_id,
             builder.build_alloca(native_arg_type(local.ty, &module.types), Some(local_name(local_id)))
         );
+    };
+
+    if let Some(ref debug_scope) = debug_scope {
+        debug_scope.visit_all_locals(|scope, local| {
+            builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(scope.start_bc)));
+            builder.build_dbg_declare(
+                module.di_builder,
+                locals[&local.local_id],
+                local.meta,
+                module.di_builder.create_expression(&[])
+            )
+        });
     };
 
     let mut all_regs = HashMap::new();

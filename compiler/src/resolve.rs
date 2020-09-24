@@ -720,7 +720,7 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
             get_constant_pool_class(&resolving_class.constant_pool, i)
         }).collect();
 
-        for m in resolving_class.methods.iter() {
+        for m in resolving_class.methods.iter_mut() {
             if let Some(instrs) = BytecodeIterator::for_method(m) {
                 for (_, instr) in instrs {
                     match instr.unwrap() {
@@ -991,6 +991,24 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                 ClassId::PRIMITIVE_VOID,
                 |d| env.try_find_for_descriptor(d).unwrap_or(ClassId::UNRESOLVED)
             );
+
+            for attr in m.attributes.iter_mut() {
+                match attr.data {
+                    AttributeData::Code(ref mut code) => {
+                        for attr in code.attributes.iter_mut() {
+                            match attr.data {
+                                AttributeData::LocalVariableTable(ref mut table) => {
+                                    for entry in table.iter_mut() {
+                                        entry.class_id = env.try_find_for_descriptor(&entry.signature).unwrap_or(ClassId::UNRESOLVED);
+                                    };
+                                },
+                                _ => {}
+                            };
+                        };
+                    },
+                    _ => {}
+                };
+            };
         };
 
         if let ResolvedClass::User(ref mut class) = **env.get_mut(resolving_id) {

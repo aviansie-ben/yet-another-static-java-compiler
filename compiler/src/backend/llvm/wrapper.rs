@@ -278,6 +278,45 @@ impl <'a> LLVMDIBuilder<'a> {
         }
     }
 
+    pub fn create_lexical_block(&self, scope: LLVMMetadata<'a>, file: Option<LLVMMetadata<'a>>, line: u32, col: u32) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateLexicalBlock(
+                self.ptr(),
+                scope.ptr(),
+                file.map_or(std::ptr::null_mut(), |file| file.ptr()),
+                line,
+                col
+            ))
+        }
+    }
+
+    pub fn create_auto_variable(
+        &self,
+        scope: LLVMMetadata<'a>,
+        name: &str,
+        file: Option<LLVMMetadata<'a>>,
+        line: u32,
+        ty: LLVMMetadata<'a>,
+        always_preserve: bool,
+        flags: LLVMDIFlags,
+        align_bits: u32
+    ) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateAutoVariable(
+                self.ptr(),
+                scope.ptr(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                file.map_or(std::ptr::null_mut(), |file| file.ptr()),
+                line,
+                ty.ptr(),
+                if always_preserve { 1 } else { 0 },
+                flags,
+                align_bits
+            ))
+        }
+    }
+
     pub fn create_debug_location(&self, line: u32, col: u32, scope: LLVMMetadata<'a>, inlined_at: Option<LLVMMetadata<'a>>) -> LLVMMetadata<'a> {
         unsafe {
             self.wrap_metadata(LLVMDIBuilderCreateDebugLocation(
@@ -287,6 +326,45 @@ impl <'a> LLVMDIBuilder<'a> {
                 scope.ptr(),
                 inlined_at.map_or(std::ptr::null_mut(), |m| m.ptr())
             ))
+        }
+    }
+
+    pub fn create_unspecified_type(&self, name: &str) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateUnspecifiedType(self.ptr(), name.as_ptr() as *const c_char, name.len()))
+        }
+    }
+
+    pub fn create_basic_type(&self, name: &str, size_bits: u64, encoding: u32, flags: LLVMDIFlags) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateBasicType(
+                self.ptr(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                size_bits,
+                encoding,
+                flags
+            ))
+        }
+    }
+
+    pub fn create_pointer_type(&self, pointee: LLVMMetadata<'a>, size_bits: u64, align_bits: u32, addr_space: u32, name: Option<&str>) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreatePointerType(
+                self.ptr(),
+                pointee.ptr(),
+                size_bits,
+                align_bits,
+                addr_space,
+                name.map_or(std::ptr::null(), |name| name.as_ptr() as *const c_char),
+                name.map_or(0, |name| name.len())
+            ))
+        }
+    }
+
+    pub fn create_expression(&self, instrs: &[u64]) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateExpression(self.ptr(), instrs.as_ptr() as *mut i64, instrs.len()))
         }
     }
 
@@ -596,6 +674,19 @@ impl <'a> LLVMBuilder<'a> {
     pub fn build_alloca(&self, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
         unsafe {
             self.wrap_value(LLVMBuildAlloca(self.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_dbg_declare(&self, di_builder: &LLVMDIBuilder<'a>, storage: LLVMValue<'a>, var: LLVMMetadata<'a>, expr: LLVMMetadata<'a>) {
+        unsafe {
+            self.wrap_value(LLVMDIBuilderInsertDeclareAtEnd(
+                di_builder.ptr(),
+                storage.ptr(),
+                var.ptr(),
+                expr.ptr(),
+                LLVMValueAsMetadata(LLVMGetCurrentDebugLocation(self.ptr())),
+                LLVMGetInsertBlock(self.ptr())
+            ));
         }
     }
 }

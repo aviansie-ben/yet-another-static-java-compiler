@@ -1246,6 +1246,79 @@ impl MilLineMap {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilLocalDebugMapEntry {
+    pub name: Arc<str>,
+    pub ty: ClassId,
+    pub local: MilLocalId
+}
+
+#[derive(Debug, Clone)]
+pub struct MilLocalDebugScope {
+    start_bc: u32,
+    end_bc: u32,
+    pub sub_scopes: Vec<MilLocalDebugScope>,
+    pub locals: Vec<MilLocalDebugMapEntry>
+}
+
+impl MilLocalDebugScope {
+    pub fn new(start_bc: u32, end_bc: u32) -> MilLocalDebugScope {
+        assert!(start_bc < end_bc);
+        MilLocalDebugScope {
+            start_bc,
+            end_bc,
+            sub_scopes: vec![],
+            locals: vec![]
+        }
+    }
+
+    pub fn range(&self) -> (u32, u32) {
+        (self.start_bc, self.end_bc)
+    }
+
+    pub fn split_at(self, split_bc: u32) -> (MilLocalDebugScope, MilLocalDebugScope) {
+        assert!(split_bc >= self.start_bc && split_bc < self.end_bc);
+
+        let mut scope_a = MilLocalDebugScope::new(self.start_bc, split_bc);
+        let mut scope_b = MilLocalDebugScope::new(split_bc, self.end_bc);
+
+        scope_a.locals = self.locals.clone();
+        scope_b.locals = self.locals;
+
+        for sub_scope in self.sub_scopes {
+            if sub_scope.start_bc < split_bc {
+                if sub_scope.end_bc > split_bc {
+                    let (sub_scope_a, sub_scope_b) = sub_scope.split_at(split_bc);
+
+                    scope_a.sub_scopes.push(sub_scope_a);
+                    scope_b.sub_scopes.push(sub_scope_b);
+                } else {
+                    scope_a.sub_scopes.push(sub_scope);
+                };
+            } else {
+                scope_b.sub_scopes.push(sub_scope);
+            };
+        };
+
+        (scope_a, scope_b)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MilLocalDebugMap {
+    top_scope: MilLocalDebugScope
+}
+
+impl MilLocalDebugMap {
+    pub fn new(top_scope: MilLocalDebugScope) -> MilLocalDebugMap {
+        MilLocalDebugMap { top_scope }
+    }
+
+    pub fn top_scope(&self) -> &MilLocalDebugScope {
+        &self.top_scope
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MilFunction {
     pub id: MethodId,
     pub reg_alloc: MilRegisterAllocator,
@@ -1254,7 +1327,8 @@ pub struct MilFunction {
     pub blocks: HashMap<MilBlockId, MilBlock>,
     pub block_order: Vec<MilBlockId>,
     pub source_file: (String, String),
-    pub line_map: MilLineMap
+    pub line_map: MilLineMap,
+    pub local_map: Option<MilLocalDebugMap>
 }
 
 impl MilFunction {
@@ -1267,7 +1341,8 @@ impl MilFunction {
             blocks: HashMap::new(),
             block_order: vec![],
             source_file: (String::new(), String::new()),
-            line_map: MilLineMap::empty()
+            line_map: MilLineMap::empty(),
+            local_map: None
         }
     }
 
