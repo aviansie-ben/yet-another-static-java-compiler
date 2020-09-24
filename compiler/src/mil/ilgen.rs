@@ -50,7 +50,8 @@ impl MilBuilder {
         if reg != MilRegister::VOID {
             self.current_block.phi_nodes.push(MilPhiNode {
                 target: reg,
-                sources: srcs
+                sources: srcs,
+                bytecode: (!0, self.bc)
             });
         };
 

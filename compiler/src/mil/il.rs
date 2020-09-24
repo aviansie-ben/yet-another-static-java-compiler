@@ -1140,7 +1140,8 @@ impl MilEndInstruction {
 #[derive(Debug, Clone)]
 pub struct MilPhiNode {
     pub target: MilRegister,
-    pub sources: SmallVec<[(MilOperand, MilBlockId); 2]>
+    pub sources: SmallVec<[(MilOperand, MilBlockId); 2]>,
+    pub bytecode: (u32, u32)
 }
 
 impl MilPhiNode {
@@ -1184,6 +1185,10 @@ impl MilBlock {
             },
             exception_successors: vec![]
         }
+    }
+
+    pub fn initial_bytecode(&self) -> (u32, u32) {
+        self.instrs.first().map_or(self.end_instr.bytecode, |instr| instr.bytecode)
     }
 
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {

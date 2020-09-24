@@ -268,6 +268,7 @@ unsafe fn emit_basic_block<'a>(
     };
 
     for phi in block.phi_nodes.iter() {
+        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(phi.bytecode.1)));
         if !phi.sources.is_empty() {
             let llvm_phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types), Some(register_name(phi.target)));
 

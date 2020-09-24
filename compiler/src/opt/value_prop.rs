@@ -273,9 +273,11 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
                     reg_map.add_reg_info(reg, MilRegisterInfo { ty });
 
                     let i = block.phi_nodes.len();
+                    let bc = block.initial_bytecode();
                     block.phi_nodes.push(MilPhiNode {
                         target: reg,
-                        sources: SmallVec::new()
+                        sources: SmallVec::new(),
+                        bytecode: bc
                     });
 
                     (i, MilOperand::Register(reg))
