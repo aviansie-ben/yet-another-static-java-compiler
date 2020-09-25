@@ -4,7 +4,7 @@ use std::os::raw::c_char;
 use std::ptr::NonNull;
 
 use itertools::Itertools;
-use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate};
+use llvm_sys::{LLVMAttributeFunctionIndex, LLVMIntPredicate, LLVMRealPredicate};
 use llvm_sys::core::*;
 use llvm_sys::debuginfo::LLVMDIFlags;
 use llvm_sys::prelude::*;
@@ -872,6 +872,17 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, debug_scope.as_ref(), dbg_func);
 
     LLVMSetGC(llvm_func.into_val().ptr(), "statepoint-example\0".as_ptr() as *const c_char);
+    LLVMAddAttributeAtIndex(
+        llvm_func.into_val().ptr(),
+        LLVMAttributeFunctionIndex,
+        LLVMCreateStringAttribute(
+            module.ctx.ptr(),
+            "frame-pointer".as_ptr() as *const c_char,
+            13,
+            "all".as_ptr() as *const c_char,
+            3
+        )
+    );
 
     let mut llvm_blocks = HashMap::new();
 
