@@ -24,7 +24,7 @@ impl MilBuilder {
         MilBuilder {
             func: MilFunction::new(id),
             current_block: MilBlock::new(),
-            bc: 0
+            bc: !0
         }
     }
 

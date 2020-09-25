@@ -86,21 +86,19 @@ impl <'a, 'b> DebugLocationMap<'a, 'b> {
         }
     }
 
-    pub fn get_or_add_loc(&mut self, bc: u32) -> LLVMMetadata<'a> {
-        let map = self.map;
-        let di_builder = self.di_builder;
+    pub fn get_or_add_loc(&mut self, bc: u32) -> Option<LLVMMetadata<'a>> {
+        if bc != !0 {
+            let map = self.map;
+            let di_builder = self.di_builder;
 
-        let scope = self.scope.map_or(self.dbg_func, |s| s.find_scope(bc).meta);
+            let scope = self.scope.map_or(self.dbg_func, |s| s.find_scope(bc).meta);
 
-        *self.locs.entry(bc).or_insert_with(|| {
-            let line = if bc != !0 {
-                map.get_line(bc).unwrap_or(0)
-            } else {
-                0
-            };
-
-            di_builder.create_debug_location(line, 0, scope, None)
-        })
+            Some(*self.locs.entry(bc).or_insert_with(|| {
+                di_builder.create_debug_location(map.get_line(bc).unwrap_or(0), 0, scope, None)
+            }))
+        } else {
+            None
+        }
     }
 }
 
@@ -320,7 +318,7 @@ unsafe fn emit_basic_block<'a>(
     };
 
     for phi in block.phi_nodes.iter() {
-        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(phi.bytecode.1)));
+        builder.set_current_debug_location(debug_locs.get_or_add_loc(phi.bytecode.1));
         if !phi.sources.is_empty() {
             let llvm_phi = builder.build_phi(native_arg_type(func.reg_map.get_reg_info(phi.target).ty, &module.types), Some(register_name(phi.target)));
 
@@ -336,7 +334,7 @@ unsafe fn emit_basic_block<'a>(
     };
 
     for instr in block.instrs.iter() {
-        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(instr.bytecode.1)));
+        builder.set_current_debug_location(debug_locs.get_or_add_loc(instr.bytecode.1));
         match instr.kind {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(tgt, ref src) => {
@@ -667,7 +665,7 @@ unsafe fn emit_basic_block<'a>(
         };
     };
 
-    builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(block.end_instr.bytecode.1)));
+    builder.set_current_debug_location(debug_locs.get_or_add_loc(block.end_instr.bytecode.1));
     match block.end_instr.kind {
         MilEndInstructionKind::Nop => {},
         MilEndInstructionKind::Unreachable => {
@@ -899,7 +897,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
     if let Some(ref debug_scope) = debug_scope {
         debug_scope.visit_all_locals(|scope, local| {
-            builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(scope.start_bc)));
+            builder.set_current_debug_location(debug_locs.get_or_add_loc(scope.start_bc));
             builder.build_dbg_declare(
                 module.di_builder,
                 locals[&local.local_id],
@@ -928,7 +926,6 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
         phi.add_incoming(&[(llvm_blocks[&pred].1, create_value_ref(module, &val, &all_regs))]);
     };
 
-    builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(0)));
     LLVMPositionBuilderAtEnd(builder.ptr(), start_block);
     builder.build_br(llvm_blocks[&func.block_order[0]].0);
 
@@ -938,7 +935,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
         LLVMPositionBuilderAtEnd(builder.ptr(), llvm_block);
 
-        builder.set_current_debug_location(Some(debug_locs.get_or_add_loc(block.end_instr.bytecode.1)));
+        builder.set_current_debug_location(debug_locs.get_or_add_loc(block.end_instr.bytecode.1));
         match block.end_instr.kind {
             MilEndInstructionKind::Unreachable => {},
             MilEndInstructionKind::Jump(tgt) => {
