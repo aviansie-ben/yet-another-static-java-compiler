@@ -868,7 +868,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
 
     llvm_func.set_subprogram(dbg_func);
 
-    let debug_scope = dbg!(func.local_map.as_ref().map(|local_map| DebugScope::new(module, dbg!(local_map.top_scope()), dbg_func, dbg_file)));
+    let debug_scope = func.local_map.as_ref().map(|local_map| DebugScope::new(module, local_map.top_scope(), dbg_func, dbg_file));
     let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, debug_scope.as_ref(), dbg_func);
 
     LLVMSetGC(llvm_func.into_val().ptr(), "statepoint-example\0".as_ptr() as *const c_char);
