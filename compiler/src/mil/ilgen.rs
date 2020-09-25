@@ -571,6 +571,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         }
     }).collect_vec();
 
+    builder.set_bytecode(off as u32);
     let mut stack = MilVirtualStack::new(if !incoming_stacks.is_empty() {
         assert!(incoming_stacks.iter().skip(1).all(|(_, s)| s.len() == incoming_stacks[0].1.len()));
         (0..incoming_stacks[0].1.len()).map(|i| {
