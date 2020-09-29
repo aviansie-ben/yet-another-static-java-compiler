@@ -885,6 +885,10 @@ lazy_static! {
             "sun/misc/Unsafe.getObject(Ljava/lang/Object;J)Ljava/lang/Object;",
             (|state| native_unsafe_get(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
         );
+        known_natives.insert(
+            "sun/misc/Unsafe.getObjectVolatile(Ljava/lang/Object;J)Ljava/lang/Object;",
+            (|state| native_unsafe_get(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
+        );
 
         known_natives.insert(
             "sun/misc/Unsafe.putBoolean(Ljava/lang/Object;JZ)V",
@@ -920,6 +924,10 @@ lazy_static! {
         );
         known_natives.insert(
             "sun/misc/Unsafe.putObject(Ljava/lang/Object;JLjava/lang/Object;)V",
+            (|state| native_unsafe_put(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
+        );
+        known_natives.insert(
+            "sun/misc/Unsafe.putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)V",
             (|state| native_unsafe_put(state, ClassId::JAVA_LANG_OBJECT)) as StaticNative
         );
 
