@@ -1,4 +1,5 @@
 #![feature(allocator_api)]
+#![feature(bindings_after_at)]
 #![feature(btree_drain_filter)]
 #![feature(drain_filter)]
 #![feature(str_split_once)]

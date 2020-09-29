@@ -614,17 +614,134 @@ pub(super) fn emit_static_heap(module: &MochaModule) {
 }
 
 pub(super) fn create_debug_types<'a>(di_builder: &LLVMDIBuilder<'a>, env: &ClassEnvironment) -> HashMap<ClassId, LLVMMetadata<'a>> {
-    let mut map = HashMap::new();
+    let mut temp_map: HashMap<_, _> = env.class_ids().map(|class_id| (class_id, di_builder.create_temporary())).collect();
+    let mut map: HashMap<_, _> = temp_map.iter().map(|(&class_id, meta)| (class_id, unsafe { meta.as_metadata() })).collect();
+
+    let mut temp_struct_map: HashMap<_, _> = env.class_ids().map(|class_id| (class_id, di_builder.create_temporary())).collect();
+    let mut struct_map: HashMap<_, _> = temp_struct_map.iter().map(|(&class_id, meta)| (class_id, unsafe { meta.as_metadata() })).collect();
+
+    let unknown_file = di_builder.create_file("<unknown>", "");
+    let length_field = di_builder.create_member_type(
+        unknown_file,
+        "length",
+        unknown_file,
+        0,
+        32,
+        32,
+        64,
+        LLVMDIFlags::LLVMDIFlagArtificial,
+        map[&ClassId::PRIMITIVE_INT]
+    );
+    let vtable_field = di_builder.create_member_type(
+        unknown_file,
+        "__vtable",
+        unknown_file,
+        0,
+        64,
+        64,
+        0,
+        LLVMDIFlags::LLVMDIFlagArtificial,
+        di_builder.create_pointer_type(di_builder.create_unspecified_type("mocha_vtable"), 64, 64, 0, None)
+    );
 
     for class_id in env.class_ids() {
-        map.insert(class_id, match **env.get(class_id) {
-            ref class @ ResolvedClass::Array(_) | ref class @ ResolvedClass::User(_) => di_builder.create_pointer_type(
-                di_builder.create_unspecified_type(&class.name(env)),
-                64,
-                64,
-                0,
-                None
-            ),
+        let ty = match **env.get(class_id) {
+            ResolvedClass::User(ref class) => {
+                let dbg_file = if let Some(ref source_file) = class.meta.source_file {
+                    di_builder.create_file(source_file, class.meta.name.rsplit_once('/').map_or("", |(dir, _)| dir))
+                } else {
+                    unknown_file
+                };
+
+                let mut fields = vec![];
+
+                if class.meta.super_id == ClassId::UNRESOLVED {
+                    fields.push(vtable_field);
+                } else {
+                    fields.push(di_builder.create_inheritance(struct_map[&class_id], struct_map[&class.meta.super_id], 0, 0, LLVMDIFlags::LLVMDIFlagZero));
+                };
+
+                for &(field_id, off) in class.layout.fields.iter() {
+                    if field_id.0 == class_id {
+                        let field = &class.fields[field_id.1 as usize];
+
+                        fields.push(di_builder.create_member_type(
+                            dbg_file,
+                            &field.name,
+                            dbg_file,
+                            0,
+                            0,
+                            0,
+                            off as u64 * 8,
+                            LLVMDIFlags::LLVMDIFlagZero,
+                            map[&field.class_id]
+                        ));
+                    };
+                };
+
+                let struct_type = di_builder.create_struct_type(
+                    dbg_file,
+                    &class.meta.name,
+                    dbg_file,
+                    0,
+                    (class.layout.size as u64) * 8,
+                    64,
+                    LLVMDIFlags::LLVMDIFlagZero,
+                    None,
+                    &fields,
+                    0,
+                    None,
+                    &class.meta.name
+                );
+
+                temp_struct_map.remove(&class_id).unwrap().replace_all_uses_with(struct_type);
+                struct_map.insert(class_id, struct_type);
+
+                di_builder.create_pointer_type(struct_type, 64, 64, 0, None)
+            },
+            ref class @ ResolvedClass::Array(elem_id) => {
+                let name = class.name(env);
+                let elem_align = layout::get_field_size_align(env, elem_id).1;
+                let mut size = 12;
+
+                if size % elem_align != 0 {
+                    size += elem_align - (size % elem_align);
+                };
+
+                let struct_type = di_builder.create_struct_type(
+                    unknown_file,
+                    &name,
+                    unknown_file,
+                    0,
+                    size as u64 * 8,
+                    64,
+                    LLVMDIFlags::LLVMDIFlagArtificial,
+                    None,
+                    &[
+                        di_builder.create_inheritance(struct_map[&class_id], struct_map[&ClassId::JAVA_LANG_OBJECT], 0, 0, LLVMDIFlags::LLVMDIFlagZero),
+                        length_field,
+                        di_builder.create_member_type(
+                            unknown_file,
+                            "data",
+                            unknown_file,
+                            0,
+                            0,
+                            0,
+                            size as u64 * 8,
+                            LLVMDIFlags::LLVMDIFlagZero,
+                            di_builder.create_array_type(0, 0, map[&elem_id], &[])
+                        )
+                    ],
+                    0,
+                    None,
+                    &name
+                );
+
+                temp_struct_map.remove(&class_id).unwrap().replace_all_uses_with(struct_type);
+                struct_map.insert(class_id, struct_type);
+
+                di_builder.create_pointer_type(struct_type, 64, 64, 0, None)
+            },
             ResolvedClass::Primitive(None) => di_builder.create_unspecified_type("void"),
             ResolvedClass::Primitive(Some(PrimitiveType::Byte)) => di_builder.create_basic_type("byte", 8, 0x05, LLVMDIFlags::LLVMDIFlagZero),
             ResolvedClass::Primitive(Some(PrimitiveType::Boolean)) => di_builder.create_basic_type("boolean", 8, 0x02, LLVMDIFlags::LLVMDIFlagZero),
@@ -634,7 +751,10 @@ pub(super) fn create_debug_types<'a>(di_builder: &LLVMDIBuilder<'a>, env: &Class
             ResolvedClass::Primitive(Some(PrimitiveType::Long)) => di_builder.create_basic_type("long", 64, 0x05, LLVMDIFlags::LLVMDIFlagZero),
             ResolvedClass::Primitive(Some(PrimitiveType::Float)) => di_builder.create_basic_type("float", 32, 0x04, LLVMDIFlags::LLVMDIFlagZero),
             ResolvedClass::Primitive(Some(PrimitiveType::Double)) => di_builder.create_basic_type("double", 64, 0x04, LLVMDIFlags::LLVMDIFlagZero)
-        });
+        };
+
+        temp_map.remove(&class_id).unwrap().replace_all_uses_with(ty);
+        map.insert(class_id, ty);
     };
 
     map

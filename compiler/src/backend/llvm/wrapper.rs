@@ -187,6 +187,34 @@ impl <'a> LLVMMetadata<'a> {
 }
 
 #[derive(Debug)]
+pub struct LLVMTemporaryMetadata<'a>(LLVMMetadata<'a>);
+
+impl <'a> LLVMTemporaryMetadata<'a> {
+    pub unsafe fn from_metadata_unchecked(metadata: LLVMMetadata<'a>) -> LLVMTemporaryMetadata<'a> {
+        LLVMTemporaryMetadata(metadata)
+    }
+
+    pub unsafe fn as_metadata(&self) -> LLVMMetadata<'a> {
+        self.0
+    }
+
+    pub fn replace_all_uses_with(self, metadata: LLVMMetadata<'a>) {
+        unsafe {
+            LLVMMetadataReplaceAllUsesWith(self.as_metadata().ptr(), metadata.ptr());
+            std::mem::forget(self);
+        }
+    }
+}
+
+impl <'a> Drop for LLVMTemporaryMetadata<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeTemporaryMDNode(self.as_metadata().ptr())
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct LLVMDIBuilder<'a>(&'a LLVMContext, LLVMDIBuilderRef);
 
 impl <'a> LLVMDIBuilder<'a> {
@@ -362,9 +390,95 @@ impl <'a> LLVMDIBuilder<'a> {
         }
     }
 
+    pub fn create_member_type(
+        &self,
+        scope: LLVMMetadata<'a>,
+        name: &str,
+        file: LLVMMetadata<'a>,
+        line: u32,
+        size_bits: u64,
+        align_bits: u32,
+        offset_bits: u64,
+        flags: LLVMDIFlags,
+        ty: LLVMMetadata<'a>
+    ) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateMemberType(
+                self.ptr(),
+                scope.ptr(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                file.ptr(),
+                line,
+                size_bits,
+                align_bits,
+                offset_bits,
+                flags,
+                ty.ptr()
+            ))
+        }
+    }
+
+    pub fn create_struct_type(
+        &self,
+        scope: LLVMMetadata<'a>,
+        name: &str,
+        file: LLVMMetadata<'a>,
+        line: u32,
+        size_bits: u64,
+        align_bits: u32,
+        flags: LLVMDIFlags,
+        derived_from: Option<LLVMMetadata<'a>>,
+        elements: &[LLVMMetadata<'a>],
+        runtime_lang: u32,
+        vtable_holder: Option<LLVMMetadata<'a>>,
+        unique_id: &str
+    ) -> LLVMMetadata<'a> {
+        unsafe {
+            let mut elements = elements.iter().map(|e| e.ptr()).collect_vec();
+            self.wrap_metadata(LLVMDIBuilderCreateStructType(
+                self.ptr(),
+                scope.ptr(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                file.ptr(),
+                line,
+                size_bits,
+                align_bits,
+                flags,
+                derived_from.map_or(std::ptr::null_mut(), |derived_from| derived_from.ptr()),
+                elements.as_mut_ptr(),
+                elements.len() as u32,
+                runtime_lang,
+                vtable_holder.map_or(std::ptr::null_mut(), |vtable_holder| vtable_holder.ptr()),
+                unique_id.as_ptr() as *const c_char,
+                unique_id.len()
+            ))
+        }
+    }
+
+    pub fn create_array_type(&self, size_bits: u64, align_bits: u32, ty: LLVMMetadata<'a>, subscripts: &[LLVMMetadata<'a>]) -> LLVMMetadata<'a> {
+        unsafe {
+            let mut subscripts = subscripts.iter().map(|s| s.ptr()).collect_vec();
+            self.wrap_metadata(LLVMDIBuilderCreateArrayType(self.ptr(), size_bits, align_bits, ty.ptr(), subscripts.as_mut_ptr(), subscripts.len() as u32))
+        }
+    }
+
+    pub fn create_inheritance(&self, ty: LLVMMetadata<'a>, base_ty: LLVMMetadata<'a>, base_off: u64, vbptr_off: u32, flags: LLVMDIFlags) -> LLVMMetadata<'a> {
+        unsafe {
+            self.wrap_metadata(LLVMDIBuilderCreateInheritance(self.ptr(), ty.ptr(), base_ty.ptr(), base_off, vbptr_off, flags))
+        }
+    }
+
     pub fn create_expression(&self, instrs: &[u64]) -> LLVMMetadata<'a> {
         unsafe {
             self.wrap_metadata(LLVMDIBuilderCreateExpression(self.ptr(), instrs.as_ptr() as *mut i64, instrs.len()))
+        }
+    }
+
+    pub fn create_temporary(&self) -> LLVMTemporaryMetadata<'a> {
+        unsafe {
+            LLVMTemporaryMetadata::from_metadata_unchecked(self.wrap_metadata(LLVMTemporaryMDNode(self.ctx().ptr(), std::ptr::null_mut(), 0)))
         }
     }
 
