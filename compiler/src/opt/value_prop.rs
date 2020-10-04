@@ -11,6 +11,7 @@ use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::mil::transform;
 use crate::resolve::{ClassEnvironment, ResolvedClass};
+use crate::util::BitVec;
 
 fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, known_objects: &MilKnownObjectMap) -> Option<MilOperand> {
     Some(match *instr {
@@ -250,6 +251,77 @@ pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known
     };
 
     num_folded
+}
+
+pub fn eliminate_dead_stores(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) -> usize {
+    log_writeln!(log, "\n===== DEAD STORE ELIMINATION =====\n");
+
+    let mut num_removed = 0;
+
+    let mut used = BitVec::new();
+
+    loop {
+        used.clear();
+        let mut mark_used = |op: &MilOperand| {
+            if let MilOperand::Register(reg) = *op {
+                if reg != MilRegister::VOID {
+                    used.set(reg, true);
+                };
+            };
+        };
+
+        for block in func.block_order.iter() {
+            let block = &func.blocks[&block];
+
+            for phi in block.phi_nodes.iter() {
+                for src in phi.sources.iter() {
+                    // Unlike other types of instructions, phi nodes can legally be self-referencial. However, a self-reference shouldn't
+                    // count as an actual use of the phi node's value, as the removal of the phi node would also remove the use.
+                    if &src.0 != &MilOperand::Register(phi.target) {
+                        mark_used(&src.0);
+                    };
+                };
+            };
+
+            for instr in block.instrs.iter() {
+                instr.for_operands(&mut mark_used);
+            };
+
+            block.end_instr.for_operands(&mut mark_used);
+        };
+
+        let mut new_num_removed = 0;
+        for block in func.block_order.iter() {
+            let block = func.blocks.get_mut(&block).unwrap();
+
+            for phi in block.phi_nodes.drain_filter(|phi| !used.get(phi.target)) {
+                log_writeln!(log, "Removed unused {}", phi.pretty(env));
+                new_num_removed += 1;
+            };
+
+            for instr in block.instrs.drain_filter(|instr| {
+                if let Some(&target) = instr.target() {
+                    target == MilRegister::VOID || !used.get(target)
+                } else {
+                    false
+                }
+            }) {
+                log_writeln!(log, "Removed unused {}", instr.pretty(env));
+                new_num_removed += 1;
+            };
+        };
+
+        num_removed += new_num_removed;
+        if new_num_removed == 0 {
+            break;
+        };
+    };
+
+    if num_removed != 0 {
+        log_writeln!(log, "\n===== AFTER DEAD STORE ELIMINATION =====\n\n{}", func.pretty(env));
+    };
+
+    num_removed
 }
 
 pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) {

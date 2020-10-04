@@ -35,6 +35,7 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
     // Start by cleaning up known messiness left by the IL generator
     value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
 
     // Now turn local slots into phi nodes and perform some basic cleanup to deal with the results
@@ -43,12 +44,14 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
         basic_control_flow::simplify_phis(func, env.env, env.log);
         value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
         basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+        value_prop::eliminate_dead_stores(func, env.env, env.log);
         run_block_cleanup_group(func, &mut cfg, env);
     };
 
     // Perform class constraint analysis and related cleanups
     class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
 }
 
