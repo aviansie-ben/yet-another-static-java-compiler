@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::fmt;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -13,18 +14,28 @@ use crate::classfile::{AttributeCode, ClassFlags, ConstantPoolEntry, FlatTypeDes
 use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
-pub struct MilBuilder {
+pub struct MilBuilder<'a> {
     func: MilFunction,
     current_block: MilBlock,
-    bc: u32
+    bc: u32,
+    verbose: bool,
+    env: &'a ClassEnvironment
 }
 
-impl MilBuilder {
-    pub fn new(id: MethodId) -> MilBuilder {
+impl <'a> MilBuilder<'a> {
+    pub fn new(id: MethodId, verbose: bool, env: &'a ClassEnvironment) -> MilBuilder {
+        let func = MilFunction::new(id);
+
+        if verbose {
+            eprintln!("  {}:", func.block_alloc.next());
+        };
+
         MilBuilder {
-            func: MilFunction::new(id),
+            func,
             current_block: MilBlock::new(),
-            bc: !0
+            bc: !0,
+            verbose,
+            env
         }
     }
 
@@ -49,11 +60,17 @@ impl MilBuilder {
 
         let reg = self.allocate_reg(ty.unwrap());
         if reg != MilRegister::VOID {
-            self.current_block.phi_nodes.push(MilPhiNode {
+            let phi_node = MilPhiNode {
                 target: reg,
                 sources: srcs,
                 bytecode: (!0, self.bc)
-            });
+            };
+
+            if self.verbose {
+                eprintln!("    {}", phi_node.pretty(self.env));
+            };
+
+            self.current_block.phi_nodes.push(phi_node);
         };
 
         reg
@@ -70,17 +87,29 @@ impl MilBuilder {
     }
 
     pub fn append_instruction(&mut self, kind: MilInstructionKind) {
-        self.current_block.instrs.push(MilInstruction {
-            kind,
-            bytecode: (!0, self.bc)
-        });
-    }
-
-    pub fn append_end_instruction(&mut self, kind: MilEndInstructionKind) -> MilBlockId {
-        self.current_block.end_instr = MilEndInstruction {
+        let instr = MilInstruction {
             kind,
             bytecode: (!0, self.bc)
         };
+
+        if self.verbose {
+            eprintln!("    {}", instr.pretty(self.env));
+        };
+
+        self.current_block.instrs.push(instr);
+    }
+
+    pub fn append_end_instruction(&mut self, kind: MilEndInstructionKind) -> MilBlockId {
+        let instr = MilEndInstruction {
+            kind,
+            bytecode: (!0, self.bc)
+        };
+
+        if self.verbose && &instr.kind != &MilEndInstructionKind::Nop {
+            eprintln!("    {}", instr.pretty(self.env));
+        };
+
+        self.current_block.end_instr = instr;
         self.end_block_impl()
     }
 
@@ -98,6 +127,11 @@ impl MilBuilder {
         self.current_block.id = id;
         self.func.blocks.insert(id, std::mem::replace(&mut self.current_block, MilBlock::new()));
         self.func.block_order.push(id);
+
+        if self.verbose {
+            eprintln!("  {}:", self.func.block_alloc.next());
+        };
+
         id
     }
 
@@ -237,6 +271,23 @@ impl MilVirtualStack {
     fn len(&self) -> usize {
         self.stack.len()
     }
+
+    fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
+        PrettyMilVirtualStack(self, env)
+    }
+}
+
+struct PrettyMilVirtualStack<'a>(&'a MilVirtualStack, &'a ClassEnvironment);
+
+impl <'a> fmt::Display for PrettyMilVirtualStack<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PrettyMilVirtualStack(stack, env) = *self;
+        write!(f, "[ ")?;
+        for val in stack.as_slice().iter() {
+            write!(f, "{} ", val.pretty(env))?;
+        };
+        write!(f, "]")
+    }
 }
 
 fn get_mil_type_for_descriptor(ty: &TypeDescriptor) -> MilType {
@@ -328,8 +379,8 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
     };
 }
 
-fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs) -> MilFunction {
-    let mut builder = MilBuilder::new(method_id);
+fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs, env: &ClassEnvironment) -> MilFunction {
+    let mut builder = MilBuilder::new(method_id, false, env);
 
     let mut args = vec![];
 
@@ -516,7 +567,9 @@ fn emit_npe_throw(builder: &mut MilBuilder) {
 }
 
 fn emit_null_check(builder: &mut MilBuilder, val: MilOperand) {
-    let check_block = builder.end_block();
+    let check_block = builder.append_end_instruction(
+        MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Ne, MilBlockId::ENTRY, val.clone(), MilOperand::RefNull)
+    );
     emit_npe_throw(builder);
 
     let not_null_block = builder.end_block();
@@ -574,6 +627,10 @@ fn generate_array_store(builder: &mut MilBuilder, stack: &mut MilVirtualStack, e
 }
 
 fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code: &AttributeCode, off: usize, cp: &[ConstantPoolEntry], blocks: &mut HashMap<usize, GenBlockInfo>, block_worklist: &mut Vec<usize>, locals: &mut MilLocals, fixups: &mut Vec<Box<dyn FnMut (&mut MilBuilder, &HashMap<usize, GenBlockInfo>) -> ()>>, known_objects: &MilKnownObjectRefs, verbose: bool) {
+    if verbose {
+        eprintln!("(Start of bytecode basic block at {})", off);
+    };
+
     let incoming_stacks = blocks.get(&off).unwrap().preds.iter().filter_map(|pred| {
         let pred = blocks.get(&pred).unwrap();
 
@@ -602,7 +659,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         builder.set_bytecode(bc as u32);
 
         if verbose {
-            eprintln!("  {}: {:?} {:?}", bc, instr, stack.as_slice());
+            eprintln!("{}: {} {}", bc, instr.pretty(cp), stack.pretty(env));
         };
 
         assert!(end_block.is_none());
@@ -1341,6 +1398,10 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         builder.end_block()
     };
 
+    if verbose {
+        eprintln!("(End of bytecode basic block) {}", stack.pretty(env));
+    };
+
     let block_info = blocks.get_mut(&off).unwrap();
     block_info.blocks = builder.end_ordered_blocks();
     block_info.end_stack = stack.as_slice().iter().cloned().collect_vec();
@@ -1478,7 +1539,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
 
     if method.flags.contains(MethodFlags::NATIVE) {
         let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
-        return Some(generate_native_thunk(name, method, method_id, known_objects));
+        return Some(generate_native_thunk(name, method, method_id, known_objects, env));
     } else if method.flags.contains(MethodFlags::ABSTRACT) {
         return None;
     };
@@ -1495,7 +1556,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
 
     let mut blocks = scan_blocks(instrs);
     let mut block_worklist = vec![0];
-    let mut builder = MilBuilder::new(method_id);
+    let mut builder = MilBuilder::new(method_id, verbose, env);
 
     get_params(&mut builder, &mut locals, method);
 
@@ -1537,7 +1598,7 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
     };
 
     if verbose {
-        eprintln!("{}", func.pretty(env));
+        eprintln!("\n\n{}", func.pretty(env));
     };
 
     Some(func)

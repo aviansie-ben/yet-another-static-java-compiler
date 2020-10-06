@@ -1,6 +1,8 @@
+use std::fmt;
+
 use byteorder::{BigEndian, ByteOrder};
 
-use crate::classfile::{AttributeCode, AttributeData, Method, PrimitiveType};
+use crate::classfile::{AttributeCode, AttributeData, ConstantPoolEntry, Method, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BytecodeCondition {
@@ -10,6 +12,19 @@ pub enum BytecodeCondition {
     Ge,
     Gt,
     Le
+}
+
+impl fmt::Display for BytecodeCondition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", match *self {
+            BytecodeCondition::Eq => "eq",
+            BytecodeCondition::Ne => "ne",
+            BytecodeCondition::Lt => "lt",
+            BytecodeCondition::Ge => "ge",
+            BytecodeCondition::Gt => "gt",
+            BytecodeCondition::Le => "le"
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +164,210 @@ pub enum BytecodeInstruction {
     SAStore,
     Swap,
     TableSwitch(i32, usize, Vec<usize>)
+}
+
+impl BytecodeInstruction {
+    pub fn pretty<'a>(&'a self, cp: &'a [ConstantPoolEntry]) -> impl fmt::Display + 'a {
+        PrettyBytecodeInstruction(self, cp)
+    }
+}
+
+struct PrettyConstantPoolEntry<'a>(u16, &'a [ConstantPoolEntry]);
+struct PrettyBytecodeInstruction<'a>(&'a BytecodeInstruction, &'a [ConstantPoolEntry]);
+
+impl <'a> fmt::Display for PrettyConstantPoolEntry<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PrettyConstantPoolEntry(idx, cp) = *self;
+        write!(f, "{} ", idx)?;
+        match cp[idx as usize] {
+            ConstantPoolEntry::Class(ref cpe) => write!(f, "<class {}>", cpe.name),
+            ConstantPoolEntry::Fieldref(ref cpe) => write!(f, "<field {}.{} {}>",
+                match cp[cpe.class as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => &cpe.name,
+                    _ => "???"
+                },
+                cpe.name,
+                cpe.descriptor
+            ),
+            ConstantPoolEntry::Methodref(ref cpe) | ConstantPoolEntry::InterfaceMethodref(ref cpe) => write!(f, "<method {}.{}{}>",
+                match cp[cpe.class as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => &cpe.name,
+                    _ => "???"
+                },
+                cpe.name,
+                cpe.descriptor
+            ),
+            ConstantPoolEntry::String(ref cpe) => write!(f, "<string {:?}>", cpe.contents.as_ref()),
+            ConstantPoolEntry::Integer(val) => write!(f, "<int {}>", val),
+            ConstantPoolEntry::Float(val) => write!(f, "<float {} (0x{:08x})>", f32::from_bits(val), val),
+            ConstantPoolEntry::Long(val) => write!(f, "<long {}>", val),
+            ConstantPoolEntry::Double(val) => write!(f, "<double {} (0x{:016x})>", f64::from_bits(val), val),
+            ConstantPoolEntry::NameAndType((ref name, ref ty)) => write!(f, "<nameandtype {} {}>", name, ty),
+            ConstantPoolEntry::Utf8(ref val) => write!(f, "<utf8 {:?}>", val.as_ref()),
+            ConstantPoolEntry::MethodHandle(_) => write!(f, "<methodhandle>"),
+            ConstantPoolEntry::MethodType(_) => write!(f, "<methodtype>"),
+            ConstantPoolEntry::InvokeDynamic(_) => write!(f, "<invokedynamic>"),
+            ConstantPoolEntry::Empty => write!(f, "<empty>")
+        }
+    }
+}
+
+impl <'a> fmt::Display for PrettyBytecodeInstruction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PrettyBytecodeInstruction(instr, cp) = *self;
+
+        match *instr {
+            BytecodeInstruction::AALoad => write!(f, "aaload"),
+            BytecodeInstruction::AAStore => write!(f, "aastore"),
+            BytecodeInstruction::AConstNull => write!(f, "aconst_null"),
+            BytecodeInstruction::ALoad(idx) => write!(f, "aload {}", idx),
+            BytecodeInstruction::ANewArray(idx) => write!(f, "anewarray {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::AReturn => write!(f, "areturn"),
+            BytecodeInstruction::ArrayLength => write!(f, "arraylength"),
+            BytecodeInstruction::AStore(idx) => write!(f, "astore {}", idx),
+            BytecodeInstruction::AThrow => write!(f, "athrow"),
+            BytecodeInstruction::BALoad => write!(f, "baload"),
+            BytecodeInstruction::BAStore => write!(f, "bastore"),
+            BytecodeInstruction::CALoad => write!(f, "caload"),
+            BytecodeInstruction::CAStore => write!(f, "castore"),
+            BytecodeInstruction::CheckCast(idx) => write!(f, "checkcast {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::D2F => write!(f, "d2f"),
+            BytecodeInstruction::D2I => write!(f, "d2i"),
+            BytecodeInstruction::D2L => write!(f, "d2l"),
+            BytecodeInstruction::DAdd => write!(f, "dadd"),
+            BytecodeInstruction::DALoad => write!(f, "daload"),
+            BytecodeInstruction::DAStore => write!(f, "dastore"),
+            BytecodeInstruction::DCmpG => write!(f, "dcmpg"),
+            BytecodeInstruction::DCmpL => write!(f, "dcmpl"),
+            BytecodeInstruction::DConst(val) => write!(f, "dconst {}", f64::from_bits(val)),
+            BytecodeInstruction::DDiv => write!(f, "ddiv"),
+            BytecodeInstruction::DLoad(idx) => write!(f, "dload {}", idx),
+            BytecodeInstruction::DMul => write!(f, "dmul"),
+            BytecodeInstruction::DNeg => write!(f, "dneg"),
+            BytecodeInstruction::DRem => write!(f, "drem"),
+            BytecodeInstruction::DReturn => write!(f, "dreturn"),
+            BytecodeInstruction::DStore(idx) => write!(f, "dstore {}", idx),
+            BytecodeInstruction::DSub => write!(f, "dsub"),
+            BytecodeInstruction::Dup => write!(f, "dup"),
+            BytecodeInstruction::DupX1 => write!(f, "dup_x1"),
+            BytecodeInstruction::DupX2 => write!(f, "dup_x2"),
+            BytecodeInstruction::Dup2 => write!(f, "dup2"),
+            BytecodeInstruction::Dup2X1 => write!(f, "dup2_x1"),
+            BytecodeInstruction::Dup2X2 => write!(f, "dup2_x2"),
+            BytecodeInstruction::F2D => write!(f, "f2d"),
+            BytecodeInstruction::F2I => write!(f, "f2i"),
+            BytecodeInstruction::F2L => write!(f, "f2l"),
+            BytecodeInstruction::FAdd => write!(f, "fadd"),
+            BytecodeInstruction::FALoad => write!(f, "faload"),
+            BytecodeInstruction::FAStore => write!(f, "fastore"),
+            BytecodeInstruction::FCmpG => write!(f, "fcmpg"),
+            BytecodeInstruction::FCmpL => write!(f, "fcmpl"),
+            BytecodeInstruction::FConst(val) => write!(f, "fconst {}", f32::from_bits(val)),
+            BytecodeInstruction::FDiv => write!(f, "fdiv"),
+            BytecodeInstruction::FLoad(idx) => write!(f, "fload {}", idx),
+            BytecodeInstruction::FMul => write!(f, "fmul"),
+            BytecodeInstruction::FNeg => write!(f, "fneg"),
+            BytecodeInstruction::FRem => write!(f, "frem"),
+            BytecodeInstruction::FReturn => write!(f, "freturn"),
+            BytecodeInstruction::FStore(idx) => write!(f, "fstore {}", idx),
+            BytecodeInstruction::FSub => write!(f, "fsub"),
+            BytecodeInstruction::GetField(idx) => write!(f, "getfield {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::GetStatic(idx) => write!(f, "getstatic {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::Goto(tgt) => write!(f, "goto {}", tgt),
+            BytecodeInstruction::I2B => write!(f, "i2b"),
+            BytecodeInstruction::I2C => write!(f, "i2c"),
+            BytecodeInstruction::I2D => write!(f, "i2d"),
+            BytecodeInstruction::I2F => write!(f, "i2f"),
+            BytecodeInstruction::I2L => write!(f, "i2l"),
+            BytecodeInstruction::I2S => write!(f, "i2s"),
+            BytecodeInstruction::IAdd => write!(f, "iadd"),
+            BytecodeInstruction::IALoad => write!(f, "iaload"),
+            BytecodeInstruction::IAnd => write!(f, "iand"),
+            BytecodeInstruction::IAStore => write!(f, "iastore"),
+            BytecodeInstruction::IConst(val) => write!(f, "iconst {}", val),
+            BytecodeInstruction::IDiv => write!(f, "idiv"),
+            BytecodeInstruction::IfACmp(cond, tgt) => write!(f, "if_acmp{} {}", cond, tgt),
+            BytecodeInstruction::IfICmp(cond, tgt) => write!(f, "if_icmp{} {}", cond, tgt),
+            BytecodeInstruction::If(cond, tgt) => write!(f, "if{} {}", cond, tgt),
+            BytecodeInstruction::IfNonNull(tgt) => write!(f, "ifnonnull {}", tgt),
+            BytecodeInstruction::IfNull(tgt) => write!(f, "ifnull {}", tgt),
+            BytecodeInstruction::IInc(idx, val) => write!(f, "iinc {} {}", idx, val),
+            BytecodeInstruction::ILoad(idx) => write!(f, "iload {}", idx),
+            BytecodeInstruction::IMul => write!(f, "imul"),
+            BytecodeInstruction::INeg => write!(f, "ineg"),
+            BytecodeInstruction::InstanceOf(idx) => write!(f, "instanceof {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::InvokeDynamic(idx) => write!(f, "invokedynamic {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::InvokeInterface(idx, _) => write!(f, "invokeinterface {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::InvokeSpecial(idx) => write!(f, "invokespecial {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::InvokeStatic(idx) => write!(f, "invokestatic {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::InvokeVirtual(idx) => write!(f, "invokevirtual {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::IOr => write!(f, "ior"),
+            BytecodeInstruction::IRem => write!(f, "irem"),
+            BytecodeInstruction::IReturn => write!(f, "ireturn"),
+            BytecodeInstruction::IShl => write!(f, "ishl"),
+            BytecodeInstruction::IShr => write!(f, "ishr"),
+            BytecodeInstruction::IStore(idx) => write!(f, "istore {}", idx),
+            BytecodeInstruction::ISub => write!(f, "isub"),
+            BytecodeInstruction::IUShr => write!(f, "iushr"),
+            BytecodeInstruction::IXor => write!(f, "ixor"),
+            BytecodeInstruction::JSR(tgt) => write!(f, "jsr {}", tgt),
+            BytecodeInstruction::L2D => write!(f, "l2d"),
+            BytecodeInstruction::L2F => write!(f, "l2f"),
+            BytecodeInstruction::L2I => write!(f, "l2i"),
+            BytecodeInstruction::LAdd => write!(f, "ladd"),
+            BytecodeInstruction::LALoad => write!(f, "laload"),
+            BytecodeInstruction::LAnd => write!(f, "land"),
+            BytecodeInstruction::LAStore => write!(f, "lastore"),
+            BytecodeInstruction::LCmp => write!(f, "lcmp"),
+            BytecodeInstruction::LConst(val) => write!(f, "lconst {}", val),
+            BytecodeInstruction::Ldc(idx) => write!(f, "ldc {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::Ldc2(idx) => write!(f, "ldc2 {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::LDiv => write!(f, "ldiv"),
+            BytecodeInstruction::LLoad(idx) => write!(f, "lload {}", idx),
+            BytecodeInstruction::LMul => write!(f, "lmul"),
+            BytecodeInstruction::LNeg => write!(f, "lneg"),
+            BytecodeInstruction::LookupSwitch(default_tgt, ref table) => try {
+                write!(f, "lookupswitch [ ")?;
+                for &(val, tgt) in table.iter() {
+                    write!(f, "{}:{} ", val, tgt)?;
+                };
+                write!(f, "default:{} ]", default_tgt)?;
+                ()
+            },
+            BytecodeInstruction::LOr => write!(f, "lor"),
+            BytecodeInstruction::LRem => write!(f, "lrem"),
+            BytecodeInstruction::LReturn => write!(f, "lreturn"),
+            BytecodeInstruction::LShl => write!(f, "lshl"),
+            BytecodeInstruction::LShr => write!(f, "lshr"),
+            BytecodeInstruction::LStore(idx) => write!(f, "lstore {}", idx),
+            BytecodeInstruction::LSub => write!(f, "lsub"),
+            BytecodeInstruction::LUShr => write!(f, "lushr"),
+            BytecodeInstruction::LXor => write!(f, "lxor"),
+            BytecodeInstruction::MonitorEnter => write!(f, "monitorenter"),
+            BytecodeInstruction::MonitorExit => write!(f, "monitorexit"),
+            BytecodeInstruction::MultiANewArray(idx, dims) => write!(f, "multianewarray {} {}", PrettyConstantPoolEntry(idx, cp), dims),
+            BytecodeInstruction::New(idx) => write!(f, "new {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::NewArray(ty) => write!(f, "newarray {}", ty.as_char()),
+            BytecodeInstruction::Nop => write!(f, "nop"),
+            BytecodeInstruction::Pop => write!(f, "pop"),
+            BytecodeInstruction::Pop2 => write!(f, "pop2"),
+            BytecodeInstruction::PutField(idx) => write!(f, "putfield {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::PutStatic(idx) => write!(f, "putstatic {}", PrettyConstantPoolEntry(idx, cp)),
+            BytecodeInstruction::Ret(idx) => write!(f, "ret {}", idx),
+            BytecodeInstruction::Return => write!(f, "return"),
+            BytecodeInstruction::SALoad => write!(f, "saload"),
+            BytecodeInstruction::SAStore => write!(f, "sastore"),
+            BytecodeInstruction::Swap => write!(f, "swap"),
+            BytecodeInstruction::TableSwitch(start_val, default_tgt, ref table) => try {
+                write!(f, "tableswitch [ ")?;
+                for (off, &tgt) in table.iter().enumerate() {
+                    write!(f, "{}:{} ", start_val.wrapping_add(off as i32), tgt)?;
+                };
+                write!(f, "default:{} ]", default_tgt)?;
+                ()
+            }
+        }
+    }
 }
 
 fn read_u8(bytecode: &[u8], off: usize) -> Result<u8, usize> {

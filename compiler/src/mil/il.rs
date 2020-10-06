@@ -157,6 +157,10 @@ impl MilBlockIdAllocator {
         self.next.0 += n;
         id
     }
+
+    pub fn next(&self) -> MilBlockId {
+        self.next
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
