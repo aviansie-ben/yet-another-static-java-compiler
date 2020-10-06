@@ -54,8 +54,11 @@ fn parse_args<'a>() -> ArgMatches<'a> {
         )
         .arg(
             Arg::with_name("verbose")
-                .short("v")
-                .help("Enables verbose logging during resolution")
+                .long("verbose")
+                .takes_value(true)
+                .possible_values(&["load", "resolve", "liveness", "layout", "clinit", "ilgen", "opt", "codegen"])
+                .use_delimiter(true)
+                .help("Enables verbose logging for the provided phases")
         )
         .get_matches()
 }
@@ -98,6 +101,48 @@ lazy_static! {
 
 fn main() {
     let args = parse_args();
+
+    let mut verbose_load = false;
+    let mut verbose_resolve = false;
+    let mut verbose_liveness = false;
+    let mut verbose_layout = false;
+    let mut verbose_clinit = false;
+    let mut verbose_ilgen = false;
+    let mut verbose_opt = false;
+    let mut verbose_codegen = false;
+
+    if let Some(verbose_options) = args.values_of("verbose") {
+        for verbose_option in verbose_options {
+            match verbose_option {
+                "load" => {
+                    verbose_load = true;
+                },
+                "resolve" => {
+                    verbose_resolve = true;
+                },
+                "liveness" => {
+                    verbose_liveness = true;
+                },
+                "layout" => {
+                    verbose_layout = true;
+                },
+                "clinit" => {
+                    verbose_clinit = true;
+                },
+                "ilgen" => {
+                    verbose_ilgen = true;
+                },
+                "opt" => {
+                    verbose_opt = true;
+                },
+                "codegen" => {
+                    verbose_codegen = true;
+                },
+                _ => unreachable!()
+            };
+        };
+    };
+
     let mut class_loaders: Vec<Box<dyn resolve::ClassLoader>> = vec![Box::new(resolve::ArrayClassLoader())];
 
     for cp in args.value_of("classpath").unwrap().split(":") {
@@ -144,7 +189,7 @@ fn main() {
         return;
     });
 
-    if let Result::Err(err) = resolve::resolve_all_classes(&mut env, args.is_present("verbose")) {
+    if let Result::Err(err) = resolve::resolve_all_classes(&mut env, verbose_load) {
         eprint!("error during resolution: ");
         print_resolve_error(&env, &err);
         return;
@@ -152,13 +197,13 @@ fn main() {
     println!("Loaded {} classes ({} class files) in {:.3}s", env.num_classes(), env.num_user_classes(), start_load_classes.elapsed().as_secs_f32());
 
     let start_resolve_subitems = std::time::Instant::now();
-    if let Result::Err(err) = resolve::resolve_all_subitem_references(&mut env, args.is_present("verbose")) {
+    if let Result::Err(err) = resolve::resolve_all_subitem_references(&mut env, verbose_resolve) {
         eprint!("error during resolution: ");
         print_resolve_error(&env, &err);
         return;
     };
 
-    if let Result::Err(err) = resolve::resolve_overriding(&mut env, args.is_present("verbose")) {
+    if let Result::Err(err) = resolve::resolve_overriding(&mut env, verbose_resolve) {
         eprint!("error during resolution: ");
         print_resolve_error(&env, &err);
         return;
@@ -184,11 +229,11 @@ fn main() {
     println!("Summarized {} methods in {:.3}s", num_methods_summarized, start_summarize_methods.elapsed().as_secs_f32());
 
     let start_analyze_liveness = std::time::Instant::now();
-    let mut liveness = liveness::analyze_all(&env, main_method, args.is_present("verbose"));
+    let mut liveness = liveness::analyze_all(&env, main_method, verbose_liveness);
     println!("Found {} classes requiring initialization ({} classes constructible) in {:.3}s", liveness.needs_clinit.len(), liveness.may_construct.len(), start_analyze_liveness.elapsed().as_secs_f32());
 
     let start_layout = std::time::Instant::now();
-    layout::compute_all_layouts(&mut env, &liveness, args.is_present("verbose"));
+    layout::compute_all_layouts(&mut env, &liveness, verbose_layout);
     println!("Computed object layouts in {:.3}s", start_layout.elapsed().as_secs_f32());
 
     let start_heap = std::time::Instant::now();
@@ -211,7 +256,7 @@ fn main() {
 
     let start_clinit = std::time::Instant::now();
     for class_id in liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0) {
-        if static_interp::try_run_clinit(&env, &heap, class_id, args.is_present("verbose")) {
+        if static_interp::try_run_clinit(&env, &heap, class_id, verbose_clinit) {
             good_clinit += 1;
         } else {
             bad_clinit += 1;
@@ -227,7 +272,7 @@ fn main() {
     );
 
     let start_liveness_methods = std::time::Instant::now();
-    liveness::analyze_post_clinit(&env, main_method, &mut liveness, needs_runtime_clinit, args.is_present("verbose"));
+    liveness::analyze_post_clinit(&env, main_method, &mut liveness, HashSet::new(), verbose_liveness);
     println!("Found {} executable methods in {:.3}s", liveness.may_call.len(), start_liveness_methods.elapsed().as_secs_f32());
 
     let mut known_objects = mil::il::MilKnownObjectMap::new();
@@ -246,7 +291,7 @@ fn main() {
     let start_ilgen = std::time::Instant::now();
     let mut program = mil::il::MilProgram::new(known_objects, main_method);
     for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
-        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, &liveness, args.is_present("verbose")) {
+        if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, &liveness, verbose_ilgen) {
             program.funcs.insert(method_id, func);
         };
     };
@@ -254,7 +299,7 @@ fn main() {
 
     if args.is_present("optimize") {
         let mut stdout = std::io::stdout();
-        let log = if args.is_present("verbose") {
+        let log = if verbose_opt {
             log::Log::new(&mut stdout)
         } else {
             log::Log::none()
@@ -267,7 +312,7 @@ fn main() {
 
     let start_codegen = std::time::Instant::now();
     let llvm_ctx = backend::llvm::LLVMContext::new();
-    let llvm_module = backend::llvm::emit_llvm_ir(&env, &program, &liveness, &heap, &llvm_ctx, args.is_present("verbose"));
+    let llvm_module = backend::llvm::emit_llvm_ir(&env, &program, &liveness, &heap, &llvm_ctx, verbose_codegen);
     llvm_module.write_bitcode_to_file("test.bc").unwrap();
     println!("Generated LLVM bitcode in {:.3}s", start_codegen.elapsed().as_secs_f32());
 }
