@@ -1,4 +1,4 @@
-use std::alloc::AllocErr;
+use std::alloc::AllocError;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -274,8 +274,8 @@ pub enum StaticInterpretErrorKind {
     ExcludedClinit(ClassId)
 }
 
-impl From<AllocErr> for StaticInterpretErrorKind {
-    fn from(_: AllocErr) -> StaticInterpretErrorKind {
+impl From<AllocError> for StaticInterpretErrorKind {
+    fn from(_: AllocError) -> StaticInterpretErrorKind {
         StaticInterpretErrorKind::OutOfMemory
     }
 }

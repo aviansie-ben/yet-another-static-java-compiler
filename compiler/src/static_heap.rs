@@ -1,4 +1,4 @@
-use std::alloc::{AllocErr, AllocRef, Global, Layout};
+use std::alloc::{AllocError, AllocRef, Global, Layout};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::{self, HashMap};
 use std::convert::TryInto;
@@ -586,7 +586,7 @@ struct JavaStaticObject {
 }
 
 impl JavaStaticObject {
-    unsafe fn allocate_uninit(size: usize) -> Result<JavaStaticObject, AllocErr> {
+    unsafe fn allocate_uninit(size: usize) -> Result<JavaStaticObject, AllocError> {
         let bytes = Global.alloc(Layout::from_size_align(size, 16).unwrap())?.cast();
         let checkpoint = match Global.alloc(Layout::from_size_align(size, 16).unwrap()) {
             Result::Ok(checkpoint_block) => checkpoint_block.cast(),
@@ -604,7 +604,7 @@ impl JavaStaticObject {
         })
     }
 
-    unsafe fn allocate_raw(class_id: ClassId, size: usize, env: &ClassEnvironment) -> Result<JavaStaticObject, AllocErr> {
+    unsafe fn allocate_raw(class_id: ClassId, size: usize, env: &ClassEnvironment) -> Result<JavaStaticObject, AllocError> {
         let obj = JavaStaticObject::allocate_uninit(size)?;
 
         obj.as_java_ref(env).write_raw::<u32>(0, class_id.0);
@@ -613,13 +613,13 @@ impl JavaStaticObject {
         Result::Ok(obj)
     }
 
-    fn allocate_object(class: &Class, env: &ClassEnvironment) -> Result<JavaStaticObject, AllocErr> {
+    fn allocate_object(class: &Class, env: &ClassEnvironment) -> Result<JavaStaticObject, AllocError> {
         unsafe {
             JavaStaticObject::allocate_raw(class.meta.this_id, class.layout.size as usize, env)
         }
     }
 
-    fn allocate_object_sized(class: &Class, env: &ClassEnvironment, size: usize) -> Result<JavaStaticObject, AllocErr> {
+    fn allocate_object_sized(class: &Class, env: &ClassEnvironment, size: usize) -> Result<JavaStaticObject, AllocError> {
         unsafe {
             assert!(class.layout.size as usize <= size);
             JavaStaticObject::allocate_raw(class.meta.this_id, size, env)
@@ -638,11 +638,11 @@ impl JavaStaticObject {
         (header_size as usize).checked_add((elem_size as usize).checked_mul(len as usize)?)
     }
 
-    fn allocate_array(class_id: ClassId, env: &ClassEnvironment, len: u32) -> Result<JavaStaticObject, AllocErr> {
+    fn allocate_array(class_id: ClassId, env: &ClassEnvironment, len: u32) -> Result<JavaStaticObject, AllocError> {
         let size = match JavaStaticObject::calculate_array_size(class_id, env, len) {
             Some(size) => size,
             None => {
-                return Result::Err(AllocErr);
+                return Result::Err(AllocError);
             }
         };
 
@@ -689,7 +689,7 @@ impl <'a> JavaStaticHeap<'a> {
         }
     }
 
-    pub fn init_class_objects(&mut self, classes: impl Iterator<Item=ClassId>) -> Result<(), AllocErr> {
+    pub fn init_class_objects(&mut self, classes: impl Iterator<Item=ClassId>) -> Result<(), AllocError> {
         for class_id in classes {
             let class_ref = unsafe { self.allocate_class_object_untracked(class_id)? };
             self.class_objs.insert(class_id, class_ref);
@@ -701,7 +701,7 @@ impl <'a> JavaStaticHeap<'a> {
         Result::Ok(())
     }
 
-    pub fn init_constant_strings<'b>(&mut self, strings: impl IntoIterator<Item=&'b str>) -> Result<(), AllocErr> {
+    pub fn init_constant_strings<'b>(&mut self, strings: impl IntoIterator<Item=&'b str>) -> Result<(), AllocError> {
         for str in strings.into_iter() {
             let str_ref = unsafe { self.allocate_string_untracked(str)? };
             self.constant_strings.push(str_ref);
@@ -747,7 +747,7 @@ impl <'a> JavaStaticHeap<'a> {
         // TODO
     }
 
-    unsafe fn allocate_class_object_untracked(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocErr> {
+    unsafe fn allocate_class_object_untracked(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocError> {
         let real_size = match **self.env.get(class_id) {
             ResolvedClass::User(ref class) => class.layout.static_size as usize,
             _ => self.env.get(ClassId::JAVA_LANG_CLASS).as_user_class().layout.size as usize
@@ -757,7 +757,7 @@ impl <'a> JavaStaticHeap<'a> {
         if self.remaining_size.get() < size {
             self.do_gc();
             if self.remaining_size.get() < size {
-                return Result::Err(AllocErr);
+                return Result::Err(AllocError);
             };
         };
 
@@ -783,14 +783,14 @@ impl <'a> JavaStaticHeap<'a> {
         Result::Ok(java_ref)
     }
 
-    pub unsafe fn allocate_object_untracked(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub unsafe fn allocate_object_untracked(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocError> {
         let class = self.env.get(class_id).as_user_class();
         let size = (class.layout.size as usize + 15) / 16 * 16;
 
         if self.remaining_size.get() < size {
             self.do_gc();
             if self.remaining_size.get() < size {
-                return Result::Err(AllocErr);
+                return Result::Err(AllocError);
             };
         };
 
@@ -809,14 +809,14 @@ impl <'a> JavaStaticHeap<'a> {
         Result::Ok(java_ref)
     }
 
-    pub fn allocate_object(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub fn allocate_object(&self, class_id: ClassId) -> Result<JavaStaticRef<'a>, AllocError> {
         unsafe {
             self.allocate_object_untracked(class_id)
                 .map(|r| r.with_root(NonNull::new_unchecked(self.ref_root.get())))
         }
     }
 
-    pub unsafe fn allocate_string_untracked(&self, value: &str) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub unsafe fn allocate_string_untracked(&self, value: &str) -> Result<JavaStaticRef<'a>, AllocError> {
         let value_utf16 = value.encode_utf16().collect_vec();
 
         assert!(value_utf16.len() <= i32::max_value() as usize);
@@ -835,18 +835,18 @@ impl <'a> JavaStaticHeap<'a> {
         Result::Ok(string_ref)
     }
 
-    pub fn allocate_string(&self, value: &str) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub fn allocate_string(&self, value: &str) -> Result<JavaStaticRef<'a>, AllocError> {
         unsafe {
             self.allocate_string_untracked(value)
                 .map(|r| r.with_root(NonNull::new_unchecked(self.ref_root.get())))
         }
     }
 
-    pub unsafe fn allocate_array_untracked(&self, class_id: ClassId, len: u32) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub unsafe fn allocate_array_untracked(&self, class_id: ClassId, len: u32) -> Result<JavaStaticRef<'a>, AllocError> {
         let size = match JavaStaticObject::calculate_array_size(class_id, self.env, len) {
             Some(size) => size,
             None => {
-                return Result::Err(AllocErr);
+                return Result::Err(AllocError);
             }
         };
         let size = (size + 15) / 16 * 16;
@@ -854,7 +854,7 @@ impl <'a> JavaStaticHeap<'a> {
         if self.remaining_size.get() < size {
             self.do_gc();
             if self.remaining_size.get() < size {
-                return Result::Err(AllocErr);
+                return Result::Err(AllocError);
             }
         };
 
@@ -873,7 +873,7 @@ impl <'a> JavaStaticHeap<'a> {
         Result::Ok(java_ref)
     }
 
-    pub fn allocate_array(&self, class_id: ClassId, len: u32) -> Result<JavaStaticRef<'a>, AllocErr> {
+    pub fn allocate_array(&self, class_id: ClassId, len: u32) -> Result<JavaStaticRef<'a>, AllocError> {
         unsafe {
             self.allocate_array_untracked(class_id, len)
                 .map(|r| r.with_root(NonNull::new_unchecked(self.ref_root.get())))
