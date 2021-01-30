@@ -96,6 +96,20 @@ impl <T: Copy + PartialEq + Eq + Hash> FlowGraph<T> {
         self.get_mut(from).outgoing = to_node.outgoing;
     }
 
+    pub fn merge_nodes_forward(&mut self, from: T, to: T) {
+        self.remove_edge(from, to);
+
+        let from_node = self.nodes.remove(&from).unwrap();
+
+        for pred in from_node.incoming.iter().copied() {
+            let pred = self.get_mut(pred);
+            let i = pred.outgoing.iter().enumerate().filter(|(_, &id)| id == from).map(|(i, _)| i).next().unwrap();
+            pred.outgoing[i] = to;
+        };
+
+        self.get_mut(to).incoming.extend(from_node.incoming);
+    }
+
     pub fn clear(&mut self) {
         self.nodes.clear();
     }

@@ -1133,6 +1133,50 @@ impl MilEndInstruction {
         }
     }
 
+    pub fn for_successors(&self, mut f: impl FnMut (&MilBlockId) -> ()) {
+        match self.kind {
+            MilEndInstructionKind::Nop => {},
+            MilEndInstructionKind::Unreachable => {},
+            MilEndInstructionKind::Call(_, _, _, _) => {},
+            MilEndInstructionKind::CallVirtual(_, _, _, _, _) => {},
+            MilEndInstructionKind::CallInterface(_, _, _, _, _) => {},
+            MilEndInstructionKind::CallNative(_, _, _, _) => {},
+            MilEndInstructionKind::Throw(_) => {},
+            MilEndInstructionKind::Return(_) => {},
+            MilEndInstructionKind::Jump(ref tgt) => {
+                f(tgt);
+            },
+            MilEndInstructionKind::JumpIfRCmp(_, ref tgt, _, _) => {
+                f(tgt);
+            },
+            MilEndInstructionKind::JumpIfICmp(_, ref tgt, _, _) => {
+                f(tgt);
+            }
+        }
+    }
+
+    pub fn for_successors_mut(&mut self, mut f: impl FnMut (&mut MilBlockId) -> ()) {
+        match self.kind {
+            MilEndInstructionKind::Nop => {},
+            MilEndInstructionKind::Unreachable => {},
+            MilEndInstructionKind::Call(_, _, _, _) => {},
+            MilEndInstructionKind::CallVirtual(_, _, _, _, _) => {},
+            MilEndInstructionKind::CallInterface(_, _, _, _, _) => {},
+            MilEndInstructionKind::CallNative(_, _, _, _) => {},
+            MilEndInstructionKind::Throw(_) => {},
+            MilEndInstructionKind::Return(_) => {},
+            MilEndInstructionKind::Jump(ref mut tgt) => {
+                f(tgt);
+            },
+            MilEndInstructionKind::JumpIfRCmp(_, ref mut tgt, _, _) => {
+                f(tgt);
+            },
+            MilEndInstructionKind::JumpIfICmp(_, ref mut tgt, _, _) => {
+                f(tgt);
+            }
+        }
+    }
+
     pub fn is_nop(&self) -> bool {
         match self.kind {
             MilEndInstructionKind::Nop => true,

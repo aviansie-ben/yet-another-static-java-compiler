@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 
 use crate::log_writeln;
 use crate::log::Log;
-use crate::mil::flow_graph::FlowGraph;
+use crate::mil::flow_graph::{FlowGraph, FlowGraphNode};
 use crate::mil::il::*;
 use crate::mil::transform;
 use crate::resolve::ClassEnvironment;
@@ -116,6 +116,40 @@ pub fn simplify_phis(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) 
     num_simplified
 }
 
+fn find_incoming_overlap(prev_cfg_node: &FlowGraphNode<MilBlockId>, next_cfg_node: &FlowGraphNode<MilBlockId>) -> Vec<MilBlockId> {
+    prev_cfg_node.incoming.iter().copied().filter(|pred| next_cfg_node.incoming.contains(pred)).collect()
+}
+
+fn is_phi_consistent(next: &MilBlock, prev_id: MilBlockId, incoming_overlap: &[MilBlockId]) -> bool {
+    if !incoming_overlap.is_empty() {
+        for phi in next.phi_nodes.iter() {
+            let mut overlap_result = None;
+
+            for &(ref val, pred_id) in phi.sources.iter() {
+                if pred_id == prev_id || incoming_overlap.contains(&pred_id) {
+                    if let Some(ref overlap_result) = overlap_result {
+                        if overlap_result != val {
+                            return false;
+                        };
+                    } else {
+                        overlap_result = Some(val.clone());
+                    };
+                };
+            };
+        };
+    };
+
+    true
+}
+
+fn remove_phi_predecessor(phi: &mut MilPhiNode, pred_id: MilBlockId) -> MilOperand {
+    let i = phi.sources.iter().enumerate()
+        .filter(|&(_, &(_, p))| p == pred_id)
+        .map(|(i, _)| i)
+        .next().unwrap();
+    phi.sources.remove(i).0
+}
+
 pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== BLOCK MERGING =====\n");
 
@@ -128,14 +162,14 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
 
         let prev = &func.blocks[&prev_id];
         let merged = if matches!(prev.end_instr.kind, MilEndInstructionKind::Nop) {
-            let merge = if cfg.get(next_id).incoming.len() == 1 {
-                log_writeln!(log, "Merging {} and {} since {} has one predecessor", prev_id, next_id, next_id);
-                true
-            } else {
-                false
-            };
+            let next = &func.blocks[&next_id];
+            let prev_cfg_node = cfg.get(prev_id);
+            let next_cfg_node = cfg.get(next_id);
+            let incoming_overlap = find_incoming_overlap(prev_cfg_node, next_cfg_node);
 
-            if merge {
+            if next_cfg_node.incoming.len() == 1 {
+                log_writeln!(log, "Merging {} and {} since {} has one predecessor", prev_id, next_id, next_id);
+
                 transform::rewrite_phis(&mut func.blocks, cfg, next_id, prev_id);
 
                 let next = func.blocks.remove(&next_id).unwrap();
@@ -150,6 +184,43 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
                 prev.instrs.extend(next.instrs);
                 prev.end_instr = next.end_instr;
 
+                true
+            } else if prev.instrs.is_empty() && is_phi_consistent(next, prev_id, &incoming_overlap) {
+                log_writeln!(log, "Merging {} and {} since {} is empty", prev_id, next_id, prev_id);
+
+                let nonoverlap_new_incoming = prev_cfg_node.incoming.iter().copied()
+                    .filter(|&pred_id| !incoming_overlap.contains(&pred_id))
+                    .collect_vec();
+
+                transform::replace_block_target(&mut func.blocks, cfg, prev_id, next_id);
+
+                let prev = func.blocks.remove(&prev_id).unwrap();
+                let next = func.blocks.get_mut(&next_id).unwrap();
+
+                for phi in next.phi_nodes.iter_mut() {
+                    match remove_phi_predecessor(phi, prev_id) {
+                        MilOperand::Register(reg) => {
+                            if let Some(prev_phi) = prev.phi_nodes.iter().filter(|&phi| phi.target == reg).next() {
+                                phi.sources.reserve(nonoverlap_new_incoming.len());
+                                for &(ref val, pred_id) in prev_phi.sources.iter() {
+                                    if !incoming_overlap.contains(&pred_id) {
+                                        phi.sources.push((val.clone(), pred_id));
+                                    };
+                                };
+                            } else {
+                                phi.sources.extend(nonoverlap_new_incoming.iter().copied().map(|pred_id| (MilOperand::Register(reg), pred_id)));
+                            };
+                        },
+                        val => {
+                            phi.sources.extend(nonoverlap_new_incoming.iter().copied().map(|pred_id| (val.clone(), pred_id)));
+                        }
+                    }
+                };
+
+                func.block_order.remove(i - 1);
+                cfg.merge_nodes_forward(prev_id, next_id);
+
+                i = i - 1;
                 true
             } else {
                 false

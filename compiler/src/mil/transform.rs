@@ -33,6 +33,18 @@ pub fn replace_register(block: &mut MilBlock, map: &HashMap<MilRegister, MilOper
     });
 }
 
+pub fn replace_block_target(blocks: &mut HashMap<MilBlockId, MilBlock>, cfg: &FlowGraph<MilBlockId>, old: MilBlockId, new: MilBlockId) {
+    for pred in cfg.get(old).incoming.iter().copied() {
+        if pred != MilBlockId::ENTRY {
+            blocks.get_mut(&pred).unwrap().end_instr.for_successors_mut(|tgt| {
+                if *tgt == old {
+                    *tgt = new;
+                };
+            });
+        };
+    };
+}
+
 pub fn rewrite_phis(blocks: &mut HashMap<MilBlockId, MilBlock>, cfg: &FlowGraph<MilBlockId>, old: MilBlockId, new: MilBlockId) {
     for succ in cfg.get(old).outgoing.iter().copied() {
         if succ != MilBlockId::EXIT {
