@@ -338,11 +338,11 @@ unsafe fn emit_basic_block<'a>(
         match instr.kind {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(tgt, ref src) => {
-                let src = create_value_ref(&module, src, &local_regs);
+                let src = create_value_ref(module, src, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, src, &module.types);
             },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
-                let val = create_value_ref(&module, val, &local_regs);
+                let val = create_value_ref(module, val, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, match op {
                     MilUnOp::INeg => builder.build_neg(val, Some(register_name(tgt))),
                     MilUnOp::IExtB => builder.build_sext(
@@ -433,8 +433,8 @@ unsafe fn emit_basic_block<'a>(
                 }, &module.types);
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
-                let lhs = create_value_ref(&module, lhs, &local_regs);
-                let rhs = create_value_ref(&module, rhs, &local_regs);
+                let lhs = create_value_ref(module, lhs, &local_regs);
+                let rhs = create_value_ref(module, rhs, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, match op {
                     MilBinOp::IAdd => builder.build_add(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::ISub => builder.build_sub(lhs, rhs, Some(register_name(tgt))),
@@ -548,13 +548,13 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, builder.build_load(locals[&local_id], Some(register_name(tgt))), &module.types);
             },
             MilInstructionKind::SetLocal(local_id, ref src) => {
-                let src = create_value_ref(&module, src, &local_regs);
+                let src = create_value_ref(module, src, &local_regs);
                 let local_ptr = locals[&local_id];
 
                 builder.build_store(src, local_ptr);
             },
             MilInstructionKind::GetField(field_id, class_id, tgt, ref obj) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
 
                 let val = builder.build_load(
                     create_instance_field_gep(builder, field_id, obj, &module.types),
@@ -565,8 +565,8 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutField(field_id, class_id, ref obj, ref val) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
-                let val = create_value_ref(&module, val, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
+                let val = create_value_ref(module, val, &local_regs);
 
                 builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
@@ -574,7 +574,7 @@ unsafe fn emit_basic_block<'a>(
                 );
             },
             MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
 
                 let val = builder.build_load(
                     create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj,&module.types),
@@ -584,8 +584,8 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
-                let idx = create_value_ref(&module, idx, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
+                let idx = create_value_ref(module, idx, &local_regs);
 
                 let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.types);
 
@@ -598,9 +598,9 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutArrayElement(class_id, ref obj, ref idx, ref val) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
-                let idx = create_value_ref(&module, idx, &local_regs);
-                let val = create_value_ref(&module, val, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
+                let idx = create_value_ref(module, idx, &local_regs);
+                let val = create_value_ref(module, val, &local_regs);
 
                 let arr_data = create_instance_field_gep(builder, FieldId(module.env.try_find_array(class_id).unwrap(), 1), obj, &module.types);
 
@@ -619,7 +619,7 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, val, &module.types);
             },
             MilInstructionKind::PutStatic(field_id, class_id, ref val) => {
-                let val = create_value_ref(&module, val, &local_regs);
+                let val = create_value_ref(module, val, &local_regs);
 
                 builder.build_store(
                     coerce_before_store(builder, class_id, val, &module.types),
@@ -641,7 +641,7 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
-                let len = create_value_ref(&module, len, &local_regs);
+                let len = create_value_ref(module, len, &local_regs);
                 let obj = builder.build_call(
                     LLVMValue::from_raw(module.builtins.alloc_array),
                     &[
@@ -657,7 +657,7 @@ unsafe fn emit_basic_block<'a>(
                 set_register(builder, func, &mut local_regs, all_regs, tgt, obj, &module.types);
             },
             MilInstructionKind::GetVTable(tgt, ref obj) => {
-                let obj = create_value_ref(&module, obj, &local_regs);
+                let obj = create_value_ref(module, obj, &local_regs);
                 let vtable = create_vtable_load(builder, obj, &module.types);
 
                 set_register(builder, func, &mut local_regs, all_regs, tgt, vtable, &module.types);
@@ -673,7 +673,7 @@ unsafe fn emit_basic_block<'a>(
         },
         MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
             let args = args.iter()
-                .map(|o| create_value_ref(&module, o, &local_regs))
+                .map(|o| create_value_ref(module, o, &local_regs))
                 .collect_vec();
 
             let val = builder.build_call(
@@ -686,9 +686,9 @@ unsafe fn emit_basic_block<'a>(
         },
         MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref vtable, ref args) => {
             let (_, method) = module.env.get_method(method_id);
-            let vtable = create_value_ref(&module, vtable, &local_regs);
+            let vtable = create_value_ref(module, vtable, &local_regs);
             let args = args.iter()
-                .map(|o| create_value_ref(&module, o, &local_regs))
+                .map(|o| create_value_ref(module, o, &local_regs))
                 .collect_vec();
 
             let vtable = builder.build_pointer_cast(
@@ -715,9 +715,9 @@ unsafe fn emit_basic_block<'a>(
             ));
 
             let (_, method) = module.env.get_method(method_id);
-            let vtable = create_value_ref(&module, vtable, &local_regs);
+            let vtable = create_value_ref(module, vtable, &local_regs);
             let args = args.iter()
-                .map(|o| create_value_ref(&module, o, &local_regs))
+                .map(|o| create_value_ref(module, o, &local_regs))
                 .collect_vec();
 
             let vtable = builder.build_pointer_cast(
@@ -776,7 +776,7 @@ unsafe fn emit_basic_block<'a>(
         MilEndInstructionKind::CallNative(ret_ty, ref name, tgt, ref args) => {
             let mut arg_tys = args.iter().map(|a| native_arg_type(a.get_type(&func.reg_map), &module.types)).collect_vec();
             let args = args.iter()
-                .map(|o| create_value_ref(&module, o, &local_regs))
+                .map(|o| create_value_ref(module, o, &local_regs))
                 .collect_vec();
 
             let func_ty = LLVMFunctionType(
@@ -793,7 +793,7 @@ unsafe fn emit_basic_block<'a>(
             set_register(builder, func, &mut local_regs, all_regs, tgt, return_val, &module.types);
         },
         MilEndInstructionKind::Throw(ref exception) => {
-            let exception = create_value_ref(&module, exception, &local_regs);
+            let exception = create_value_ref(module, exception, &local_regs);
 
             builder.build_call(LLVMValue::from_raw(module.builtins.throw), &[exception], None);
             builder.build_unreachable();
@@ -803,7 +803,7 @@ unsafe fn emit_basic_block<'a>(
         },
         MilEndInstructionKind::Return(ref val) => {
             let val = builder.build_bit_cast(
-                create_value_ref(&module, val, &local_regs),
+                create_value_ref(module, val, &local_regs),
                 LLVMGetReturnType(module.types.method_types[&func.id]),
                 None
             );
@@ -812,8 +812,8 @@ unsafe fn emit_basic_block<'a>(
         },
         MilEndInstructionKind::Jump(_) => {},
         MilEndInstructionKind::JumpIfRCmp(cond, _, ref lhs, ref rhs) => {
-            let lhs = create_value_ref(&module, lhs, &local_regs);
-            let rhs = create_value_ref(&module, rhs, &local_regs);
+            let lhs = create_value_ref(module, lhs, &local_regs);
+            let rhs = create_value_ref(module, rhs, &local_regs);
 
             let cond = match cond {
                 MilRefComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
@@ -823,8 +823,8 @@ unsafe fn emit_basic_block<'a>(
             cond_out = Some(builder.build_icmp(cond, lhs, rhs, None));
         },
         MilEndInstructionKind::JumpIfICmp(cond, _, ref lhs, ref rhs) => {
-            let lhs = create_value_ref(&module, lhs, &local_regs);
-            let rhs = create_value_ref(&module, rhs, &local_regs);
+            let lhs = create_value_ref(module, lhs, &local_regs);
+            let rhs = create_value_ref(module, rhs, &local_regs);
 
             let cond = match cond {
                 MilIntComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
@@ -911,7 +911,7 @@ unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
     let mut phis_to_add = vec![];
 
     for block_id in func.block_order.iter().cloned() {
-        emit_basic_block(&module, func, &cfg, block_id, &builder, llvm_func.into_val(), &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add, &mut debug_locs);
+        emit_basic_block(module, func, &cfg, block_id, &builder, llvm_func.into_val(), &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add, &mut debug_locs);
     };
 
     builder.set_current_debug_location(None);
