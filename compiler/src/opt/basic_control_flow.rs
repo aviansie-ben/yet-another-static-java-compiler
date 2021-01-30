@@ -365,6 +365,33 @@ pub fn remove_redundant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlo
     num_removed
 }
 
+pub fn devirtualize_nonoverriden_calls(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) -> usize {
+    log_writeln!(log, "\n===== NON-OVERRIDDEN CALL DEVIRTUALIZATION =====\n");
+
+    let mut num_devirtualized = 0;
+
+    for block_id in func.block_order.iter().copied() {
+        let block = func.blocks.get_mut(&block_id).unwrap();
+
+        match block.end_instr.kind {
+            MilEndInstructionKind::CallVirtual(return_class_id, method_id, tgt, _, ref args) => {
+                if env.get_method(method_id).1.overrides.overridden_by.is_empty() {
+                    log_writeln!(log, "Devirtualizing call to non-overridden function {}", MethodName(method_id, env));
+                    block.end_instr.kind = MilEndInstructionKind::Call(return_class_id, method_id, tgt, args.clone());
+                    num_devirtualized += 1;
+                };
+            },
+            _ => {}
+        };
+    };
+
+    if num_devirtualized != 0 {
+        log_writeln!(log, "\n===== AFTER NON-OVERRIDDEN CALL DEVIRTUALIZATION =====\n\n{}", func.pretty(env));
+    };
+
+    num_devirtualized
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

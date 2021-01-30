@@ -53,6 +53,9 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
+
+    // Get things ready for inlining wherever possible
+    basic_control_flow::devirtualize_nonoverriden_calls(func, env.env, env.log);
 }
 
 pub fn optimize_program(program: &mut MilProgram, env: &ClassEnvironment, heap: &JavaStaticHeap, log: &Log) {
