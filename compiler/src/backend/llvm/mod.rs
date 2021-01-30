@@ -5,7 +5,7 @@ mod wrapper;
 pub use self::wrapper::LLVMContext;
 
 use std::collections::HashMap;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr::NonNull;
 
@@ -35,6 +35,7 @@ struct MochaModule<'a, 'b, 'c> {
     known_objs: &'a MilKnownObjectMap<'c>,
     obj_map: HashMap<NonNull<u8>, LLVMValue<'a>>,
     methods: HashMap<MethodId, LLVMFunctionValue<'a>>,
+    native_funcs: HashMap<CString, LLVMValue<'a>>,
     builtin_class_table: LLVMValue<'a>,
     di_builder: &'a LLVMDIBuilder<'b>,
     compile_unit: LLVMMetadata<'a>,
@@ -178,7 +179,7 @@ unsafe fn create_builtin_class_table(module: &LLVMModule, types: &LLVMTypes) -> 
     global
 }
 
-unsafe fn emit_main_function<'a>(module: &MochaModule<'a, '_, '_>, main_method: MethodId) -> LLVMFunctionValue<'a> {
+unsafe fn emit_main_function<'a>(module: &mut MochaModule<'a, '_, '_>, main_method: MethodId) -> LLVMFunctionValue<'a> {
     let main_func = module.module.add_function(
         CStr::from_bytes_with_nul(b"main\0").unwrap(),
         LLVMFunctionType(
@@ -228,6 +229,7 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
             known_objs: &program.known_objects,
             obj_map: HashMap::new(),
             methods: HashMap::new(),
+            native_funcs: HashMap::new(),
             builtin_class_table,
             di_builder: &di_builder,
             compile_unit: {
@@ -255,10 +257,10 @@ pub fn emit_llvm_ir<'a>(env: &ClassEnvironment, program: &MilProgram, liveness: 
 
         define_static_heap(&mut module);
         define_functions(program, &mut module, liveness);
-        emit_vtables(&module, liveness);
-        emit_static_heap(&module);
-        emit_functions(program, &module, liveness);
-        emit_main_function(&module, program.main_method);
+        emit_vtables(&mut module, liveness);
+        emit_static_heap(&mut module);
+        emit_functions(program, &mut module, liveness);
+        emit_main_function(&mut module, program.main_method);
 
         module.di_builder.finalize();
 

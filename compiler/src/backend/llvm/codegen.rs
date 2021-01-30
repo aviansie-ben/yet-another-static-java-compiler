@@ -273,8 +273,8 @@ fn undefined_register_value<'a>(module: &MochaModule<'a, '_, '_>, ty: MilType) -
     }
 }
 
-unsafe fn emit_basic_block<'a>(
-    module: &MochaModule<'a, '_, '_>,
+unsafe fn emit_basic_block<'a, 'b>(
+    module: &mut MochaModule<'a, '_, '_>,
     func: &MilFunction,
     cfg: &FlowGraph<MilBlockId>,
     block_id: MilBlockId,
@@ -284,7 +284,7 @@ unsafe fn emit_basic_block<'a>(
     llvm_blocks: &mut HashMap<MilBlockId, (LLVMBasicBlockRef, LLVMBasicBlockRef, Option<LLVMValue<'a>>)>,
     all_regs: &mut HashMap<MilRegister, LLVMValue<'a>>,
     phis_to_add: &mut Vec<(LLVMPhiValue<'a>, MilBlockId, MilOperand)>,
-    debug_locs: &mut DebugLocationMap<'_, 'a>
+    debug_locs: &mut DebugLocationMap<'_, 'b>
 ) {
     let mut local_regs = HashMap::new();
 
@@ -786,7 +786,10 @@ unsafe fn emit_basic_block<'a>(
                 0
             );
             let name = CString::new(name.as_str()).unwrap();
-            let native_func = LLVMValue::from_raw(LLVMAddFunction(module.module.ptr(), name.as_ptr(), func_ty));
+            let module_module = &module.module;
+            let native_func = *module.native_funcs.entry(name.clone()).or_insert_with(|| {
+                module_module.add_function(&name, func_ty).into_val()
+            });
 
             let return_val = builder.build_call(native_func, &args[..], Some(register_name(tgt)));
 
@@ -842,7 +845,7 @@ unsafe fn emit_basic_block<'a>(
     llvm_blocks.insert(block_id, (llvm_start_block, llvm_block, cond_out));
 }
 
-unsafe fn emit_function(module: &MochaModule, func: &MilFunction) {
+unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
     let cfg = FlowGraph::for_function(func);
 
     let llvm_func = module.methods[&func.id];
@@ -964,7 +967,7 @@ pub(super) fn define_functions(program: &MilProgram, module: &mut MochaModule, l
     };
 }
 
-pub(super) fn emit_functions(program: &MilProgram, module: &MochaModule, liveness: &LivenessInfo) {
+pub(super) fn emit_functions(program: &MilProgram, module: &mut MochaModule, liveness: &LivenessInfo) {
     for method_id in liveness.may_call.iter().sorted_by_key(|m| ((m.0).0, m.1)).cloned() {
         if let Some(func) = program.funcs.get(&method_id) {
             unsafe {

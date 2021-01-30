@@ -435,7 +435,7 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
     LLVMSetInitializer(ty.vtable, vtable_value);
 }
 
-pub(super) fn emit_vtables(module: &MochaModule, liveness: &LivenessInfo) {
+pub(super) fn emit_vtables(module: &mut MochaModule, liveness: &LivenessInfo) {
     for class_id in liveness.needs_class_object.iter().cloned() {
         unsafe {
             emit_itable(module, class_id);
@@ -605,7 +605,7 @@ unsafe fn emit_static_heap_object<'a>(module: &MochaModule, obj: &JavaStaticRef<
     LLVMSetInitializer(module.obj_map[&obj.as_ptr()].ptr(), value);
 }
 
-pub(super) fn emit_static_heap(module: &MochaModule) {
+pub(super) fn emit_static_heap(module: &mut MochaModule) {
     for obj in module.objs.iter() {
         unsafe {
             emit_static_heap_object(&module, obj);
