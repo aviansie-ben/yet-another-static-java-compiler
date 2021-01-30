@@ -9,6 +9,7 @@ use crate::static_heap::JavaStaticHeap;
 
 pub mod basic_control_flow;
 pub mod class_constraints;
+pub mod inliner;
 pub mod value_prop;
 
 pub struct OptimizationEnvironment<'a, 'b, 'c> {
@@ -62,4 +63,6 @@ pub fn optimize_program(program: &mut MilProgram, env: &ClassEnvironment, heap: 
     for (_, func) in program.funcs.iter_mut().sorted_by_key(|&(&id, _)| ((id.0).0, id.1)) {
         optimize_function(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log })
     };
+
+    inliner::run_inliner(program, inliner::GreedyInliner::new(|func| func.blocks.len() as u64), &OptimizationEnvironment { env, heap, known_objects: &MilKnownObjectMap::new(), log });
 }

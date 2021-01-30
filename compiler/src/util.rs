@@ -1,5 +1,9 @@
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::iter;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 fn into_pos(i: usize) -> (usize, u8) {
     (i >> 3, (i & 0x7) as u8)
@@ -221,10 +225,100 @@ impl <T: BitVecIndex> Clone for BitVec<T> {
     }
 }
 
+enum LazyImpl<T, F: FnOnce () -> T> {
+    Initialized(T),
+    Uninitialized(F),
+    Poisoned
+}
+
+pub struct Lazy<T, F: FnOnce () -> T>(UnsafeCell<LazyImpl<T, F>>);
+
+impl <T, F: FnOnce () -> T> Lazy<T, F> {
+    pub fn new(f: F) -> Lazy<T, F> {
+        Lazy(UnsafeCell::new(LazyImpl::Uninitialized(f)))
+    }
+
+    pub fn unwrap(l: Lazy<T, F>) -> Option<T> {
+        match l.0.into_inner() {
+            LazyImpl::Initialized(t) => Some(t),
+            LazyImpl::Uninitialized(_) => None,
+            LazyImpl::Poisoned => None
+        }
+    }
+
+    pub fn force_init(l: &Lazy<T, F>) {
+        unsafe {
+            match *l.0.get() {
+                LazyImpl::Initialized(_) => {},
+                LazyImpl::Uninitialized(_) => match std::mem::replace(&mut *l.0.get(), LazyImpl::Poisoned) {
+                    LazyImpl::Uninitialized(f) => {
+                        *l.0.get() = LazyImpl::Initialized(f());
+                    },
+                    _ => unreachable!()
+                },
+                LazyImpl::Poisoned => panic!("Lazy constructor previously panicked")
+            }
+        }
+    }
+}
+
+impl <T, F: FnOnce() -> T> Deref for Lazy<T, F> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        Lazy::force_init(self);
+        unsafe {
+            match *self.0.get() {
+                LazyImpl::Initialized(ref t) => t,
+                _ => unreachable!()
+            }
+        }
+    }
+}
+
+impl <T, F: FnOnce() -> T> DerefMut for Lazy<T, F> {
+    fn deref_mut(&mut self) -> &mut T {
+        Lazy::force_init(self);
+        unsafe {
+            match *self.0.get() {
+                LazyImpl::Initialized(ref mut t) => t,
+                _ => unreachable!()
+            }
+        }
+    }
+}
+
+impl <T, F: FnOnce() -> T> std::panic::UnwindSafe for Lazy<T, F> {}
+impl <T, F: FnOnce() -> T> std::panic::RefUnwindSafe for Lazy<T, F> {}
+
+pub struct FuncCache<T: Clone + Eq + Hash, U, F: FnMut (T) -> U> {
+    func: F,
+    cache: HashMap<T, U>
+}
+
+impl <T: Clone + Eq + Hash, U, F: FnMut (T) -> U> FuncCache<T, U, F> {
+    pub fn new(func: F) -> Self {
+        FuncCache { func, cache: HashMap::new() }
+    }
+
+    pub fn clear(&mut self) {
+        self.cache.clear()
+    }
+
+    pub fn get(&mut self, t: T) -> &U {
+        let func = &mut self.func;
+        self.cache.entry(t.clone()).or_insert_with(|| {
+            func(t)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::ops::{Deref, DerefMut};
     use itertools::Itertools;
-    use super::BitVec;
+    use super::{BitVec, FuncCache, Lazy};
 
     #[test]
     fn test_get_set() {
@@ -433,5 +527,106 @@ mod tests {
             bv.iter().collect_vec(),
             vec![0, 7, 8, 9, 16]
         );
+    }
+
+    #[test]
+    fn test_lazy_unused_no_side_effects() {
+        let mut run = false;
+        let _ = Lazy::new(|| { run = true; () });
+
+        assert!(!run);
+    }
+
+    #[test]
+    fn test_lazy_deref() {
+        let lazy = Lazy::new(|| 100i32);
+
+        assert_eq!(100, *Deref::deref(&lazy));
+        assert_eq!(100, *Deref::deref(&lazy));
+    }
+
+    #[test]
+    fn test_lazy_deref_mut() {
+        let mut lazy = Lazy::new(|| 100i32);
+
+        assert_eq!(100, *DerefMut::deref_mut(&mut lazy));
+        assert_eq!(100, *DerefMut::deref_mut(&mut lazy));
+
+        *lazy = 200i32;
+
+        assert_eq!(200, *Deref::deref(&lazy));
+        assert_eq!(200, *DerefMut::deref_mut(&mut lazy));
+    }
+
+    fn poisoned_lazy() -> Lazy<i32, impl FnOnce() -> i32> {
+        let lazy = Lazy::new(|| panic!("Fake panic for testing"));
+
+        let _ = std::panic::catch_unwind(|| Lazy::force_init(&lazy));
+        lazy
+    }
+
+    #[test]
+    #[should_panic(expected = "Lazy constructor previously panicked")]
+    fn test_lazy_poison_deref() {
+        let _ = Deref::deref(&poisoned_lazy());
+    }
+
+    #[test]
+    #[should_panic(expected = "Lazy constructor previously panicked")]
+    fn test_lazy_poison_deref_mut() {
+        let _ = DerefMut::deref_mut(&mut poisoned_lazy());
+    }
+
+    #[test]
+    fn test_lazy_unwrap() {
+        assert_eq!(None, Lazy::unwrap(Lazy::new(|| 100i32)));
+        assert_eq!(Some(100), Lazy::unwrap({ let lazy = Lazy::new(|| 100i32); Lazy::force_init(&lazy); lazy }));
+        assert_eq!(None, Lazy::unwrap(poisoned_lazy()));
+    }
+
+    #[test]
+    fn test_cache_basic() {
+        let mut cache = FuncCache::new(|x| x);
+
+        assert_eq!(*cache.get(1), 1);
+        assert_eq!(*cache.get(2), 2);
+        assert_eq!(*cache.get(3), 3);
+    }
+
+    #[test]
+    fn test_cache_multicall() {
+        let num_calls = Cell::new(0);
+        let mut cache = FuncCache::new(|_| {
+            num_calls.set(num_calls.get() + 1);
+            num_calls.get() - 1
+        });
+
+        assert_eq!(*cache.get(1), 0);
+        assert_eq!(*cache.get(1), 0);
+        assert_eq!(num_calls.get(), 1);
+
+        assert_eq!(*cache.get(0), 1);
+        assert_eq!(*cache.get(0), 1);
+        assert_eq!(num_calls.get(), 2);
+
+        assert_eq!(*cache.get(1), 0);
+        assert_eq!(num_calls.get(), 2);
+    }
+
+    #[test]
+    fn test_cache_clear() {
+        let num_calls = Cell::new(0);
+        let mut cache = FuncCache::new(|_| {
+            num_calls.set(num_calls.get() + 1);
+            num_calls.get() - 1
+        });
+
+        assert_eq!(*cache.get(1), 0);
+        assert_eq!(num_calls.get(), 1);
+
+        cache.clear();
+
+        assert_eq!(*cache.get(1), 1);
+        assert_eq!(num_calls.get(), 2);
     }
 }

@@ -54,9 +54,11 @@ pub struct MilRegisterAllocator {
 
 impl MilRegisterAllocator {
     pub fn new() -> MilRegisterAllocator {
-        MilRegisterAllocator {
-            next: MilRegister(0)
-        }
+        MilRegisterAllocator::new_from(MilRegister(0))
+    }
+
+    pub fn new_from(start: MilRegister) -> MilRegisterAllocator {
+        MilRegisterAllocator { next: start }
     }
 
     pub fn allocate_one(&mut self) -> MilRegister {
@@ -143,9 +145,11 @@ pub struct MilBlockIdAllocator {
 
 impl MilBlockIdAllocator {
     pub fn new() -> MilBlockIdAllocator {
-        MilBlockIdAllocator {
-            next: MilBlockId(0)
-        }
+        MilBlockIdAllocator::new_from(MilBlockId(0))
+    }
+
+    pub fn new_from(start: MilBlockId) -> MilBlockIdAllocator {
+        MilBlockIdAllocator { next: start }
     }
 
     pub fn allocate_one(&mut self) -> MilBlockId {
@@ -708,7 +712,7 @@ pub enum MilEndInstructionKind {
     JumpIfICmp(MilIntComparison, MilBlockId, MilOperand, MilOperand)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MilInstructionWrapper<T> {
     pub kind: T,
     pub bytecode: (u32, u32)
@@ -828,6 +832,28 @@ impl MilInstruction {
         }
     }
 
+    pub fn target_mut(&mut self) -> Option<&mut MilRegister> {
+        match self.kind {
+            MilInstructionKind::Nop => None,
+            MilInstructionKind::Copy(ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::UnOp(_, ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::BinOp(_, ref mut tgt, _, _) => Some(tgt),
+            MilInstructionKind::GetParam(_, _, ref mut tgt) => Some(tgt),
+            MilInstructionKind::GetLocal(_, ref mut tgt) => Some(tgt),
+            MilInstructionKind::SetLocal(_, _) => None,
+            MilInstructionKind::GetField(_, _, ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::PutField(_, _, _, _) => None,
+            MilInstructionKind::GetArrayLength(ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::GetArrayElement(_, ref mut tgt, _, _) => Some(tgt),
+            MilInstructionKind::PutArrayElement(_, _, _, _) => None,
+            MilInstructionKind::GetStatic(_, _, ref mut tgt) => Some(tgt),
+            MilInstructionKind::PutStatic(_, _, _) => None,
+            MilInstructionKind::AllocObj(_, ref mut tgt) => Some(tgt),
+            MilInstructionKind::AllocArray(_, ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::GetVTable(ref mut tgt, _) => Some(tgt)
+        }
+    }
+
     pub fn for_operands(&self, mut f: impl FnMut (&MilOperand) -> ()) {
         match self.kind {
             MilInstructionKind::Nop => {},
@@ -927,6 +953,16 @@ impl MilInstruction {
             MilInstructionKind::GetVTable(_, ref mut obj) => {
                 f(obj);
             }
+        };
+    }
+
+    pub fn for_registers(&self, mut f: impl FnMut (MilRegister) -> ()) {
+        self.for_operands(|op| if let MilOperand::Register(reg) = *op {
+            f(reg);
+        });
+
+        if let Some(&target) = self.target() {
+            f(target);
         };
     }
 }
@@ -1029,6 +1065,22 @@ impl MilEndInstruction {
         }
     }
 
+    pub fn target_mut(&mut self) -> Option<&mut MilRegister> {
+        match self.kind {
+            MilEndInstructionKind::Nop => None,
+            MilEndInstructionKind::Unreachable => None,
+            MilEndInstructionKind::Call(_, _, ref mut tgt, _) => Some(tgt),
+            MilEndInstructionKind::CallVirtual(_, _, ref mut tgt, _, _) => Some(tgt),
+            MilEndInstructionKind::CallInterface(_, _, ref mut tgt, _, _) => Some(tgt),
+            MilEndInstructionKind::CallNative(_, _, ref mut tgt, _) => Some(tgt),
+            MilEndInstructionKind::Throw(_) => None,
+            MilEndInstructionKind::Return(_) => None,
+            MilEndInstructionKind::Jump(_) => None,
+            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => None,
+            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => None
+        }
+    }
+
     pub fn for_operands(&self, mut f: impl FnMut (&MilOperand) -> ()) {
         match self.kind {
             MilEndInstructionKind::Nop => {},
@@ -1117,6 +1169,16 @@ impl MilEndInstruction {
         };
     }
 
+    pub fn for_registers(&self, mut f: impl FnMut (MilRegister) -> ()) {
+        self.for_operands(|op| if let MilOperand::Register(reg) = *op {
+            f(reg);
+        });
+
+        if let Some(&target) = self.target() {
+            f(target);
+        };
+    }
+
     pub fn can_fall_through(&self) -> bool {
         match self.kind {
             MilEndInstructionKind::Nop => true,
@@ -1185,7 +1247,7 @@ impl MilEndInstruction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MilPhiNode {
     pub target: MilRegister,
     pub sources: SmallVec<[(MilOperand, MilBlockId); 2]>,
@@ -1195,6 +1257,16 @@ pub struct MilPhiNode {
 impl MilPhiNode {
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilPhiNode(self, env)
+    }
+
+    pub fn for_registers(&self, mut f: impl FnMut(MilRegister) -> ()) {
+        f(self.target);
+
+        for &(ref op, _) in self.sources.iter() {
+            if let MilOperand::Register(reg) = *op {
+                f(reg);
+            };
+        };
     }
 }
 
@@ -1367,6 +1439,13 @@ impl MilLocalDebugMap {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilInlineSiteInfo {
+    pub method_id: MethodId,
+    pub call_location: (u32, u32),
+    pub line_map: MilLineMap
+}
+
+#[derive(Debug, Clone)]
 pub struct MilFunction {
     pub id: MethodId,
     pub reg_alloc: MilRegisterAllocator,
@@ -1376,7 +1455,8 @@ pub struct MilFunction {
     pub block_order: Vec<MilBlockId>,
     pub source_file: (String, String),
     pub line_map: MilLineMap,
-    pub local_map: Option<MilLocalDebugMap>
+    pub local_map: Option<MilLocalDebugMap>,
+    pub inline_sites: Vec<MilInlineSiteInfo>
 }
 
 impl MilFunction {
@@ -1390,7 +1470,8 @@ impl MilFunction {
             block_order: vec![],
             source_file: (String::new(), String::new()),
             line_map: MilLineMap::empty(),
-            local_map: None
+            local_map: None,
+            inline_sites: vec![]
         }
     }
 
