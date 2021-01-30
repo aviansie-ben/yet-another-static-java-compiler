@@ -22,7 +22,7 @@ fn run_block_cleanup_group(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockI
     basic_control_flow::eliminate_dead_blocks(func, cfg, env.env, env.log);
     basic_control_flow::simplify_phis(func, env.env, env.log);
     basic_control_flow::merge_blocks(func, cfg, env.env, env.log);
-    while basic_control_flow::remove_redundant_jumps(func, env.env, env.log) != 0 {
+    while basic_control_flow::remove_redundant_jumps(func, cfg, env.env, env.log) != 0 {
         basic_control_flow::merge_blocks(func, cfg, env.env, env.log);
     };
 }

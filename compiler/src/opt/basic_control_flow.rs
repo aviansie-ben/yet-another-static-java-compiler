@@ -334,7 +334,7 @@ pub fn fold_constant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockI
     num_folded
 }
 
-pub fn remove_redundant_jumps(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) -> usize {
+pub fn remove_redundant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== REDUNDANT JUMP REMOVAL =====\n");
 
     let mut num_removed = 0;
@@ -342,10 +342,19 @@ pub fn remove_redundant_jumps(func: &mut MilFunction, env: &ClassEnvironment, lo
     for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = func.blocks.get_mut(&block_id).unwrap();
 
-        if matches!(block.end_instr.kind, MilEndInstructionKind::Jump(target_block_id) if target_block_id == next_block_id) {
-            log_writeln!(log, "Removed redundant jump from {} to next block {}", block_id, next_block_id);
-            block.end_instr.kind = MilEndInstructionKind::Nop;
-            num_removed += 1;
+        match block.end_instr.kind {
+            MilEndInstructionKind::Jump(target_block_id) if target_block_id == next_block_id => {
+                log_writeln!(log, "Removed redundant jump from {} to next block {}", block_id, next_block_id);
+                block.end_instr.kind = MilEndInstructionKind::Nop;
+                num_removed += 1;
+            },
+            MilEndInstructionKind::JumpIfRCmp(_, target_block_id, _, _) | MilEndInstructionKind::JumpIfICmp(_, target_block_id, _, _) if target_block_id == next_block_id => {
+                log_writeln!(log, "Removed redundant conditional jump from {} to next block {}", block_id, next_block_id);
+                block.end_instr.kind = MilEndInstructionKind::Nop;
+                cfg.remove_edge(block_id, next_block_id);
+                num_removed += 1;
+            },
+            _ => {}
         };
     };
 
