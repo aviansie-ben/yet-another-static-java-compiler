@@ -97,7 +97,7 @@ pub unsafe extern fn sun_misc_Unsafe_putDouble(_: *mut MochaObject, obj: *mut Mo
 
 #[no_mangle]
 pub unsafe extern fn sun_misc_Unsafe_compareAndSwapInt(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: i32, val: i32) -> i32 {
-    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI32)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI32)).compare_exchange(expected, val, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         1
     } else {
         0
@@ -106,7 +106,7 @@ pub unsafe extern fn sun_misc_Unsafe_compareAndSwapInt(_: *mut MochaObject, obj:
 
 #[no_mangle]
 pub unsafe extern fn sun_misc_Unsafe_compareAndSwapLong(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: i64, val: i64) -> i32 {
-    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI64)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicI64)).compare_exchange(expected, val, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         1
     } else {
         0
@@ -115,7 +115,7 @@ pub unsafe extern fn sun_misc_Unsafe_compareAndSwapLong(_: *mut MochaObject, obj
 
 #[no_mangle]
 pub unsafe extern fn sun_misc_Unsafe_compareAndSwapObject(_: *mut MochaObject, obj: *mut MochaObject, off: u64, expected: *mut MochaObject, val: *mut MochaObject) -> i32 {
-    if (*((obj as *mut u8).add(off as usize) as *mut AtomicPtr<MochaObject>)).compare_and_swap(expected, val, Ordering::SeqCst) == expected {
+    if (*((obj as *mut u8).add(off as usize) as *mut AtomicPtr<MochaObject>)).compare_exchange(expected, val, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         1
     } else {
         0

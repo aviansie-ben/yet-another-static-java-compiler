@@ -1,4 +1,4 @@
-use std::alloc::{AllocRef, Global, Layout};
+use std::alloc::{Allocator, Global, Layout};
 use std::cell::Cell;
 use std::ptr::NonNull;
 
@@ -97,7 +97,7 @@ impl MochaObject {
     pub fn allocate(vtable: &'static MochaVTable) -> *mut MochaObject {
         unsafe {
             assert!(vtable.obj_size > 0);
-            let ptr: NonNull<u8> = match Global.alloc(Layout::from_size_align_unchecked(vtable.obj_size as usize, 16)) {
+            let ptr: NonNull<u8> = match Global.allocate(Layout::from_size_align_unchecked(vtable.obj_size as usize, 16)) {
                 Ok(block) => block.cast(),
                 Err(_) => panic!("Out of memory")
             };
@@ -137,7 +137,7 @@ impl MochaAnyArray {
                 .and_then(|data_size| (vtable.obj_size as usize).checked_add(data_size))
                 .expect("Array size overflow");
 
-            let ptr: NonNull<u8> = match Global.alloc(Layout::from_size_align_unchecked(real_size, 16)) {
+            let ptr: NonNull<u8> = match Global.allocate(Layout::from_size_align_unchecked(real_size, 16)) {
                 Ok(block) => block.cast(),
                 Err(_) => panic!("Out of memory")
             };

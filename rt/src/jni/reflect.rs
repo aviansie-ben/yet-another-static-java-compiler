@@ -5,7 +5,7 @@ pub unsafe extern fn java_lang_reflect_Array_newArray(_: *mut MochaClass, elem_c
     let elem_vtable = MochaVTable::from_compressed(elem_class.as_ref().unwrap().vtable);
 
     if elem_vtable.array_vtable == 0 {
-        panic!("Attempt to allocate array of {} without loaded array class");
+        panic!("Attempt to allocate array of {} without loaded array class", (*(*elem_class).canonical_name).as_string());
     };
 
     MochaAnyArray::allocate(MochaVTable::from_compressed(elem_vtable.array_vtable), len)
