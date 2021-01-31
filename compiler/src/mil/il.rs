@@ -799,7 +799,19 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::GetVTable(tgt, ref obj) => {
                 write!(f, "get_vtable {}, {}", tgt, obj.pretty(self.1))?;
             }
-        }
+        };
+
+        write!(f, " @bc ")?;
+
+        if self.0.bytecode.0 != !0 {
+            write!(f, "{}:", self.0.bytecode.0)?;
+        };
+
+        if self.0.bytecode.1 == !0 {
+            write!(f, "prologue")?;
+        } else {
+            write!(f, "{}", self.0.bytecode.1)?;
+        };
 
         Ok(())
     }
@@ -1038,7 +1050,19 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                     src2.pretty(self.1)
                 )?;
             }
-        }
+        };
+
+        write!(f, " @bc ")?;
+
+        if self.0.bytecode.0 != !0 {
+            write!(f, "{}:", self.0.bytecode.0)?;
+        };
+
+        if self.0.bytecode.1 == !0 {
+            write!(f, "prologue")?;
+        } else {
+            write!(f, "{}", self.0.bytecode.1)?;
+        };
 
         Ok(())
     }
@@ -1280,6 +1304,18 @@ impl fmt::Display for PrettyMilPhiNode<'_> {
             write!(f, ", {}:{}", pred, src.pretty(self.1))?;
         };
 
+        write!(f, " @bc ")?;
+
+        if self.0.bytecode.0 != !0 {
+            write!(f, "{}:", self.0.bytecode.0)?;
+        };
+
+        if self.0.bytecode.1 == !0 {
+            write!(f, "prologue")?;
+        } else {
+            write!(f, "{}", self.0.bytecode.1)?;
+        };
+
         Result::Ok(())
     }
 }
@@ -1330,9 +1366,7 @@ impl <'a> fmt::Display for PrettyMilBlock<'a> {
             write!(f, "\n  {}", instr.pretty(self.1))?;
         };
 
-        if !self.0.end_instr.is_nop() {
-            write!(f, "\n  {}", self.0.end_instr.pretty(self.1))?;
-        };
+        write!(f, "\n  {}", self.0.end_instr.pretty(self.1))?;
 
         Ok(())
     }
