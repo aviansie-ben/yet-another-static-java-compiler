@@ -514,7 +514,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::JumpIfICmp(MilIntComparison::Eq, MilBlockId(2), MilOperand::Int(0), MilOperand::Int(0)),
+                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true)),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]
@@ -577,7 +577,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::JumpIfICmp(MilIntComparison::Eq, MilBlockId(2), MilOperand::Int(0), MilOperand::Int(0)),
+                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true)),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]

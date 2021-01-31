@@ -508,6 +508,13 @@ impl MilRefComparison {
             MilRefComparison::Ne => MilRefComparison::Eq
         }
     }
+
+    pub fn name(&self) -> &'static str {
+        match *self {
+            MilRefComparison::Eq => "eq",
+            MilRefComparison::Ne => "ne"
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -540,6 +547,17 @@ impl MilIntComparison {
             MilIntComparison::Lt => MilIntComparison::Gt,
             MilIntComparison::Ge => MilIntComparison::Le,
             MilIntComparison::Le => MilIntComparison::Ge
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match *self {
+            MilIntComparison::Eq => "eq",
+            MilIntComparison::Ne => "ne",
+            MilIntComparison::Gt => "gt",
+            MilIntComparison::Lt => "lt",
+            MilIntComparison::Ge => "ge",
+            MilIntComparison::Le => "le"
         }
     }
 }
@@ -635,6 +653,7 @@ pub enum MilBinOp {
     IShrS,
     IShrU,
     IShl,
+    ICmp(MilIntComparison),
     LAdd,
     LSub,
     LMul,
@@ -656,7 +675,8 @@ pub enum MilBinOp {
     DSub,
     DMul,
     DDiv,
-    DCmp(MilFCmpMode)
+    DCmp(MilFCmpMode),
+    RCmp(MilRefComparison)
 }
 
 impl MilBinOp {
@@ -673,6 +693,7 @@ impl MilBinOp {
             MilBinOp::IShrS => (MilType::Int, MilType::Int, MilType::Int),
             MilBinOp::IShrU => (MilType::Int, MilType::Int, MilType::Int),
             MilBinOp::IShl => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::ICmp(_) => (MilType::Bool, MilType::Int, MilType::Int),
             MilBinOp::LAdd => (MilType::Long, MilType::Long, MilType::Long),
             MilBinOp::LSub => (MilType::Long, MilType::Long, MilType::Long),
             MilBinOp::LMul => (MilType::Long, MilType::Long, MilType::Long),
@@ -694,7 +715,8 @@ impl MilBinOp {
             MilBinOp::DSub => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DMul => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DDiv => (MilType::Double, MilType::Double, MilType::Double),
-            MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double)
+            MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double),
+            MilBinOp::RCmp(_) => (MilType::Bool, MilType::Ref, MilType::Ref)
         }
     }
 }
@@ -713,6 +735,7 @@ impl fmt::Display for MilBinOp {
             MilBinOp::IShrS => write!(f, "ishrs"),
             MilBinOp::IShrU => write!(f, "ishru"),
             MilBinOp::IShl => write!(f, "ishl"),
+            MilBinOp::ICmp(cond) => write!(f, "icmp.{}", cond.name()),
             MilBinOp::LAdd => write!(f, "ladd"),
             MilBinOp::LSub => write!(f, "lsub"),
             MilBinOp::LMul => write!(f, "lmul"),
@@ -736,7 +759,8 @@ impl fmt::Display for MilBinOp {
             MilBinOp::DMul => write!(f, "dmul"),
             MilBinOp::DDiv => write!(f, "ddiv"),
             MilBinOp::DCmp(MilFCmpMode::L) => write!(f, "dcmpl"),
-            MilBinOp::DCmp(MilFCmpMode::G) => write!(f, "dcmpg")
+            MilBinOp::DCmp(MilFCmpMode::G) => write!(f, "dcmpg"),
+            MilBinOp::RCmp(cond) => write!(f, "rcmp.{}", cond.name())
         }
     }
 }
@@ -773,8 +797,7 @@ pub enum MilEndInstructionKind {
     Throw(MilOperand),
     Return(MilOperand),
     Jump(MilBlockId),
-    JumpIfRCmp(MilRefComparison, MilBlockId, MilOperand, MilOperand),
-    JumpIfICmp(MilIntComparison, MilBlockId, MilOperand, MilOperand)
+    JumpIf(MilBlockId, MilOperand)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1089,31 +1112,8 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Jump(block) => {
                 write!(f, "j {}", block)?;
             },
-            MilEndInstructionKind::JumpIfRCmp(cond, block, ref src1, ref src2) => {
-                write!(f, "jrcmp.{} {}, {}, {}",
-                    match cond {
-                        MilRefComparison::Eq => "eq",
-                        MilRefComparison::Ne => "ne"
-                    },
-                    block,
-                    src1.pretty(self.1),
-                    src2.pretty(self.1)
-                )?;
-            },
-            MilEndInstructionKind::JumpIfICmp(cond, block, ref src1, ref src2) => {
-                write!(f, "jicmp.{} {}, {}, {}",
-                    match cond {
-                        MilIntComparison::Eq => "eq",
-                        MilIntComparison::Ne => "ne",
-                        MilIntComparison::Gt => "gt",
-                        MilIntComparison::Lt => "lt",
-                        MilIntComparison::Ge => "ge",
-                        MilIntComparison::Le => "le"
-                    },
-                    block,
-                    src1.pretty(self.1),
-                    src2.pretty(self.1)
-                )?;
+            MilEndInstructionKind::JumpIf(block, ref cond) => {
+                write!(f, "jc {}, {}", block, cond.pretty(self.1))?;
             }
         };
 
@@ -1149,8 +1149,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => None,
-            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => None
+            MilEndInstructionKind::JumpIf(_, _) => None
         }
     }
 
@@ -1165,8 +1164,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => None,
-            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => None
+            MilEndInstructionKind::JumpIf(_, _) => None
         }
     }
 
@@ -1203,13 +1201,8 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIfRCmp(_, _, ref lhs, ref rhs) => {
-                f(lhs);
-                f(rhs);
-            },
-            MilEndInstructionKind::JumpIfICmp(_, _, ref lhs, ref rhs) => {
-                f(lhs);
-                f(rhs);
+            MilEndInstructionKind::JumpIf(_, ref cond) => {
+                f(cond);
             }
         };
     }
@@ -1247,13 +1240,8 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIfRCmp(_, _, ref mut lhs, ref mut rhs) => {
-                f(lhs);
-                f(rhs);
-            },
-            MilEndInstructionKind::JumpIfICmp(_, _, ref mut lhs, ref mut rhs) => {
-                f(lhs);
-                f(rhs);
+            MilEndInstructionKind::JumpIf(_, ref mut cond) => {
+                f(cond);
             }
         };
     }
@@ -1279,8 +1267,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => false,
             MilEndInstructionKind::Return(_) => false,
             MilEndInstructionKind::Jump(_) => false,
-            MilEndInstructionKind::JumpIfRCmp(_, _, _, _) => true,
-            MilEndInstructionKind::JumpIfICmp(_, _, _, _) => true
+            MilEndInstructionKind::JumpIf(_, _) => true
         }
     }
 
@@ -1297,10 +1284,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Jump(ref tgt) => {
                 f(tgt);
             },
-            MilEndInstructionKind::JumpIfRCmp(_, ref tgt, _, _) => {
-                f(tgt);
-            },
-            MilEndInstructionKind::JumpIfICmp(_, ref tgt, _, _) => {
+            MilEndInstructionKind::JumpIf(ref tgt, _) => {
                 f(tgt);
             }
         }
@@ -1319,10 +1303,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Jump(ref mut tgt) => {
                 f(tgt);
             },
-            MilEndInstructionKind::JumpIfRCmp(_, ref mut tgt, _, _) => {
-                f(tgt);
-            },
-            MilEndInstructionKind::JumpIfICmp(_, ref mut tgt, _, _) => {
+            MilEndInstructionKind::JumpIf(ref mut tgt, _) => {
                 f(tgt);
             }
         }

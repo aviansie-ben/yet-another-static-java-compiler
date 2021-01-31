@@ -133,7 +133,7 @@ fn native_arg_type(ty: MilType, types: &LLVMTypes) -> LLVMTypeRef {
         MilType::Void => types.void,
         MilType::Addr => types.any_raw_pointer,
         MilType::Ref => types.any_object_pointer,
-        MilType::Bool => unreachable!(),
+        MilType::Bool => types.bool,
         MilType::Int => types.int,
         MilType::Long => types.long,
         MilType::Float => types.float,
@@ -270,6 +270,24 @@ fn undefined_register_value<'a>(module: &MochaModule<'a, '_, '_>, ty: MilType) -
         MilType::Long => module.const_long(0),
         MilType::Float => module.const_float(0),
         MilType::Double => module.const_double(0)
+    }
+}
+
+fn int_comparison_to_predicate(cond: MilIntComparison) -> LLVMIntPredicate {
+    match cond {
+        MilIntComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
+        MilIntComparison::Ne => LLVMIntPredicate::LLVMIntNE,
+        MilIntComparison::Gt => LLVMIntPredicate::LLVMIntSGT,
+        MilIntComparison::Lt => LLVMIntPredicate::LLVMIntSLT,
+        MilIntComparison::Ge => LLVMIntPredicate::LLVMIntSGE,
+        MilIntComparison::Le => LLVMIntPredicate::LLVMIntSLE
+    }
+}
+
+fn ref_comparison_to_predicate(cond: MilRefComparison) -> LLVMIntPredicate {
+    match cond {
+        MilRefComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
+        MilRefComparison::Ne => LLVMIntPredicate::LLVMIntNE
     }
 }
 
@@ -459,6 +477,12 @@ unsafe fn emit_basic_block<'a, 'b>(
                         builder.build_and(rhs, module.const_int(0x1f), None),
                         Some(register_name(tgt))
                     ),
+                    MilBinOp::ICmp(cond) => builder.build_icmp(
+                        int_comparison_to_predicate(cond),
+                        lhs,
+                        rhs,
+                        Some(register_name(tgt))
+                    ),
                     MilBinOp::LAdd => builder.build_add(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::LSub => builder.build_sub(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::LMul => builder.build_mul(lhs, rhs, Some(register_name(tgt))),
@@ -537,6 +561,12 @@ unsafe fn emit_basic_block<'a, 'b>(
                                 None
                             )
                         },
+                        Some(register_name(tgt))
+                    ),
+                    MilBinOp::RCmp(cond) => builder.build_icmp(
+                        ref_comparison_to_predicate(cond),
+                        lhs,
+                        rhs,
                         Some(register_name(tgt))
                     )
                 }, &module.types);
@@ -814,31 +844,8 @@ unsafe fn emit_basic_block<'a, 'b>(
             builder.build_ret(val);
         },
         MilEndInstructionKind::Jump(_) => {},
-        MilEndInstructionKind::JumpIfRCmp(cond, _, ref lhs, ref rhs) => {
-            let lhs = create_value_ref(module, lhs, &local_regs);
-            let rhs = create_value_ref(module, rhs, &local_regs);
-
-            let cond = match cond {
-                MilRefComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
-                MilRefComparison::Ne => LLVMIntPredicate::LLVMIntNE
-            };
-
-            cond_out = Some(builder.build_icmp(cond, lhs, rhs, None));
-        },
-        MilEndInstructionKind::JumpIfICmp(cond, _, ref lhs, ref rhs) => {
-            let lhs = create_value_ref(module, lhs, &local_regs);
-            let rhs = create_value_ref(module, rhs, &local_regs);
-
-            let cond = match cond {
-                MilIntComparison::Eq => LLVMIntPredicate::LLVMIntEQ,
-                MilIntComparison::Ne => LLVMIntPredicate::LLVMIntNE,
-                MilIntComparison::Gt => LLVMIntPredicate::LLVMIntSGT,
-                MilIntComparison::Lt => LLVMIntPredicate::LLVMIntSLT,
-                MilIntComparison::Ge => LLVMIntPredicate::LLVMIntSGE,
-                MilIntComparison::Le => LLVMIntPredicate::LLVMIntSLE
-            };
-
-            cond_out = Some(builder.build_icmp(cond, lhs, rhs, None));
+        MilEndInstructionKind::JumpIf(_, ref cond) => {
+            cond_out = Some(create_value_ref(module, cond, &local_regs));
         }
     };
 
@@ -944,7 +951,7 @@ unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
             MilEndInstructionKind::Jump(tgt) => {
                 builder.build_br(llvm_blocks[&tgt].0);
             },
-            MilEndInstructionKind::JumpIfICmp(_, tgt, _, _) | MilEndInstructionKind::JumpIfRCmp(_, tgt, _, _) => {
+            MilEndInstructionKind::JumpIf(tgt, _) => {
                 builder.build_cond_br(cond.unwrap(), llvm_blocks[&tgt].0, llvm_blocks[&next_block_id].0);
             },
             MilEndInstructionKind::Throw(_) => {},

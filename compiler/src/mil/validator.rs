@@ -309,7 +309,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
                     });
                 };
             },
-            MilEndInstructionKind::JumpIfRCmp(_, tgt, ref lhs, ref rhs) => {
+            MilEndInstructionKind::JumpIf(tgt, ref cond) => {
                 if !func.blocks.contains_key(&tgt) {
                     state.errors.push(ValidatorError {
                         kind: ValidatorErrorKind::BlockNotFound(tgt),
@@ -317,19 +317,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
                     });
                 };
 
-                validate_operand(lhs, MilType::Ref, &mut state);
-                validate_operand(rhs, MilType::Ref, &mut state);
-            },
-            MilEndInstructionKind::JumpIfICmp(_, tgt, ref lhs, ref rhs) => {
-                if !func.blocks.contains_key(&tgt) {
-                    state.errors.push(ValidatorError {
-                        kind: ValidatorErrorKind::BlockNotFound(tgt),
-                        loc: state.loc
-                    });
-                };
-
-                validate_operand(lhs, MilType::Int, &mut state);
-                validate_operand(rhs, MilType::Int, &mut state);
+                validate_operand(cond, MilType::Bool, &mut state);
             }
         };
 

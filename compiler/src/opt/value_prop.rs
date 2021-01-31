@@ -107,6 +107,12 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
             MilBinOp::IShrS => MilOperand::Int(lhs >> (rhs & 0x1f)),
             MilBinOp::IShrU => MilOperand::Int(((lhs as u32) >> (rhs & 0x1f)) as i32),
             MilBinOp::IShl => MilOperand::Int(lhs << (rhs & 0x1f)),
+            MilBinOp::ICmp(MilIntComparison::Eq) => MilOperand::Bool(lhs == rhs),
+            MilBinOp::ICmp(MilIntComparison::Ne) => MilOperand::Bool(lhs != rhs),
+            MilBinOp::ICmp(MilIntComparison::Lt) => MilOperand::Bool(lhs < rhs),
+            MilBinOp::ICmp(MilIntComparison::Gt) => MilOperand::Bool(lhs > rhs),
+            MilBinOp::ICmp(MilIntComparison::Le) => MilOperand::Bool(lhs <= rhs),
+            MilBinOp::ICmp(MilIntComparison::Ge) => MilOperand::Bool(lhs >= rhs),
             _ => unreachable!()
         },
         MilInstructionKind::BinOp(op, _, MilOperand::Long(lhs), MilOperand::Int(rhs)) => match op {

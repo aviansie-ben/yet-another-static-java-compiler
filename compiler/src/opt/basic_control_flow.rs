@@ -245,42 +245,11 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
 
 fn try_fold_constant_jump(instr: &mut MilEndInstructionKind, fallthrough_block: MilBlockId) -> Option<MilBlockId> {
     Some(match *instr {
-        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::RefNull, MilOperand::RefNull) => match cmp {
-            MilRefComparison::Eq => target_block,
-            MilRefComparison::Ne => fallthrough_block
+        MilEndInstructionKind::JumpIf(target_block, MilOperand::Bool(true)) => {
+            target_block
         },
-        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::RefNull, MilOperand::KnownObject(_, _))
-        | MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::KnownObject(_, _), MilOperand::RefNull) => match cmp {
-            MilRefComparison::Eq => fallthrough_block,
-            MilRefComparison::Ne => target_block
-        },
-        MilEndInstructionKind::JumpIfRCmp(cmp, target_block, MilOperand::KnownObject(lhs, _), MilOperand::KnownObject(rhs, _)) => {
-            let is_taken = match cmp {
-                MilRefComparison::Eq => lhs == rhs,
-                MilRefComparison::Ne => lhs != rhs
-            };
-
-            if is_taken {
-                target_block
-            } else {
-                fallthrough_block
-            }
-        },
-        MilEndInstructionKind::JumpIfICmp(cmp, target_block, MilOperand::Int(lhs), MilOperand::Int(rhs)) => {
-            let is_taken = match cmp {
-                MilIntComparison::Eq => lhs == rhs,
-                MilIntComparison::Ne => lhs != rhs,
-                MilIntComparison::Lt => lhs < rhs,
-                MilIntComparison::Gt => lhs > rhs,
-                MilIntComparison::Le => lhs <= rhs,
-                MilIntComparison::Ge => lhs >= rhs
-            };
-
-            if is_taken {
-                target_block
-            } else {
-                fallthrough_block
-            }
+        MilEndInstructionKind::JumpIf(_, MilOperand::Bool(false)) => {
+            fallthrough_block
         },
         _ => {
             return None;
@@ -348,7 +317,7 @@ pub fn remove_redundant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlo
                 block.end_instr.kind = MilEndInstructionKind::Nop;
                 num_removed += 1;
             },
-            MilEndInstructionKind::JumpIfRCmp(_, target_block_id, _, _) | MilEndInstructionKind::JumpIfICmp(_, target_block_id, _, _) if target_block_id == next_block_id => {
+            MilEndInstructionKind::JumpIf(target_block_id, _) if target_block_id == next_block_id => {
                 log_writeln!(log, "Removed redundant conditional jump from {} to next block {}", block_id, next_block_id);
                 block.end_instr.kind = MilEndInstructionKind::Nop;
                 cfg.remove_edge(block_id, next_block_id);
@@ -524,7 +493,7 @@ mod tests {
     fn test_no_eliminate_live_blocks() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIfRCmp(MilRefComparison::Eq, MilBlockId(3), MilOperand::RefNull, MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(3), create_test_block(MilBlockId(3), &[], &[], MilEndInstructionKind::Jump(MilBlockId(2))));
