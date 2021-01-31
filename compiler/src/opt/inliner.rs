@@ -148,9 +148,27 @@ fn create_register_mapping(inlinee: &MilFunction, reg_alloc: &mut MilRegisterAll
     reg_mapping
 }
 
+fn is_return_block_shared(func: &MilFunction, return_block_id: MilBlockId) -> bool {
+    for block_id in func.block_order.iter().copied() {
+        let mut shared = false;
+        func.blocks[&block_id].end_instr.for_successors(|&succ| {
+            if succ == return_block_id {
+                shared = true;
+            };
+        });
+
+        if shared {
+            return true;
+        };
+    };
+
+    false
+}
+
 fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilBlockId) -> HashMap<MilBlockId, MilBlockId> {
     let block_insertion_index = func.block_order.iter().copied().find_position(|&l| l == loc).unwrap().0 + 1;
     let return_block = func.block_order[block_insertion_index];
+    let return_block_shared = is_return_block_shared(func, return_block);
 
     let call_block = func.blocks.get_mut(&loc).unwrap();
     let call_loc = call_block.end_instr.bytecode;
@@ -231,8 +249,20 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         func.blocks.insert(new_block_id, new_block);
     };
 
-    if return_reg != MilRegister::VOID {
-        func.blocks.get_mut(&return_block).unwrap().phi_nodes.push(MilPhiNode {
+    let return_block = func.blocks.get_mut(&return_block).unwrap();
+
+    if return_block_shared {
+        for phi in return_block.phi_nodes.iter_mut() {
+            let (val, _) = phi.sources.remove(phi.sources.iter().find_position(|&&(_, pred)| pred == loc).unwrap().0);
+
+            if val == MilOperand::Register(return_reg) {
+                phi.sources.extend(return_phi_sources.clone());
+            } else {
+                phi.sources.extend(return_phi_sources.iter().map(|&(_, pred)| (val.clone(), pred)));
+            };
+        };
+    } else if return_reg != MilRegister::VOID {
+        return_block.phi_nodes.push(MilPhiNode {
             target: return_reg,
             sources: return_phi_sources,
             bytecode: call_loc
@@ -472,6 +502,135 @@ mod test {
         assert_eq!(
             MilEndInstructionKind::Jump(MilBlockId(2)),
             f.blocks[&MilBlockId(2)].end_instr.kind
+        );
+    }
+
+    #[test]
+    pub fn test_return_block_phi() {
+        let mut f = MilFunction::new(MethodId::UNRESOLVED);
+
+        f.blocks.insert(MilBlockId(0), MilBlock {
+            id: MilBlockId(0),
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::JumpIfICmp(MilIntComparison::Eq, MilBlockId(2), MilOperand::Int(0), MilOperand::Int(0)),
+                bytecode: (!0, 0)
+            },
+            exception_successors: vec![]
+        });
+        f.blocks.insert(MilBlockId(1), MilBlock {
+            id: MilBlockId(1),
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::Call(
+                    ClassId::UNRESOLVED,
+                    MethodId::UNRESOLVED,
+                    MilRegister(0),
+                    vec![]
+                ),
+                bytecode: (!0, 0)
+            },
+            exception_successors: vec![]
+        });
+        f.blocks.insert(MilBlockId(2), MilBlock {
+            id: MilBlockId(2),
+            phi_nodes: vec![
+                MilPhiNode {
+                    target: MilRegister(1),
+                    sources: smallvec![
+                        (MilOperand::Int(0), MilBlockId(0)),
+                        (MilOperand::Int(1), MilBlockId(1))
+                    ],
+                    bytecode: (!0, 1)
+                },
+                MilPhiNode {
+                    target: MilRegister(2),
+                    sources: smallvec![
+                        (MilOperand::Int(0), MilBlockId(0)),
+                        (MilOperand::Register(MilRegister(0)), MilBlockId(1))
+                    ],
+                    bytecode: (!0, 1)
+                }
+            ],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
+                bytecode: (!0, 1)
+            },
+            exception_successors: vec![]
+        });
+
+        f.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
+        f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(3));
+
+        f.reg_map.add_reg_info(MilRegister(0), MilRegisterInfo { ty: MilType::Int });
+        f.reg_map.add_reg_info(MilRegister(1), MilRegisterInfo { ty: MilType::Int });
+        f.reg_map.add_reg_info(MilRegister(2), MilRegisterInfo { ty: MilType::Int });
+        f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(3));
+
+        let mut g = MilFunction::new(MethodId::UNRESOLVED);
+
+        g.blocks.insert(MilBlockId(0), MilBlock {
+            id: MilBlockId(0),
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::JumpIfICmp(MilIntComparison::Eq, MilBlockId(2), MilOperand::Int(0), MilOperand::Int(0)),
+                bytecode: (!0, 0)
+            },
+            exception_successors: vec![]
+        });
+        g.blocks.insert(MilBlockId(1), MilBlock {
+            id: MilBlockId(1),
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::Return(MilOperand::Int(0)),
+                bytecode: (!0, 0)
+            },
+            exception_successors: vec![]
+        });
+        g.blocks.insert(MilBlockId(2), MilBlock {
+            id: MilBlockId(2),
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::Return(MilOperand::Int(1)),
+                bytecode: (!0, 0)
+            },
+            exception_successors: vec![]
+        });
+
+        g.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
+        g.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(3));
+
+        inline_single_method(&mut f, &g, MilBlockId(1));
+
+        assert_eq!(vec![MilBlockId(0), MilBlockId(1), MilBlockId(3), MilBlockId(4), MilBlockId(5), MilBlockId(2)], f.block_order);
+        assert_eq!(
+            &vec![
+                MilPhiNode {
+                    target: MilRegister(1),
+                    sources: smallvec![
+                        (MilOperand::Int(0), MilBlockId(0)),
+                        (MilOperand::Int(1), MilBlockId(4)),
+                        (MilOperand::Int(1), MilBlockId(5))
+                    ],
+                    bytecode: (!0, 1)
+                },
+                MilPhiNode {
+                    target: MilRegister(2),
+                    sources: smallvec![
+                        (MilOperand::Int(0), MilBlockId(0)),
+                        (MilOperand::Int(0), MilBlockId(4)),
+                        (MilOperand::Int(1), MilBlockId(5))
+                    ],
+                    bytecode: (!0, 1)
+                }
+            ],
+            &f.blocks[&MilBlockId(2)].phi_nodes
         );
     }
 }
