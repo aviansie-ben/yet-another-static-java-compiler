@@ -189,6 +189,7 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::Nop => None,
         // Copies should already be eliminated by now, so no need to handle them
         MilInstructionKind::Copy(_, _) => None,
+        MilInstructionKind::Select(_, _, _, _) => None,
         MilInstructionKind::UnOp(_, _, _) => None,
         MilInstructionKind::BinOp(_, _, _, _) => None,
         MilInstructionKind::GetParam(_, constraint, _) => Some(constraint),

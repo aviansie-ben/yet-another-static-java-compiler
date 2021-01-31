@@ -769,6 +769,7 @@ impl fmt::Display for MilBinOp {
 pub enum MilInstructionKind {
     Nop,
     Copy(MilRegister, MilOperand),
+    Select(MilRegister, MilOperand, MilOperand, MilOperand),
     UnOp(MilUnOp, MilRegister, MilOperand),
     BinOp(MilBinOp, MilRegister, MilOperand, MilOperand),
     GetParam(u16, MilClassConstraint, MilRegister),
@@ -842,6 +843,9 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::Copy(tgt, ref src) => {
                 write!(f, "copy {}, {}", tgt, src.pretty(self.1))?;
             },
+            MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
+                write!(f, "select {}, {}, {}, {}", tgt, cond.pretty(self.1), true_val.pretty(self.1), false_val.pretty(self.1))?;
+            },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
                 write!(f, "{} {}, {}", op, tgt, val.pretty(self.1))?;
             },
@@ -914,6 +918,7 @@ impl MilInstruction {
         match self.kind {
             MilInstructionKind::Nop => None,
             MilInstructionKind::Copy(ref tgt, _) => Some(tgt),
+            MilInstructionKind::Select(ref tgt, _, _, _) => Some(tgt),
             MilInstructionKind::UnOp(_, ref tgt, _) => Some(tgt),
             MilInstructionKind::BinOp(_, ref tgt, _, _) => Some(tgt),
             MilInstructionKind::GetParam(_, _, ref tgt) => Some(tgt),
@@ -936,6 +941,7 @@ impl MilInstruction {
         match self.kind {
             MilInstructionKind::Nop => None,
             MilInstructionKind::Copy(ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::Select(ref mut tgt, _, _, _) => Some(tgt),
             MilInstructionKind::UnOp(_, ref mut tgt, _) => Some(tgt),
             MilInstructionKind::BinOp(_, ref mut tgt, _, _) => Some(tgt),
             MilInstructionKind::GetParam(_, _, ref mut tgt) => Some(tgt),
@@ -959,6 +965,11 @@ impl MilInstruction {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(_, ref val) => {
                 f(val);
+            },
+            MilInstructionKind::Select(_, ref cond, ref true_val, ref false_val) => {
+                f(cond);
+                f(true_val);
+                f(false_val);
             },
             MilInstructionKind::UnOp(_, _, ref val) => {
                 f(val);
@@ -1010,6 +1021,11 @@ impl MilInstruction {
             MilInstructionKind::Nop => {},
             MilInstructionKind::Copy(_, ref mut val) => {
                 f(val);
+            },
+            MilInstructionKind::Select(_, ref mut cond, ref mut true_val, ref mut false_val) => {
+                f(cond);
+                f(true_val);
+                f(false_val);
             },
             MilInstructionKind::UnOp(_, _, ref mut val) => {
                 f(val);

@@ -359,6 +359,14 @@ unsafe fn emit_basic_block<'a, 'b>(
                 let src = create_value_ref(module, src, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, src, &module.types);
             },
+            MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
+                let cond = create_value_ref(module, cond, &local_regs);
+                let true_val = create_value_ref(module, true_val, &local_regs);
+                let false_val = create_value_ref(module, false_val, &local_regs);
+
+                let result = builder.build_select(cond, true_val, false_val, Some(register_name(tgt)));
+                set_register(builder, func, &mut local_regs, all_regs, tgt, result, &module.types);
+            },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
                 let val = create_value_ref(module, val, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, match op {

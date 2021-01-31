@@ -184,6 +184,14 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
                     validate_operand(val, ty, &mut state);
                     validate_target(tgt, ty, &mut state);
                 },
+                MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
+                    let ty = func.reg_map.get_reg_info(tgt).ty;
+
+                    validate_operand(cond, MilType::Bool, &mut state);
+                    validate_operand(true_val, ty, &mut state);
+                    validate_operand(false_val, ty, &mut state);
+                    validate_target(tgt, ty, &mut state);
+                },
                 MilInstructionKind::UnOp(op, tgt, ref val) => {
                     let (tgt_ty, val_ty) = op.type_sig();
 
