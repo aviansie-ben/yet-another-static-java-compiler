@@ -8,6 +8,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::log_writeln;
 use crate::mil::il::*;
+use crate::mil::validator::validate_function;
 use crate::resolve::{MethodId, ClassEnvironment};
 use crate::util::FuncCache;
 
@@ -269,6 +270,8 @@ pub fn run_inliner<I: Inliner>(program: &mut MilProgram, inliner: I, env: &Optim
 
         let mut func = func.clone();
         inline_from_plan(&mut func, program, &plan);
+
+        validate_function(&func, env.env);
 
         log_writeln!(env.log, "{}\n", func.pretty(env.env));
         new_funcs.insert(method_id, func);

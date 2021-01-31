@@ -566,6 +566,31 @@ pub enum MilUnOp {
     D2F
 }
 
+impl MilUnOp {
+    pub fn type_sig(self) -> (MilType, MilType) {
+        match self {
+            MilUnOp::INeg => (MilType::Int, MilType::Int),
+            MilUnOp::IExtB => (MilType::Int, MilType::Int),
+            MilUnOp::IExtS => (MilType::Int, MilType::Int),
+            MilUnOp::LNeg => (MilType::Long, MilType::Long),
+            MilUnOp::FNeg => (MilType::Float, MilType::Float),
+            MilUnOp::DNeg => (MilType::Double, MilType::Double),
+            MilUnOp::I2L => (MilType::Long, MilType::Long),
+            MilUnOp::I2F => (MilType::Float, MilType::Int),
+            MilUnOp::I2D => (MilType::Double, MilType::Int),
+            MilUnOp::L2I => (MilType::Int, MilType::Long),
+            MilUnOp::L2F => (MilType::Float, MilType::Long),
+            MilUnOp::L2D => (MilType::Double, MilType::Long),
+            MilUnOp::F2I => (MilType::Int, MilType::Float),
+            MilUnOp::F2L => (MilType::Long, MilType::Float),
+            MilUnOp::F2D => (MilType::Double, MilType::Float),
+            MilUnOp::D2I => (MilType::Int, MilType::Double),
+            MilUnOp::D2L => (MilType::Long, MilType::Double),
+            MilUnOp::D2F => (MilType::Float, MilType::Double)
+        }
+    }
+}
+
 impl fmt::Display for MilUnOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -632,6 +657,46 @@ pub enum MilBinOp {
     DMul,
     DDiv,
     DCmp(MilFCmpMode)
+}
+
+impl MilBinOp {
+    pub fn type_sig(self) -> (MilType, MilType, MilType) {
+        match self {
+            MilBinOp::IAdd => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::ISub => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IMul => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IDivS => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IRemS => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IAnd => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IOr => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IXor => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IShrS => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IShrU => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::IShl => (MilType::Int, MilType::Int, MilType::Int),
+            MilBinOp::LAdd => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LSub => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LMul => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LDivS => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LRemS => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LAnd => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LOr => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LXor => (MilType::Long, MilType::Long, MilType::Long),
+            MilBinOp::LShrS => (MilType::Long, MilType::Long, MilType::Int),
+            MilBinOp::LShrU => (MilType::Long, MilType::Long, MilType::Int),
+            MilBinOp::LShl => (MilType::Long, MilType::Long, MilType::Int),
+            MilBinOp::LCmp => (MilType::Int, MilType::Long, MilType::Long),
+            MilBinOp::FAdd => (MilType::Float, MilType::Float, MilType::Float),
+            MilBinOp::FSub => (MilType::Float, MilType::Float, MilType::Float),
+            MilBinOp::FMul => (MilType::Float, MilType::Float, MilType::Float),
+            MilBinOp::FDiv => (MilType::Float, MilType::Float, MilType::Float),
+            MilBinOp::FCmp(_) => (MilType::Int, MilType::Float, MilType::Float),
+            MilBinOp::DAdd => (MilType::Double, MilType::Double, MilType::Double),
+            MilBinOp::DSub => (MilType::Double, MilType::Double, MilType::Double),
+            MilBinOp::DMul => (MilType::Double, MilType::Double, MilType::Double),
+            MilBinOp::DDiv => (MilType::Double, MilType::Double, MilType::Double),
+            MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double)
+        }
+    }
 }
 
 impl fmt::Display for MilBinOp {

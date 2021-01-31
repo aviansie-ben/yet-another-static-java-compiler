@@ -4,6 +4,7 @@ use crate::log_writeln;
 use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
+use crate::mil::validator::validate_function;
 use crate::resolve::ClassEnvironment;
 use crate::static_heap::JavaStaticHeap;
 
@@ -61,7 +62,8 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
 
 pub fn optimize_program(program: &mut MilProgram, env: &ClassEnvironment, heap: &JavaStaticHeap, log: &Log) {
     for (_, func) in program.funcs.iter_mut().sorted_by_key(|&(&id, _)| ((id.0).0, id.1)) {
-        optimize_function(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log })
+        optimize_function(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log });
+        validate_function(func, env);
     };
 
     inliner::run_inliner(program, inliner::GreedyInliner::new(|func| func.blocks.len() as u64), &OptimizationEnvironment { env, heap, known_objects: &MilKnownObjectMap::new(), log });
