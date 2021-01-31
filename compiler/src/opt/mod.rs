@@ -29,7 +29,7 @@ fn run_block_cleanup_group(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockI
     };
 }
 
-fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
+fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationEnvironment) {
     let mut cfg = FlowGraph::for_function(func);
 
     log_writeln!(env.log, "\n===== OPTIMIZING {} =====\n\n{}\n{:#?}\n", MethodName(func.id, env.env), func.pretty(env.env), cfg);
@@ -60,11 +60,34 @@ fn optimize_function(func: &mut MilFunction, env: &OptimizationEnvironment) {
     basic_control_flow::devirtualize_nonoverriden_calls(func, env.env, env.log);
 }
 
+fn optimize_function_after_inlining(func: &mut MilFunction, env: &OptimizationEnvironment) {
+    let mut cfg = FlowGraph::for_function(func);
+
+    log_writeln!(env.log, "\n===== OPTIMIZING {} =====\n\n{}\n{:#?}\n", MethodName(func.id, env.env), func.pretty(env.env), cfg);
+
+    // Start by cleaning up the inliner's mess
+    value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+    basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
+    run_block_cleanup_group(func, &mut cfg, env);
+
+    // Perform another round of class constraint analysis
+    class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
+    basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
+    run_block_cleanup_group(func, &mut cfg, env);
+}
+
 pub fn optimize_program(program: &mut MilProgram, env: &ClassEnvironment, heap: &JavaStaticHeap, log: &Log) {
     for (_, func) in program.funcs.iter_mut().sorted_by_key(|&(&id, _)| ((id.0).0, id.1)) {
-        optimize_function(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log });
+        optimize_function_before_inlining(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log });
         validate_function(func, env);
     };
 
     inliner::run_inliner(program, inliner::GreedyInliner::new(|func| func.blocks.len() as u64), &OptimizationEnvironment { env, heap, known_objects: &MilKnownObjectMap::new(), log });
+
+    for (_, func) in program.funcs.iter_mut().sorted_by_key(|&(&id, _)| ((id.0).0, id.1)) {
+        optimize_function_after_inlining(func, &OptimizationEnvironment { env, heap, known_objects: &program.known_objects, log });
+        validate_function(func, env);
+    };
 }
