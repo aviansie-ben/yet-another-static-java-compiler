@@ -1,9 +1,10 @@
 use std::collections::{HashMap, VecDeque};
+use std::mem;
 
 use itertools::Itertools;
 use smallvec::SmallVec;
 
-use crate::log_writeln;
+use crate::{log_write, log_writeln};
 use crate::log::Log;
 use crate::mil::flow_graph::{FlowGraph, FlowGraphNode};
 use crate::mil::il::*;
@@ -359,6 +360,82 @@ pub fn devirtualize_nonoverriden_calls(func: &mut MilFunction, env: &ClassEnviro
     };
 
     num_devirtualized
+}
+
+pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
+    log_writeln!(log, "\n===== SELECT PATTERN RECOGNITION =====\n");
+
+    let mut num_recognized = 0;
+
+    for (block_id_0, block_id_1, block_id_2) in func.block_order.iter().copied().tuple_windows() {
+        let block_0 = &func.blocks[&block_id_0];
+        let block_1 = &func.blocks[&block_id_1];
+
+        if cfg.get(block_id_1).incoming.len() != 1 {
+            continue;
+        } else if !block_1.phi_nodes.is_empty() || !block_1.instrs.is_empty() {
+            continue;
+        };
+
+        if let MilEndInstructionKind::JumpIf(target_block_id, ref cond) = block_0.end_instr.kind {
+            if cfg.get(target_block_id).incoming.len() != 2 {
+                continue;
+            };
+
+            match block_1.end_instr.kind {
+                MilEndInstructionKind::Nop if target_block_id == block_id_2 => {},
+                MilEndInstructionKind::Jump(jump_target) if jump_target == target_block_id => {},
+                _ => {
+                    continue;
+                }
+            };
+
+            log_writeln!(log, "Recognized select pattern [ {} {} {} ]", block_id_0, block_id_1, target_block_id);
+
+            let cond = cond.clone();
+            let phis = mem::replace(&mut func.blocks.get_mut(&target_block_id).unwrap().phi_nodes, vec![]);
+            let block_0 = func.blocks.get_mut(&block_id_0).unwrap();
+
+            for mut phi in phis {
+                log_write!(log, "  {} -> ", phi.pretty(env));
+
+                assert_eq!(2, phi.sources.len());
+
+                let src_0 = mem::replace(&mut phi.sources[0].0, MilOperand::RefNull);
+                let src_1 = mem::replace(&mut phi.sources[1].0, MilOperand::RefNull);
+
+                let (true_val, false_val) = if phi.sources[0].1 == block_id_0 {
+                    assert_eq!(block_id_1, phi.sources[1].1);
+
+                    (src_0, src_1)
+                } else {
+                    assert_eq!(block_id_1, phi.sources[0].1);
+                    assert_eq!(block_id_0, phi.sources[1].1);
+
+                    (src_1, src_0)
+                };
+
+                let select_instr = MilInstruction {
+                    kind: MilInstructionKind::Select(phi.target, cond.clone(), true_val, false_val),
+                    bytecode: phi.bytecode
+                };
+
+                log_writeln!(log, "{}", select_instr.pretty(env));
+                block_0.instrs.push(select_instr);
+            };
+
+            block_0.end_instr.kind = MilEndInstructionKind::Jump(target_block_id);
+            cfg.remove_edge(block_id_0, block_id_1);
+
+            num_recognized += 1;
+        };
+    };
+
+    if num_recognized != 0 {
+        log_writeln!(log, "\n===== AFTER SELECT PATTERN RECONGITION =====\n\n{}\n{:#?}", func.pretty(env), cfg);
+    };
+
+    num_recognized
 }
 
 #[cfg(test)]

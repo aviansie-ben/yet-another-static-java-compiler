@@ -57,6 +57,10 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
 
+    if basic_control_flow::recognize_select_pattern(func, &mut cfg, env.env, env.log) != 0 {
+        run_block_cleanup_group(func, &mut cfg, env);
+    };
+
     // Get things ready for inlining wherever possible
     basic_control_flow::devirtualize_nonoverriden_calls(func, env.env, env.log);
 }
