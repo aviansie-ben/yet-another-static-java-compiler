@@ -13,205 +13,261 @@ use crate::mil::transform;
 use crate::resolve::{ClassEnvironment, ResolvedClass};
 use crate::util::BitVec;
 
+fn try_fold_un_int<F: Fn (i32) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
+    match *val {
+        MilOperand::Int(val) => Some(f(val)),
+        _ => None
+    }
+}
+
+fn try_fold_un_long<F: Fn (i64) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
+    match *val {
+        MilOperand::Long(val) => Some(f(val)),
+        _ => None
+    }
+}
+
+fn try_fold_un_float<F: Fn (f32) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
+    match *val {
+        MilOperand::Float(val_bits) => Some(f(f32::from_bits(val_bits))),
+        _ => None
+    }
+}
+
+fn try_fold_un_double<F: Fn (f64) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
+    match *val {
+        MilOperand::Double(val_bits) => Some(f(f64::from_bits(val_bits))),
+        _ => None
+    }
+}
+
+fn try_fold_bin_int_int<F: Fn (i32, i32) -> MilOperand>(lhs: &MilOperand, rhs: &MilOperand, f: F) -> Option<MilOperand> {
+    match (lhs, rhs) {
+        (&MilOperand::Int(lhs), &MilOperand::Int(rhs)) => Some(f(lhs, rhs)),
+        _ => None
+    }
+}
+
+fn try_fold_bin_long_long<F: Fn (i64, i64) -> MilOperand>(lhs: &MilOperand, rhs: &MilOperand, f: F) -> Option<MilOperand> {
+    match (lhs, rhs) {
+        (&MilOperand::Long(lhs), &MilOperand::Long(rhs)) => Some(f(lhs, rhs)),
+        _ => None
+    }
+}
+
+fn try_fold_bin_long_int<F: Fn (i64, i32) -> MilOperand>(lhs: &MilOperand, rhs: &MilOperand, f: F) -> Option<MilOperand> {
+    match (lhs, rhs) {
+        (&MilOperand::Long(lhs), &MilOperand::Int(rhs)) => Some(f(lhs, rhs)),
+        _ => None
+    }
+}
+
+fn try_fold_bin_float_float<F: Fn (f32, f32) -> MilOperand>(lhs: &MilOperand, rhs: &MilOperand, f: F) -> Option<MilOperand> {
+    match (lhs, rhs) {
+        (&MilOperand::Float(lhs), &MilOperand::Float(rhs)) => Some(f(f32::from_bits(lhs), f32::from_bits(rhs))),
+        _ => None
+    }
+}
+
+fn try_fold_bin_double_double<F: Fn (f64, f64) -> MilOperand>(lhs: &MilOperand, rhs: &MilOperand, f: F) -> Option<MilOperand> {
+    match (lhs, rhs) {
+        (&MilOperand::Double(lhs), &MilOperand::Double(rhs)) => Some(f(f64::from_bits(lhs), f64::from_bits(rhs))),
+        _ => None
+    }
+}
+
 fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, known_objects: &MilKnownObjectMap) -> Option<MilOperand> {
-    Some(match *instr {
-        MilInstructionKind::Copy(_, ref val) => val.clone(),
-        MilInstructionKind::UnOp(op, _, MilOperand::Int(val)) => match op {
-            MilUnOp::INeg => MilOperand::Int(val.wrapping_neg()),
-            MilUnOp::IExtB => MilOperand::Int(val as i8 as i32),
-            MilUnOp::IExtS => MilOperand::Int(val as i16 as i32),
-            MilUnOp::I2L => MilOperand::Long(val as i64),
-            MilUnOp::I2F => MilOperand::Float((val as f32).to_bits()),
-            MilUnOp::I2D => MilOperand::Double((val as f64).to_bits()),
-            _ => unreachable!()
+    match *instr {
+        MilInstructionKind::Copy(_, ref val) => Some(val.clone()),
+        MilInstructionKind::Select(_, MilOperand::Bool(true), ref true_val, _) => Some(true_val.clone()),
+        MilInstructionKind::Select(_, MilOperand::Bool(false), _, ref false_val) => Some(false_val.clone()),
+        MilInstructionKind::UnOp(op, _, ref val) => match op {
+            MilUnOp::INeg => try_fold_un_int(val, |x| MilOperand::Int(x.wrapping_neg())),
+            MilUnOp::IExtB => try_fold_un_int(val, |x| MilOperand::Int(x as i8 as i32)),
+            MilUnOp::IExtS => try_fold_un_int(val, |x| MilOperand::Int(x as i16 as i32)),
+            MilUnOp::LNeg => try_fold_un_long(val, |x| MilOperand::Long(x.wrapping_neg())),
+            MilUnOp::FNeg => try_fold_un_float(val, |x| MilOperand::Float((-x).to_bits())),
+            MilUnOp::DNeg => try_fold_un_double(val, |x| MilOperand::Double((-x).to_bits())),
+            MilUnOp::I2L => try_fold_un_int(val, |x| MilOperand::Long(x as i64)),
+            MilUnOp::I2D => try_fold_un_int(val, |x| MilOperand::Double((x as f64).to_bits())),
+            MilUnOp::I2F => try_fold_un_int(val, |x| MilOperand::Float((x as f32).to_bits())),
+            MilUnOp::L2I => try_fold_un_long(val, |x| MilOperand::Int(x as i32)),
+            MilUnOp::L2F => try_fold_un_long(val, |x| MilOperand::Float((x as f32).to_bits())),
+            MilUnOp::L2D => try_fold_un_long(val, |x| MilOperand::Double((x as f64).to_bits())),
+            MilUnOp::F2I => try_fold_un_float(val, |x| MilOperand::Int(
+                if x.is_nan() {
+                    0
+                } else if x >= (i32::MAX as f32) {
+                    i32::MAX
+                } else if x <= (i32::MIN as f32) {
+                    i32::MIN
+                } else {
+                    x as i32
+                }
+            )),
+            MilUnOp::F2L => try_fold_un_float(val, |x| MilOperand::Long(
+                if x.is_nan() {
+                    0
+                } else if x >= (i64::MAX as f32) {
+                    i64::MAX
+                } else if x <= (i64::MIN as f32) {
+                    i64::MIN
+                } else {
+                    x as i64
+                }
+            )),
+            MilUnOp::F2D => try_fold_un_float(val, |x| MilOperand::Double((x as f64).to_bits())),
+            MilUnOp::D2I => try_fold_un_double(val, |x| MilOperand::Int(
+                if x.is_nan() {
+                    0
+                } else if x >= (i32::MAX as f64) {
+                    i32::MAX
+                } else if x <= (i32::MIN as f64) {
+                    i32::MIN
+                } else {
+                    x as i32
+                }
+            )),
+            MilUnOp::D2L => try_fold_un_double(val, |x| MilOperand::Long(
+                if x.is_nan() {
+                    0
+                } else if x >= (i64::MAX as f64) {
+                    i64::MAX
+                } else if x <= (i64::MIN as f64) {
+                    i64::MIN
+                } else {
+                    x as i64
+                }
+            )),
+            MilUnOp::D2F => try_fold_un_double(val, |x| MilOperand::Float((x as f32).to_bits()))
         },
-        MilInstructionKind::UnOp(op, _, MilOperand::Long(val)) => match op {
-            MilUnOp::LNeg => MilOperand::Long(val.wrapping_neg()),
-            MilUnOp::L2I => MilOperand::Int(val as i32),
-            MilUnOp::L2F => MilOperand::Float((val as f32).to_bits()),
-            MilUnOp::L2D => MilOperand::Double((val as f64).to_bits()),
-            _ => unreachable!()
-        },
-        MilInstructionKind::UnOp(op, _, MilOperand::Float(val_bits)) => {
-            let val = f32::from_bits(val_bits);
-            match op {
-                MilUnOp::FNeg => MilOperand::Float((-val).to_bits()),
-                MilUnOp::F2I => MilOperand::Int(
-                    if val.is_nan() {
-                        0
-                    } else if val >= (i32::MAX as f32) {
-                        i32::MAX
-                    } else if val <= (i32::MIN as f32) {
-                        i32::MIN
-                    } else {
-                        val as i32
-                    }
-                ),
-                MilUnOp::F2L => MilOperand::Long(
-                    if val.is_nan() {
-                        0
-                    } else if val >= (i64::MAX as f32) {
-                        i64::MAX
-                    } else if val <= (i64::MIN as f32) {
-                        i64::MIN
-                    } else {
-                        val as i64
-                    }
-                ),
-                MilUnOp::F2D => MilOperand::Double((val as f64).to_bits()),
-                _ => unreachable!()
-            }
-        }
-        MilInstructionKind::UnOp(op, _, MilOperand::Double(val_bits)) => {
-            let val = f64::from_bits(val_bits);
-            match op {
-                MilUnOp::DNeg => MilOperand::Double((-val).to_bits()),
-                MilUnOp::D2I => MilOperand::Int(
-                    if val.is_nan() {
-                        0
-                    } else if val >= (i32::MAX as f64) {
-                        i32::MAX
-                    } else if val <= (i32::MIN as f64) {
-                        i32::MIN
-                    } else {
-                        val as i32
-                    }
-                ),
-                MilUnOp::D2L => MilOperand::Long(
-                    if val.is_nan() {
-                        0
-                    } else if val >= (i64::MAX as f64) {
-                        i64::MAX
-                    } else if val <= (i64::MIN as f64) {
-                        i64::MIN
-                    } else {
-                        val as i64
-                    }
-                ),
-                MilUnOp::D2F => MilOperand::Float((val as f32).to_bits()),
-                _ => unreachable!()
-            }
-        },
-        MilInstructionKind::BinOp(op, _, MilOperand::Int(lhs), MilOperand::Int(rhs)) => match op {
-            MilBinOp::IAdd => MilOperand::Int(lhs.wrapping_add(rhs)),
-            MilBinOp::ISub => MilOperand::Int(lhs.wrapping_sub(rhs)),
-            MilBinOp::IMul => MilOperand::Int(lhs.wrapping_mul(rhs)),
-            MilBinOp::IDivS | MilBinOp::IRemS if rhs == 0 => {
-                return None;
+        MilInstructionKind::BinOp(op, _, ref lhs, ref rhs) => match op {
+            MilBinOp::IAdd => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x.wrapping_add(y))),
+            MilBinOp::ISub => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x.wrapping_sub(y))),
+            MilBinOp::IMul => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x.wrapping_mul(y))),
+            MilBinOp::IDivS => match (lhs, rhs) {
+                (&MilOperand::Int(_), &MilOperand::Int(0)) => None,
+                (&MilOperand::Int(x), &MilOperand::Int(y)) => Some(MilOperand::Int(x.wrapping_div(y))),
+                _ => None
             },
-            MilBinOp::IDivS => MilOperand::Int(lhs.wrapping_div(rhs)),
-            MilBinOp::IRemS => MilOperand::Int(lhs.wrapping_rem(rhs)),
-            MilBinOp::IAnd => MilOperand::Int(lhs & rhs),
-            MilBinOp::IOr => MilOperand::Int(lhs | rhs),
-            MilBinOp::IXor => MilOperand::Int(lhs ^ rhs),
-            MilBinOp::IShrS => MilOperand::Int(lhs >> (rhs & 0x1f)),
-            MilBinOp::IShrU => MilOperand::Int(((lhs as u32) >> (rhs & 0x1f)) as i32),
-            MilBinOp::IShl => MilOperand::Int(lhs << (rhs & 0x1f)),
-            MilBinOp::ICmp(MilIntComparison::Eq) => MilOperand::Bool(lhs == rhs),
-            MilBinOp::ICmp(MilIntComparison::Ne) => MilOperand::Bool(lhs != rhs),
-            MilBinOp::ICmp(MilIntComparison::Lt) => MilOperand::Bool(lhs < rhs),
-            MilBinOp::ICmp(MilIntComparison::Gt) => MilOperand::Bool(lhs > rhs),
-            MilBinOp::ICmp(MilIntComparison::Le) => MilOperand::Bool(lhs <= rhs),
-            MilBinOp::ICmp(MilIntComparison::Ge) => MilOperand::Bool(lhs >= rhs),
-            _ => unreachable!()
-        },
-        MilInstructionKind::BinOp(op, _, MilOperand::Long(lhs), MilOperand::Int(rhs)) => match op {
-            MilBinOp::LShrS => MilOperand::Long(lhs >> (rhs & 0x3f)),
-            MilBinOp::LShrU => MilOperand::Long(((lhs as u64) >> (rhs & 0x3f)) as i64),
-            MilBinOp::LShl => MilOperand::Long(lhs << (rhs & 0x3f)),
-            _ => unreachable!()
-        },
-        MilInstructionKind::BinOp(op, _, MilOperand::Long(lhs), MilOperand::Long(rhs)) => match op {
-            MilBinOp::LAdd => MilOperand::Long(lhs.wrapping_add(rhs)),
-            MilBinOp::LSub => MilOperand::Long(lhs.wrapping_sub(rhs)),
-            MilBinOp::LMul => MilOperand::Long(lhs.wrapping_mul(rhs)),
-            MilBinOp::LDivS | MilBinOp::LRemS if rhs == 0 => {
-                return None;
+            MilBinOp::IRemS => match (lhs, rhs) {
+                (&MilOperand::Int(_), &MilOperand::Int(0)) => None,
+                (&MilOperand::Int(x), &MilOperand::Int(y)) => Some(MilOperand::Int(x.wrapping_rem(y))),
+                _ => None
             },
-            MilBinOp::LDivS => MilOperand::Long(lhs.wrapping_div(rhs)),
-            MilBinOp::LRemS => MilOperand::Long(lhs.wrapping_rem(rhs)),
-            MilBinOp::LAnd => MilOperand::Long(lhs & rhs),
-            MilBinOp::LOr => MilOperand::Long(lhs | rhs),
-            MilBinOp::LXor => MilOperand::Long(lhs ^ rhs),
-            MilBinOp::LCmp => MilOperand::Int(match lhs.cmp(&rhs) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1
-            }),
-            _ => unreachable!()
-        },
-        MilInstructionKind::BinOp(op, _, MilOperand::Float(lhs_bits), MilOperand::Float(rhs_bits)) => {
-            let lhs = f32::from_bits(lhs_bits);
-            let rhs = f32::from_bits(rhs_bits);
-
-            match op {
-                MilBinOp::FAdd => MilOperand::Float((lhs + rhs).to_bits()),
-                MilBinOp::FSub => MilOperand::Float((lhs - rhs).to_bits()),
-                MilBinOp::FMul => MilOperand::Float((lhs * rhs).to_bits()),
-                MilBinOp::FDiv => MilOperand::Float((lhs / rhs).to_bits()),
-                MilBinOp::FCmp(mode) => MilOperand::Int(match lhs.partial_cmp(&rhs) {
+            MilBinOp::IAnd => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x & y)),
+            MilBinOp::IOr => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x | y)),
+            MilBinOp::IXor => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x ^ y)),
+            MilBinOp::IShrS => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x >> (y & 0x1f))),
+            MilBinOp::IShrU => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(((x as u32) >> (y & 0x1f)) as i32)),
+            MilBinOp::IShl => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x << (y & 0x1f))),
+            MilBinOp::ICmp(cmp) => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Bool(match cmp {
+                MilIntComparison::Eq => x == y,
+                MilIntComparison::Ne => x != y,
+                MilIntComparison::Gt => x > y,
+                MilIntComparison::Lt => x < y,
+                MilIntComparison::Ge => x >= y,
+                MilIntComparison::Le => x <= y
+            })),
+            MilBinOp::LAdd => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x.wrapping_add(y))),
+            MilBinOp::LSub => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x.wrapping_sub(y))),
+            MilBinOp::LMul => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x.wrapping_mul(y))),
+            MilBinOp::LDivS => match (lhs, rhs) {
+                (&MilOperand::Long(_), &MilOperand::Long(0)) => None,
+                (&MilOperand::Long(x), &MilOperand::Long(y)) => Some(MilOperand::Long(x.wrapping_div(y))),
+                _ => None
+            },
+            MilBinOp::LRemS => match (lhs, rhs) {
+                (&MilOperand::Long(_), &MilOperand::Long(0)) => None,
+                (&MilOperand::Long(x), &MilOperand::Long(y)) => Some(MilOperand::Long(x.wrapping_rem(y))),
+                _ => None
+            },
+            MilBinOp::LAnd => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x & y)),
+            MilBinOp::LOr => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x | y)),
+            MilBinOp::LXor => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Long(x ^ y)),
+            MilBinOp::LShrS => try_fold_bin_long_int(lhs, rhs, |x, y| MilOperand::Long(x >> (y & 0x3f))),
+            MilBinOp::LShrU => try_fold_bin_long_int(lhs, rhs, |x, y| MilOperand::Long(((x as u64) >> (y & 0x3f)) as i64)),
+            MilBinOp::LShl => try_fold_bin_long_int(lhs, rhs, |x, y| MilOperand::Long(x << (y & 0x3f))),
+            MilBinOp::LCmp => try_fold_bin_long_long(lhs, rhs, |x, y| MilOperand::Int(
+                match x.cmp(&y) {
+                    Ordering::Less => -1,
+                    Ordering::Equal => 0,
+                    Ordering::Greater => 1
+                }
+            )),
+            MilBinOp::FAdd => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x + y).to_bits())),
+            MilBinOp::FSub => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x - y).to_bits())),
+            MilBinOp::FMul => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x * y).to_bits())),
+            MilBinOp::FDiv => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x / y).to_bits())),
+            MilBinOp::FCmp(mode) => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Int(
+                match x.partial_cmp(&y) {
+                    Some(Ordering::Less) => -1,
                     Some(Ordering::Equal) => 0,
                     Some(Ordering::Greater) => 1,
-                    Some(Ordering::Less) => -1,
                     None => match mode {
-                        MilFCmpMode::L => -1,
-                        MilFCmpMode::G => 1
+                        MilFCmpMode::G => 1,
+                        MilFCmpMode::L => -1
                     }
-                }),
-                _ => unreachable!()
-            }
-        },
-        MilInstructionKind::BinOp(op, _, MilOperand::Double(lhs_bits), MilOperand::Double(rhs_bits)) => {
-            let lhs = f64::from_bits(lhs_bits);
-            let rhs = f64::from_bits(rhs_bits);
-
-            match op {
-                MilBinOp::DAdd => MilOperand::Double((lhs + rhs).to_bits()),
-                MilBinOp::DSub => MilOperand::Double((lhs - rhs).to_bits()),
-                MilBinOp::DMul => MilOperand::Double((lhs * rhs).to_bits()),
-                MilBinOp::DDiv => MilOperand::Double((lhs / rhs).to_bits()),
-                MilBinOp::DCmp(mode) => MilOperand::Int(match lhs.partial_cmp(&rhs) {
+                }
+            )),
+            MilBinOp::DAdd => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x + y).to_bits())),
+            MilBinOp::DSub => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x - y).to_bits())),
+            MilBinOp::DMul => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x * y).to_bits())),
+            MilBinOp::DDiv => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x / y).to_bits())),
+            MilBinOp::DCmp(mode) => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Int(
+                match x.partial_cmp(&y) {
+                    Some(Ordering::Less) => -1,
                     Some(Ordering::Equal) => 0,
                     Some(Ordering::Greater) => 1,
-                    Some(Ordering::Less) => -1,
                     None => match mode {
-                        MilFCmpMode::L => -1,
-                        MilFCmpMode::G => 1
+                        MilFCmpMode::G => 1,
+                        MilFCmpMode::L => -1
                     }
-                }),
-                _ => unreachable!()
+                }
+            )),
+            MilBinOp::RCmp(cmp) => {
+                let eq = match (lhs, rhs) {
+                    (&MilOperand::RefNull, &MilOperand::RefNull) => Some(true),
+                    (&MilOperand::KnownObject(_, _), &MilOperand::RefNull) => Some(false),
+                    (&MilOperand::RefNull, &MilOperand::KnownObject(_, _)) => Some(false),
+                    (&MilOperand::KnownObject(lhs, _), &MilOperand::KnownObject(rhs, _)) => Some(lhs == rhs),
+                    _ => None
+                };
+
+                eq.map(|eq| MilOperand::Bool(match cmp {
+                    MilRefComparison::Eq => eq,
+                    MilRefComparison::Ne => !eq
+                }))
             }
         },
         MilInstructionKind::GetField(field_id, _, _, MilOperand::KnownObject(val, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
-                MilOperand::from_const(known_objects.get(val).read_field(field_id), known_objects)
+                Some(MilOperand::from_const(known_objects.get(val).read_field(field_id), known_objects))
             } else {
-                return None;
+                None
             }
         },
         MilInstructionKind::GetArrayLength(_, MilOperand::KnownObject(val, _)) => {
             let val = known_objects.get(val);
 
             if matches!(val.class(), ResolvedClass::Array(_)) {
-                MilOperand::Int(val.read_array_length())
+                Some(MilOperand::Int(val.read_array_length()))
             } else {
-                return None;
+                None
             }
         },
         MilInstructionKind::GetStatic(field_id, _, _) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
-                MilOperand::from_const(
+                Some(MilOperand::from_const(
                     known_objects.get(known_objects.refs.classes[&field_id.0]).read_field(field_id),
                     known_objects
-                )
+                ))
             } else {
-                return None;
+                None
             }
         },
-        _ => {
-            return None;
-        }
-    })
+        _ => None
+    }
 }
 
 pub fn fold_constant_exprs(func: &mut MilFunction, env: &ClassEnvironment, known_objects: &MilKnownObjectMap, log: &Log) -> usize {
