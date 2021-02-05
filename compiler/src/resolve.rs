@@ -720,6 +720,11 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
             get_constant_pool_class(&resolving_class.constant_pool, i)
         }).collect();
 
+        if resolving_class.flags.intersects(ClassFlags::INTERFACE) && resolving_class.meta.super_id != ClassId::JAVA_LANG_OBJECT {
+            eprintln!("WARNING: Interface {} does not list its superclass as java/lang/Object", resolving_class.meta.name);
+            resolving_class.meta.super_id = ClassId::JAVA_LANG_OBJECT;
+        };
+
         for m in resolving_class.methods.iter_mut() {
             if let Some(instrs) = BytecodeIterator::for_method(m) {
                 for (_, instr) in instrs {
@@ -1100,14 +1105,16 @@ pub fn resolve_overriding(env: &mut ClassEnvironment, verbose: bool) -> Result<(
                 &methodref
             );
 
-            if m.overrides.overrides_virtual != MethodId::UNRESOLVED && env.get(m.overrides.overrides_virtual.0).as_user_class().flags.contains(ClassFlags::INTERFACE) {
+            if resolving_class.flags.intersects(ClassFlags::INTERFACE) {
+                m.overrides.overrides_virtual = MethodId::UNRESOLVED;
+            } else if m.overrides.overrides_virtual != MethodId::UNRESOLVED && env.get(m.overrides.overrides_virtual.0).as_user_class().flags.contains(ClassFlags::INTERFACE) {
                 m.overrides.overrides_virtual = MethodId::UNRESOLVED;
             };
 
             m.overrides.overrides_interface = resolving_class.meta.all_interface_ids.iter().cloned()
                 .filter_map(|interface| {
                     let method = find_method(env, interface, true, &[], resolving_meta, &methodref);
-                    if method != MethodId::UNRESOLVED {
+                    if method != MethodId::UNRESOLVED && method.0 != ClassId::JAVA_LANG_OBJECT {
                         Some(method)
                     } else {
                         None
