@@ -186,7 +186,7 @@ unsafe fn fill_type(env: &ClassEnvironment, class_id: ClassId, liveness: &Livene
     vtable_fields[VTABLE_NUM_INTERFACES_FIELD] = types.short;
     vtable_fields[VTABLE_ARRAY_VTABLE_FIELD] = types.int;
     vtable_fields[VTABLE_TYPE_SPECIFIC_INFO_FIELD] = types.long;
-    vtable_fields[VTABLE_SUPER_VTABLES_FIELD] = LLVMPointerType(types.int, 0);
+    vtable_fields[VTABLE_SUPER_VTABLES_FIELD] = LLVMPointerType(LLVMArrayType(types.int, env.get_class_chain(class_id).len() as u32), 0);
     vtable_fields[VTABLE_CLASS_OBJ_FIELD] = LLVMPointerType(types.class_types[&class_id].meta_ty, 1);
     vtable_fields[VTABLE_ITABLE_FIELD] = LLVMPointerType(itable_type, 0);
 
@@ -394,11 +394,12 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
         ResolvedClass::Primitive(Some(ty)) => (0x0001, 0, module.const_long(ty.as_char().into()).ptr())
     };
 
+    let class_chain = module.env.get_class_chain(class_id);
     let ty = &module.types.class_types[&class_id];
 
     let mut vtable_fields = [
         module.const_int(size as i32).ptr(),
-        module.const_short(0).ptr(),
+        module.const_short(class_chain.len() as i16).ptr(),
         module.const_short(flags).ptr(),
         module.const_short(0).ptr(),
         module.const_short(0).ptr(),
@@ -419,7 +420,25 @@ unsafe fn emit_vtable(module: &MochaModule, class_id: ClassId, liveness: &Livene
             module.const_int(0).ptr()
         },
         type_specific_info,
-        LLVMConstNull(LLVMPointerType(module.types.int, 0)),
+        {
+            let supers_name = CString::new(format!("supers_{}", module.env.get(class_id).name(module.env))).unwrap();
+
+            let mut supers = class_chain.iter().rev().copied().map(|super_id| {
+                LLVMConstIntCast(
+                    LLVMConstAdd(
+                        LLVMConstPointerCast(module.types.class_types[&super_id].vtable, module.types.long),
+                        module.const_long(8).ptr()
+                    ),
+                    module.types.int,
+                    0
+                )
+            }).collect_vec();
+            let supers_val = LLVMConstArray(module.types.int, supers.as_mut_ptr(), supers.len() as u32);
+
+            let supers_global = LLVMAddGlobal(module.module.ptr(), LLVMArrayType(module.types.int, supers.len() as u32), supers_name.as_ptr());
+            LLVMSetInitializer(supers_global, supers_val);
+            supers_global
+        },
         class_obj,
         if ty.itable.is_null() {
             LLVMConstNull(LLVMStructGetTypeAtIndex(LLVMGlobalGetValueType(ty.vtable), VTABLE_ITABLE_FIELD as u32))

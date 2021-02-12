@@ -261,6 +261,10 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
                 MilInstructionKind::GetVTable(tgt, ref obj) => {
                     validate_operand(obj, MilType::Ref, &mut state);
                     validate_target(tgt, MilType::Addr, &mut state);
+                },
+                MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
+                    validate_operand(vtable, MilType::Addr, &mut state);
+                    validate_target(tgt, MilType::Bool, &mut state);
                 }
             };
 

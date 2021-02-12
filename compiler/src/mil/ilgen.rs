@@ -1306,12 +1306,108 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 }));
                 end_block = Some(block);
             },
-            BytecodeInstruction::CheckCast(_) => {
-                // TODO
+            BytecodeInstruction::CheckCast(idx) => {
+                let cpe = match cp[idx as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let obj = stack.pop(builder, MilType::Ref);
+
+                let is_null_reg = builder.allocate_reg(MilType::Bool);
+                builder.append_instruction(MilInstructionKind::BinOp(
+                    MilBinOp::RCmp(MilRefComparison::Eq),
+                    is_null_reg,
+                    obj.clone(),
+                    MilOperand::RefNull
+                ));
+
+                let null_check_block = builder.end_block();
+
+                let vtable_reg = builder.allocate_reg(MilType::Addr);
+                let is_subclass_reg = builder.allocate_reg(MilType::Bool);
+                builder.append_instruction(MilInstructionKind::GetVTable(vtable_reg, obj.clone()));
+
+                if !env.get(cpe.class_id).is_interface() {
+                    builder.append_instruction(MilInstructionKind::IsSubclass(
+                        cpe.class_id,
+                        is_subclass_reg,
+                        MilOperand::Register(vtable_reg)
+                    ));
+                } else {
+                    // TODO
+                    builder.append_instruction(MilInstructionKind::Copy(is_subclass_reg, MilOperand::Bool(true)));
+                };
+
+                let class_check_block = builder.end_block();
+                builder.append_end_instruction(MilEndInstructionKind::Throw(MilOperand::RefNull));
+
+                let continue_block = builder.end_block();
+                builder.insert_end_instruction(
+                    null_check_block,
+                    MilEndInstructionKind::JumpIf(continue_block, MilOperand::Register(is_null_reg))
+                );
+                builder.insert_end_instruction(
+                    class_check_block,
+                    MilEndInstructionKind::JumpIf(continue_block, MilOperand::Register(is_subclass_reg))
+                );
+
+                stack.push(builder, obj, MilType::Ref);
             },
-            BytecodeInstruction::InstanceOf(_) => {
-                stack.pop(builder, MilType::Ref);
-                stack.push(builder, MilOperand::Int(1), MilType::Int);
+            BytecodeInstruction::InstanceOf(idx) => {
+                let cpe = match cp[idx as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let obj = stack.pop(builder, MilType::Ref);
+
+                let is_null_reg = builder.allocate_reg(MilType::Bool);
+                builder.append_instruction(MilInstructionKind::BinOp(
+                    MilBinOp::RCmp(MilRefComparison::Eq),
+                    is_null_reg,
+                    obj.clone(),
+                    MilOperand::RefNull
+                ));
+
+                let null_check_block = builder.end_block();
+
+                let vtable_reg = builder.allocate_reg(MilType::Addr);
+                let is_subclass_reg = builder.allocate_reg(MilType::Bool);
+                let is_subclass_int_reg = builder.allocate_reg(MilType::Int);
+                builder.append_instruction(MilInstructionKind::GetVTable(vtable_reg, obj));
+
+                if !env.get(cpe.class_id).is_interface() {
+                    builder.append_instruction(MilInstructionKind::IsSubclass(
+                        cpe.class_id,
+                        is_subclass_reg,
+                        MilOperand::Register(vtable_reg)
+                    ));
+                } else {
+                    // TODO
+                    builder.append_instruction(MilInstructionKind::Copy(is_subclass_reg, MilOperand::Bool(true)));
+                };
+
+                builder.append_instruction(MilInstructionKind::Select(
+                    is_subclass_int_reg,
+                    MilOperand::Register(is_subclass_reg),
+                    MilOperand::Int(1),
+                    MilOperand::Int(0)
+                ));
+
+                let is_subclass_block = builder.end_block();
+                let result_reg = builder.append_phi_node(vec![
+                    (MilOperand::Int(0), null_check_block),
+                    (MilOperand::Register(is_subclass_int_reg), is_subclass_block)
+                ]);
+
+                let merge_block = builder.end_block();
+                builder.insert_end_instruction(
+                    null_check_block,
+                    MilEndInstructionKind::JumpIf(merge_block, MilOperand::Register(is_null_reg))
+                );
+
+                stack.push(builder, MilOperand::Register(result_reg), MilType::Int);
             },
             BytecodeInstruction::AThrow => {
                 let val = stack.pop(builder, MilType::Ref);

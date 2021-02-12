@@ -17,6 +17,7 @@ use crate::resolve::{ClassId, FieldId};
 use super::MochaModule;
 use super::types::{LLVMTypes, VTABLE_FIRST_VSLOT_FIELD, VTABLE_ITABLE_FIELD};
 use super::wrapper::*;
+use crate::backend::llvm::types::{VTABLE_DEPTH_FIELD, VTABLE_SUPER_VTABLES_FIELD};
 
 #[derive(Debug)]
 struct DebugLocal<'a> {
@@ -700,6 +701,70 @@ unsafe fn emit_basic_block<'a, 'b>(
                 let vtable = create_vtable_load(builder, obj, &module.types);
 
                 set_register(builder, func, &mut local_regs, all_regs, tgt, vtable, &module.types);
+            },
+            MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
+                let class_depth = module.env.get_class_chain(class_id).len() - 1;
+                let vtable = create_value_ref(module, vtable, &local_regs);
+                let vtable = builder.build_pointer_cast(
+                    vtable,
+                    LLVMPointerType(LLVMGlobalGetValueType(module.types.class_types[&class_id].vtable), 0),
+                    None
+                );
+
+                let read_supers_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+                let merge_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+
+                builder.build_cond_br(
+                    builder.build_icmp(
+                        LLVMIntPredicate::LLVMIntUGE,
+                        builder.build_load(
+                            builder.build_struct_gep(vtable, VTABLE_DEPTH_FIELD as u32, None),
+                            None
+                        ),
+                        module.const_short(class_depth as i16),
+                        None
+                    ),
+                    read_supers_block,
+                    merge_block
+                );
+
+                LLVMPositionBuilderAtEnd(builder.ptr(), read_supers_block);
+
+                let read_supers_match = builder.build_icmp(
+                    LLVMIntPredicate::LLVMIntEQ,
+                    builder.build_load(
+                        builder.build_struct_gep(
+                            builder.build_load(
+                                builder.build_struct_gep(vtable, VTABLE_SUPER_VTABLES_FIELD as u32, None),
+                                None
+                            ),
+                            class_depth as u32,
+                            None
+                        ),
+                        None
+                    ),
+                    LLVMValue::from_raw(
+                        LLVMConstIntCast(
+                            LLVMConstAdd(
+                                LLVMConstPointerCast(module.types.class_types[&class_id].vtable, module.types.long),
+                                module.const_long(8).ptr()
+                            ),
+                            module.types.int,
+                            0
+                        )
+                    ),
+                    None
+                );
+                builder.build_br(merge_block);
+
+                LLVMPositionBuilderAtEnd(builder.ptr(), merge_block);
+
+                let result = builder.build_phi(module.types.bool, Some(register_name(tgt)));
+
+                result.add_incoming(&[(llvm_block, module.const_bool(false)), (read_supers_block, read_supers_match)]);
+                set_register(builder, func, &mut local_regs, all_regs, tgt, result.into_val(), &module.types);
+
+                llvm_block = merge_block;
             }
         };
     };

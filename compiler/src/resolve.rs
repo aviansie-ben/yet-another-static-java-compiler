@@ -326,6 +326,14 @@ impl ResolvedClass {
             unreachable!();
         }
     }
+
+    pub fn is_interface(&self) -> bool {
+        if let ResolvedClass::User(ref class) = *self {
+            class.flags.contains(ClassFlags::INTERFACE)
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug)]

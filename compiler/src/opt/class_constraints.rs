@@ -204,7 +204,8 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::PutStatic(_, _, _) => None,
         MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
         MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-        MilInstructionKind::GetVTable(_, _) => None
+        MilInstructionKind::GetVTable(_, _) => None,
+        MilInstructionKind::IsSubclass(_, _, _) => None
     }
 }
 

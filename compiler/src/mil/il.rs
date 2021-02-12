@@ -784,7 +784,8 @@ pub enum MilInstructionKind {
     PutStatic(FieldId, ClassId, MilOperand),
     AllocObj(ClassId, MilRegister),
     AllocArray(ClassId, MilRegister, MilOperand),
-    GetVTable(MilRegister, MilOperand)
+    GetVTable(MilRegister, MilOperand),
+    IsSubclass(ClassId, MilRegister, MilOperand)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -890,6 +891,9 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             },
             MilInstructionKind::GetVTable(tgt, ref obj) => {
                 write!(f, "get_vtable {}, {}", tgt, obj.pretty(self.1))?;
+            },
+            MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
+                write!(f, "is_subclass <{}> {}, {}", self.1.get(class_id).name(self.1), tgt, vtable.pretty(self.1))?;
             }
         };
 
@@ -933,7 +937,8 @@ impl MilInstruction {
             MilInstructionKind::PutStatic(_, _, _) => None,
             MilInstructionKind::AllocObj(_, ref tgt) => Some(tgt),
             MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt),
-            MilInstructionKind::GetVTable(ref tgt, _) => Some(tgt)
+            MilInstructionKind::GetVTable(ref tgt, _) => Some(tgt),
+            MilInstructionKind::IsSubclass(_, ref tgt, _) => Some(tgt)
         }
     }
 
@@ -956,7 +961,8 @@ impl MilInstruction {
             MilInstructionKind::PutStatic(_, _, _) => None,
             MilInstructionKind::AllocObj(_, ref mut tgt) => Some(tgt),
             MilInstructionKind::AllocArray(_, ref mut tgt, _) => Some(tgt),
-            MilInstructionKind::GetVTable(ref mut tgt, _) => Some(tgt)
+            MilInstructionKind::GetVTable(ref mut tgt, _) => Some(tgt),
+            MilInstructionKind::IsSubclass(_, ref mut tgt, _) => Some(tgt)
         }
     }
 
@@ -1012,6 +1018,9 @@ impl MilInstruction {
             },
             MilInstructionKind::GetVTable(_, ref obj) => {
                 f(obj);
+            },
+            MilInstructionKind::IsSubclass(_, _, ref vtable) => {
+                f(vtable);
             }
         };
     }
@@ -1068,6 +1077,9 @@ impl MilInstruction {
             },
             MilInstructionKind::GetVTable(_, ref mut obj) => {
                 f(obj);
+            },
+            MilInstructionKind::IsSubclass(_, _, ref mut vtable) => {
+                f(vtable);
             }
         };
     }
