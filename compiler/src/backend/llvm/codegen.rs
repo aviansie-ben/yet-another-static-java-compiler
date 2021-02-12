@@ -34,15 +34,16 @@ struct DebugScope<'a> {
 }
 
 impl <'a> DebugScope<'a> {
-    pub fn new(module: &MochaModule<'a, '_, '_>, scope: &MilLocalDebugScope, parent_meta: LLVMMetadata<'a>, file: LLVMMetadata<'a>) -> DebugScope<'a> {
-        let meta = module.di_builder.create_lexical_block(parent_meta, Some(file), 0, 0);
+    pub fn new(module: &MochaModule<'a, '_, '_>, scope: &MilLocalDebugScope, parent_meta: LLVMMetadata<'a>, file: LLVMMetadata<'a>, line_map: &MilLineMap) -> DebugScope<'a> {
+        let line = line_map.get_line(scope.range().0).unwrap_or(1);
+        let meta = module.di_builder.create_lexical_block(parent_meta, Some(file), line, 0);
         DebugScope {
             start_bc: scope.range().0,
             end_bc: scope.range().1,
             meta,
-            sub_scopes: scope.sub_scopes.iter().map(|ss| DebugScope::new(module, ss, meta, file)).collect_vec(),
+            sub_scopes: scope.sub_scopes.iter().map(|ss| DebugScope::new(module, ss, meta, file, line_map)).collect_vec(),
             locals: scope.locals.iter().map(|e| DebugLocal {
-                meta: module.di_builder.create_auto_variable(meta, &e.name, Some(file), 0, module.debug_types[&e.ty], false, LLVMDIFlags::LLVMDIFlagZero, 0),
+                meta: module.di_builder.create_auto_variable(meta, &e.name, Some(file), line, module.debug_types[&e.ty], false, LLVMDIFlags::LLVMDIFlagZero, 0),
                 local_id: e.local
             }).collect_vec()
         }
@@ -872,7 +873,7 @@ unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
     let dbg_func = module.di_builder.create_function(
         module.compile_unit,
         dbg_file,
-        func.line_map.get_line(0).unwrap_or(0),
+        func.line_map.get_line(0).unwrap_or(1),
         &format!("{}", MethodName(func.id, module.env)),
         "",
         None,
@@ -884,7 +885,8 @@ unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
 
     llvm_func.set_subprogram(dbg_func);
 
-    let debug_scope = func.local_map.as_ref().map(|local_map| DebugScope::new(module, local_map.top_scope(), dbg_func, dbg_file));
+    let line_map = &func.line_map;
+    let debug_scope = func.local_map.as_ref().map(|local_map| DebugScope::new(module, local_map.top_scope(), dbg_func, dbg_file, line_map));
     let mut debug_locs = DebugLocationMap::new(&func.line_map, module.di_builder, debug_scope.as_ref(), dbg_func);
 
     LLVMSetGC(llvm_func.into_val().ptr(), "statepoint-example\0".as_ptr() as *const c_char);
