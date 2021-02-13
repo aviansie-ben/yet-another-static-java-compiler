@@ -372,6 +372,7 @@ unsafe fn emit_basic_block<'a, 'b>(
             MilInstructionKind::UnOp(op, tgt, ref val) => {
                 let val = create_value_ref(module, val, &local_regs);
                 set_register(builder, func, &mut local_regs, all_regs, tgt, match op {
+                    MilUnOp::ZNot => builder.build_not(val, Some(register_name(tgt))),
                     MilUnOp::INeg => builder.build_neg(val, Some(register_name(tgt))),
                     MilUnOp::IExtB => builder.build_sext(
                         builder.build_trunc(val, module.types.byte, None),

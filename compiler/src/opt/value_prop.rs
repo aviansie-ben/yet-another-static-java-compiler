@@ -13,6 +13,13 @@ use crate::mil::transform;
 use crate::resolve::{ClassEnvironment, ResolvedClass};
 use crate::util::BitVec;
 
+fn try_fold_un_bool<F: Fn (bool) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
+    match *val {
+        MilOperand::Bool(val) => Some(f(val)),
+        _ => None
+    }
+}
+
 fn try_fold_un_int<F: Fn (i32) -> MilOperand>(val: &MilOperand, f: F) -> Option<MilOperand> {
     match *val {
         MilOperand::Int(val) => Some(f(val)),
@@ -82,6 +89,7 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
         MilInstructionKind::Select(_, MilOperand::Bool(true), ref true_val, _) => Some(true_val.clone()),
         MilInstructionKind::Select(_, MilOperand::Bool(false), _, ref false_val) => Some(false_val.clone()),
         MilInstructionKind::UnOp(op, _, ref val) => match op {
+            MilUnOp::ZNot => try_fold_un_bool(val, |x| MilOperand::Bool(!x)),
             MilUnOp::INeg => try_fold_un_int(val, |x| MilOperand::Int(x.wrapping_neg())),
             MilUnOp::IExtB => try_fold_un_int(val, |x| MilOperand::Int(x as i8 as i32)),
             MilUnOp::IExtS => try_fold_un_int(val, |x| MilOperand::Int(x as i16 as i32)),

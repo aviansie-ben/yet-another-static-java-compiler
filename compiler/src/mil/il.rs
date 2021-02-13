@@ -564,6 +564,7 @@ impl MilIntComparison {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MilUnOp {
+    ZNot,
     INeg,
     IExtB,
     IExtS,
@@ -587,6 +588,7 @@ pub enum MilUnOp {
 impl MilUnOp {
     pub fn type_sig(self) -> (MilType, MilType) {
         match self {
+            MilUnOp::ZNot => (MilType::Bool, MilType::Bool),
             MilUnOp::INeg => (MilType::Int, MilType::Int),
             MilUnOp::IExtB => (MilType::Int, MilType::Int),
             MilUnOp::IExtS => (MilType::Int, MilType::Int),
@@ -612,6 +614,7 @@ impl MilUnOp {
 impl fmt::Display for MilUnOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            MilUnOp::ZNot => write!(f, "znot"),
             MilUnOp::INeg => write!(f, "ineg"),
             MilUnOp::IExtB => write!(f, "iextb"),
             MilUnOp::IExtS => write!(f, "iexts"),

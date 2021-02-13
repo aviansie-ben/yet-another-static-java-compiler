@@ -628,6 +628,12 @@ impl <'a> LLVMBuilder<'a> {
         }
     }
 
+    pub fn build_not(&self, val: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildNot(self.ptr(), val.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
     pub fn build_fneg(&self, val: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
         unsafe {
             self.wrap_value(LLVMBuildFNeg(self.ptr(), val.ptr(), cstr_or_empty(&name)))
