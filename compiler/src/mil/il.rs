@@ -543,10 +543,10 @@ impl MilIntComparison {
         match *self {
             MilIntComparison::Eq => MilIntComparison::Ne,
             MilIntComparison::Ne => MilIntComparison::Eq,
-            MilIntComparison::Gt => MilIntComparison::Lt,
-            MilIntComparison::Lt => MilIntComparison::Gt,
-            MilIntComparison::Ge => MilIntComparison::Le,
-            MilIntComparison::Le => MilIntComparison::Ge
+            MilIntComparison::Gt => MilIntComparison::Le,
+            MilIntComparison::Lt => MilIntComparison::Ge,
+            MilIntComparison::Ge => MilIntComparison::Lt,
+            MilIntComparison::Le => MilIntComparison::Gt
         }
     }
 
