@@ -224,6 +224,38 @@ fn class_constraint_for_end_instr(instr: &MilEndInstructionKind) -> Option<MilCl
     }
 }
 
+fn for_edge_constraints(
+    cond: MilRegister,
+    instrs_by_reg: &HashMap<MilRegister, &MilInstructionKind>,
+    mut add_constraint: impl FnMut (bool, MilRegister, MilClassConstraint)
+) {
+    let cond = instrs_by_reg.get(&cond);
+    let (cond, flip_cond) = match cond {
+        Some(&&MilInstructionKind::UnOp(MilUnOp::ZNot, _, MilOperand::Register(cond))) => (instrs_by_reg.get(&cond), true),
+        _ => (cond, false)
+    };
+
+    match cond {
+        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Eq), _, MilOperand::Register(obj), MilOperand::RefNull)) => {
+            add_constraint(!flip_cond, obj, MilClassConstraint::null());
+            add_constraint(flip_cond, obj, MilClassConstraint::non_null());
+        },
+        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Ne), _, MilOperand::Register(obj), MilOperand::RefNull)) => {
+            add_constraint(!flip_cond, obj, MilClassConstraint::non_null());
+            add_constraint(flip_cond, obj, MilClassConstraint::null());
+        },
+        Some(&&MilInstructionKind::IsSubclass(class_id, _, MilOperand::Register(vtable))) => {
+            match instrs_by_reg.get(&vtable) {
+                Some(&&MilInstructionKind::GetVTable(_, MilOperand::Register(obj))) => {
+                    add_constraint(!flip_cond, obj, MilClassConstraint::for_class(class_id));
+                },
+                _ => {}
+            };
+        },
+        _ => {}
+    };
+}
+
 pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== CLASS CONSTRAINT ANALYSIS =====\n");
 
@@ -234,6 +266,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
 
     log_writeln!(log, "Collecting initial constraints...");
     let mut instrs_by_reg = HashMap::new();
+
     for block_id in func.block_order.iter().copied() {
         let block = &func.blocks[&block_id];
 
@@ -270,7 +303,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                     constraints.set_vtable_of(tgt, obj.clone());
                 },
                 _ => {}
-            }
+            };
         };
 
         if let Some(tgt) = block.end_instr.target().copied() {
@@ -287,23 +320,16 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
 
         if let MilEndInstructionKind::JumpIf(target_block_id, MilOperand::Register(cond)) = block.end_instr.kind {
-            match instrs_by_reg.get(&cond) {
-                Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Eq), _, MilOperand::Register(lhs), MilOperand::RefNull)) => {
-                    log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::null().pretty(env));
-                    log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::non_null().pretty(env));
+            for_edge_constraints(cond, &instrs_by_reg, |taken, reg, constraint| {
+                let to_block_id = if taken {
+                    target_block_id
+                } else {
+                    next_block_id
+                };
 
-                    edge_constraints.entry((block_id, target_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::null());
-                    edge_constraints.entry((block_id, next_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::non_null());
-                },
-                Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Ne), _, MilOperand::Register(lhs), MilOperand::RefNull)) => {
-                    log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, target_block_id, lhs, MilClassConstraint::non_null().pretty(env));
-                    log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, next_block_id, lhs, MilClassConstraint::null().pretty(env));
-
-                    edge_constraints.entry((block_id, target_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::non_null());
-                    edge_constraints.entry((block_id, next_block_id)).or_insert_with(BTreeMap::new).insert(lhs, MilClassConstraint::null());
-                },
-                _ => {}
-            };
+                log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, to_block_id, reg, constraint.pretty(env));
+                edge_constraints.entry((block_id, to_block_id)).or_insert_with(BTreeMap::new).insert(reg, constraint);
+            });
         };
     };
 
@@ -439,6 +465,17 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                             ));
 
                             num_changes += 1;
+                        };
+                    };
+                },
+                MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
+                    if let Some(constraint) = block_constraints.find_vtable_of(vtable) {
+                        if env.can_convert(constraint.class_id(), class_id) {
+                            log_writeln!(log, "  Replacing is_subclass <{}> check of vtable {} with bool:true in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
+                            instr.kind = MilInstructionKind::Copy(tgt, MilOperand::Bool(true));
+                        } else if constraint.is_exact() || !env.can_convert(class_id, constraint.class_id()) {
+                            log_writeln!(log, "  Replacing is_subclass <{}> check of vtable {} with bool:false in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
+                            instr.kind = MilInstructionKind::Copy(tgt, MilOperand::Bool(false));
                         };
                     };
                 },
