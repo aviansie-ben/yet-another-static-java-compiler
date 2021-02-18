@@ -150,7 +150,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
         let preds = cfg.get(block_id).incoming.iter().copied().sorted_by_key(|id| id.0).dedup().collect_vec();
 
         for (i, phi) in block.phi_nodes.iter().enumerate() {
-            let phi_preds = phi.sources.iter().map(|&(_, pred)| pred).sorted_by_key(|id| id.0).dedup().collect_vec();
+            let phi_preds = phi.sources.iter().map(|&(_, pred)| pred).sorted_by_key(|id| id.0).collect_vec();
 
             state.loc = ValidatorLocation::Phi(block_id, i);
 
