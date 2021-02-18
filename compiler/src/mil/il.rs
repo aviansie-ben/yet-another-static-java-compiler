@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 
 use crate::bytecode::BytecodeCondition;
 use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId};
@@ -917,6 +917,13 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
 }
 
 impl MilInstruction {
+    pub fn dummy() -> MilInstruction {
+        MilInstruction {
+            kind: MilInstructionKind::Nop,
+            bytecode: (!0, !0)
+        }
+    }
+
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilInstruction(self, env)
     }
@@ -1165,6 +1172,13 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
 }
 
 impl MilEndInstruction {
+    pub fn dummy() -> MilEndInstruction {
+        MilEndInstruction {
+            kind: MilEndInstructionKind::Nop,
+            bytecode: (!0, !0)
+        }
+    }
+
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilEndInstruction(self, env)
     }
@@ -1356,6 +1370,14 @@ pub struct MilPhiNode {
 }
 
 impl MilPhiNode {
+    pub fn dummy() -> Self {
+        MilPhiNode {
+            target: MilRegister::VOID,
+            sources: smallvec![],
+            bytecode: (!0, !0)
+        }
+    }
+
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilPhiNode(self, env)
     }
