@@ -328,6 +328,10 @@ impl MilOperand {
         }
     }
 
+    pub fn is_const(&self) -> bool {
+        self.get_const_type().is_some()
+    }
+
     pub fn from_const<'a>(val: Value<'a>, known_objects: &MilKnownObjectMap<'a>) -> MilOperand {
         match val {
             Value::Int(val) => MilOperand::Int(val),
@@ -550,6 +554,17 @@ impl MilIntComparison {
         }
     }
 
+    pub fn flip_order(&self) -> MilIntComparison {
+        match *self {
+            MilIntComparison::Eq => MilIntComparison::Eq,
+            MilIntComparison::Ne => MilIntComparison::Ne,
+            MilIntComparison::Gt => MilIntComparison::Lt,
+            MilIntComparison::Lt => MilIntComparison::Gt,
+            MilIntComparison::Ge => MilIntComparison::Le,
+            MilIntComparison::Le => MilIntComparison::Ge
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match *self {
             MilIntComparison::Eq => "eq",
@@ -720,6 +735,86 @@ impl MilBinOp {
             MilBinOp::DDiv => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double),
             MilBinOp::RCmp(_) => (MilType::Bool, MilType::Ref, MilType::Ref)
+        }
+    }
+
+    pub fn get_commuted_op(self) -> Option<MilBinOp> {
+        match self {
+            MilBinOp::IAdd => Some(MilBinOp::IAdd),
+            MilBinOp::ISub => None,
+            MilBinOp::IMul => Some(MilBinOp::IMul),
+            MilBinOp::IDivS => None,
+            MilBinOp::IRemS => None,
+            MilBinOp::IAnd => Some(MilBinOp::IAnd),
+            MilBinOp::IOr => Some(MilBinOp::IOr),
+            MilBinOp::IXor => Some(MilBinOp::IXor),
+            MilBinOp::IShrS => None,
+            MilBinOp::IShrU => None,
+            MilBinOp::IShl => None,
+            MilBinOp::ICmp(cmp) => Some(MilBinOp::ICmp(cmp.flip_order())),
+            MilBinOp::LAdd => Some(MilBinOp::LAdd),
+            MilBinOp::LSub => None,
+            MilBinOp::LMul => Some(MilBinOp::LMul),
+            MilBinOp::LDivS => None,
+            MilBinOp::LRemS => None,
+            MilBinOp::LAnd => Some(MilBinOp::LAnd),
+            MilBinOp::LOr => Some(MilBinOp::LOr),
+            MilBinOp::LXor => Some(MilBinOp::LXor),
+            MilBinOp::LShrS => None,
+            MilBinOp::LShrU => None,
+            MilBinOp::LShl => None,
+            MilBinOp::LCmp => None,
+            MilBinOp::FAdd => Some(MilBinOp::FAdd),
+            MilBinOp::FSub => None,
+            MilBinOp::FMul => Some(MilBinOp::FMul),
+            MilBinOp::FDiv => None,
+            MilBinOp::FCmp(_) => None,
+            MilBinOp::DAdd => Some(MilBinOp::DAdd),
+            MilBinOp::DSub => None,
+            MilBinOp::DMul => Some(MilBinOp::DMul),
+            MilBinOp::DDiv => None,
+            MilBinOp::DCmp(_) => None,
+            MilBinOp::RCmp(cmp) => Some(MilBinOp::RCmp(cmp))
+        }
+    }
+
+    pub fn is_associative(self) -> bool {
+        match self {
+            MilBinOp::IAdd => true,
+            MilBinOp::ISub => false,
+            MilBinOp::IMul => true,
+            MilBinOp::IDivS => false,
+            MilBinOp::IRemS => false,
+            MilBinOp::IAnd => true,
+            MilBinOp::IOr => true,
+            MilBinOp::IXor => true,
+            MilBinOp::IShrS => false,
+            MilBinOp::IShrU => false,
+            MilBinOp::IShl => false,
+            MilBinOp::ICmp(_) => false,
+            MilBinOp::LAdd => true,
+            MilBinOp::LSub => false,
+            MilBinOp::LMul => true,
+            MilBinOp::LDivS => false,
+            MilBinOp::LRemS => false,
+            MilBinOp::LAnd => true,
+            MilBinOp::LOr => true,
+            MilBinOp::LXor => true,
+            MilBinOp::LShrS => false,
+            MilBinOp::LShrU => false,
+            MilBinOp::LShl => false,
+            MilBinOp::LCmp => false,
+            MilBinOp::FAdd => false,
+            MilBinOp::FSub => false,
+            MilBinOp::FMul => false,
+            MilBinOp::FDiv => false,
+            MilBinOp::FCmp(_) => false,
+            MilBinOp::DAdd => false,
+            MilBinOp::DSub => false,
+            MilBinOp::DMul => false,
+            MilBinOp::DDiv => false,
+            MilBinOp::DCmp(_) => false,
+            MilBinOp::RCmp(_) => false
         }
     }
 }

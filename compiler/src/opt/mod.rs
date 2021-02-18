@@ -35,7 +35,7 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
     log_writeln!(env.log, "\n===== OPTIMIZING {} =====\n\n{}\n{:#?}\n", MethodName(func.id, env.env), func.pretty(env.env), cfg);
 
     // Start by cleaning up known messiness left by the IL generator
-    value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
@@ -44,7 +44,7 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
     if !func.reg_map.local_info.is_empty() {
         value_prop::transform_locals_into_phis(func, &cfg, env.env, env.log);
         basic_control_flow::simplify_phis(func, env.env, env.log);
-        value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+        value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
         basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
         value_prop::eliminate_dead_stores(func, env.env, env.log);
         run_block_cleanup_group(func, &mut cfg, env);
@@ -52,7 +52,7 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
 
     // Perform class constraint analysis and related cleanups
     class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
-    value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
@@ -71,14 +71,14 @@ fn optimize_function_after_inlining(func: &mut MilFunction, env: &OptimizationEn
     log_writeln!(env.log, "\n===== OPTIMIZING {} =====\n\n{}\n{:#?}\n", MethodName(func.id, env.env), func.pretty(env.env), cfg);
 
     // Start by cleaning up the inliner's mess
-    value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
 
     // Perform another round of class constraint analysis
     class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
-    value_prop::fold_constant_exprs(func, env.env, env.known_objects, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
     run_block_cleanup_group(func, &mut cfg, env);
