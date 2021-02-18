@@ -191,6 +191,8 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
 
                 let nonoverlap_new_incoming = prev_cfg_node.incoming.iter().copied()
                     .filter(|&pred_id| !incoming_overlap.contains(&pred_id))
+                    .sorted_by_key(|i| i.0)
+                    .dedup()
                     .collect_vec();
 
                 transform::replace_block_target(&mut func.blocks, cfg, prev_id, next_id);
@@ -1083,6 +1085,51 @@ mod tests {
         assert_eq!(
             vec![(MilOperand::Int(0), MilBlockId(1)), (MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))],
             block_4.phi_nodes[1].sources.clone().into_vec()
+        );
+    }
+
+    #[test]
+    fn test_merge_blocks_forward_duplicate_predecessor() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[],
+            &[],
+            MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))
+        ));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[],
+            &[],
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+        ));
+        func.blocks.insert(MilBlockId(2), create_test_block(
+            MilBlockId(2),
+            &[],
+            &[],
+            MilEndInstructionKind::Nop
+        ));
+        func.blocks.insert(MilBlockId(3), create_test_block(
+            MilBlockId(3),
+            &[
+                MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }
+            ],
+            &[
+                MilInstructionKind::Nop
+            ],
+            MilEndInstructionKind::Return(MilOperand::RefNull)
+        ));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(1, merge_blocks(&mut func, &mut cfg, &TEST_ENV, &Log::none()));
+        assert_eq!(vec![MilBlockId(0), MilBlockId(1), MilBlockId(3)], func.block_order);
+
+        assert_eq!(
+            vec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))],
+            func.blocks[&MilBlockId(3)].phi_nodes[0].sources.clone().into_vec()
         );
     }
 }
