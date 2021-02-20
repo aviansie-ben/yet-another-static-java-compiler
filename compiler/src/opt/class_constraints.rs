@@ -59,7 +59,7 @@ impl <'a> BlockClassConstraints<'a> {
 
     pub fn find_operand(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         match *val {
-            MilOperand::Register(reg) => self.find(reg),
+            MilOperand::Register(_, reg) => self.find(reg),
             MilOperand::KnownObject(_, class_id) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
             MilOperand::RefNull => Some(MilClassConstraint::null()),
             _ => None
@@ -68,7 +68,7 @@ impl <'a> BlockClassConstraints<'a> {
 
     pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         let val = match *val {
-            MilOperand::Register(reg) => self.2.get(&reg),
+            MilOperand::Register(_, reg) => self.2.get(&reg),
             _ => None
         };
 
@@ -98,14 +98,14 @@ impl <'a> BlockWithEdgeClassConstraints<'a> {
 
     pub fn find_operand(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         match *val {
-            MilOperand::Register(reg) => self.find(reg),
+            MilOperand::Register(_, reg) => self.find(reg),
             _ => self.1.find_operand(val)
         }
     }
 
     pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         let val = match *val {
-            MilOperand::Register(reg) => (self.1).2.get(&reg),
+            MilOperand::Register(_, reg) => (self.1).2.get(&reg),
             _ => None
         };
 
@@ -151,7 +151,7 @@ impl BlockClassConstraintsMut<'_> {
 
     pub fn find_vtable_of(&self, val: &MilOperand) -> Option<MilClassConstraint> {
         let val = match *val {
-            MilOperand::Register(reg) => self.2.get(&reg),
+            MilOperand::Register(_, reg) => self.2.get(&reg),
             _ => None
         };
 
@@ -231,22 +231,22 @@ fn for_edge_constraints(
 ) {
     let cond = instrs_by_reg.get(&cond);
     let (cond, flip_cond) = match cond {
-        Some(&&MilInstructionKind::UnOp(MilUnOp::ZNot, _, MilOperand::Register(cond))) => (instrs_by_reg.get(&cond), true),
+        Some(&&MilInstructionKind::UnOp(MilUnOp::ZNot, _, MilOperand::Register(_, cond))) => (instrs_by_reg.get(&cond), true),
         _ => (cond, false)
     };
 
     match cond {
-        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Eq), _, MilOperand::Register(obj), MilOperand::RefNull)) => {
+        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Eq), _, MilOperand::Register(_, obj), MilOperand::RefNull)) => {
             add_constraint(!flip_cond, obj, MilClassConstraint::null());
             add_constraint(flip_cond, obj, MilClassConstraint::non_null());
         },
-        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Ne), _, MilOperand::Register(obj), MilOperand::RefNull)) => {
+        Some(&&MilInstructionKind::BinOp(MilBinOp::RCmp(MilRefComparison::Ne), _, MilOperand::Register(_, obj), MilOperand::RefNull)) => {
             add_constraint(!flip_cond, obj, MilClassConstraint::non_null());
             add_constraint(flip_cond, obj, MilClassConstraint::null());
         },
-        Some(&&MilInstructionKind::IsSubclass(class_id, _, MilOperand::Register(vtable))) => {
+        Some(&&MilInstructionKind::IsSubclass(class_id, _, MilOperand::Register(_, vtable))) => {
             match instrs_by_reg.get(&vtable) {
-                Some(&&MilInstructionKind::GetVTable(_, MilOperand::Register(obj))) => {
+                Some(&&MilInstructionKind::GetVTable(_, MilOperand::Register(_, obj))) => {
                     add_constraint(!flip_cond, obj, MilClassConstraint::for_class(class_id));
                 },
                 _ => {}
@@ -319,7 +319,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             };
         };
 
-        if let MilEndInstructionKind::JumpIf(target_block_id, MilOperand::Register(cond)) = block.end_instr.kind {
+        if let MilEndInstructionKind::JumpIf(target_block_id, MilOperand::Register(_, cond)) = block.end_instr.kind {
             for_edge_constraints(cond, &instrs_by_reg, |taken, reg, constraint| {
                 let to_block_id = if taken {
                     target_block_id

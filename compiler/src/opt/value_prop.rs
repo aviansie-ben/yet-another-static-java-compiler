@@ -288,8 +288,8 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
     }
 }
 
-fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprIter, reg_alloc: &mut MilRegisterAllocator, reg_map: &mut MilRegisterMap, env: &ClassEnvironment, known_objects: &MilKnownObjectMap, log: &Log) -> bool {
-    instr.for_operands_mut(|o| if let MilOperand::Register(reg) = *o {
+fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprIter, reg_alloc: &mut MilRegisterAllocator, env: &ClassEnvironment, known_objects: &MilKnownObjectMap, log: &Log) -> bool {
+    instr.for_operands_mut(|o| if let MilOperand::Register(_, reg) = *o {
         match flat_func.get_reg(reg) {
             Some(MilRegisterSource::Instr(instr)) => match instr.kind {
                 MilInstructionKind::Copy(_, ref val) => {
@@ -341,7 +341,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
     match instr.kind {
         MilInstructionKind::UnOp(op, tgt, ref val) => {
             let val_instr = match *val {
-                MilOperand::Register(val) => flat_func.get_reg(val).map(MilRegisterSource::kind),
+                MilOperand::Register(_, val) => flat_func.get_reg(val).map(MilRegisterSource::kind),
                 _ => None
             };
 
@@ -360,11 +360,11 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
         },
         MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
             let lhs_instr = match *lhs {
-                MilOperand::Register(lhs) => flat_func.get_reg(lhs).map(MilRegisterSource::kind),
+                MilOperand::Register(_, lhs) => flat_func.get_reg(lhs).map(MilRegisterSource::kind),
                 _ => None
             };
             let rhs_instr = match *rhs {
-                MilOperand::Register(rhs) => flat_func.get_reg(rhs).map(MilRegisterSource::kind),
+                MilOperand::Register(_, rhs) => flat_func.get_reg(rhs).map(MilRegisterSource::kind),
                 _ => None
             };
 
@@ -427,7 +427,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
     };
 
     match instr.kind {
-        MilInstructionKind::UnOp(MilUnOp::ZNot, tgt, MilOperand::Register(cond)) => {
+        MilInstructionKind::UnOp(MilUnOp::ZNot, tgt, MilOperand::Register(_, cond)) => {
             match flat_func.get_reg(cond).map(MilRegisterSource::kind) {
                 // !(x > y) => x <= y
                 Some(MilRegisterSourceKind::Instr(&MilInstructionKind::BinOp(MilBinOp::ICmp(cmp), _, ref lhs, ref rhs))) => {
@@ -452,7 +452,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                 _ => {}
             }
         },
-        MilInstructionKind::UnOp(MilUnOp::INeg, tgt, MilOperand::Register(val)) => {
+        MilInstructionKind::UnOp(MilUnOp::INeg, tgt, MilOperand::Register(_, val)) => {
             match flat_func.get_reg(val).map(MilRegisterSource::kind) {
                 // --x => x
                 Some(MilRegisterSourceKind::Instr(&MilInstructionKind::UnOp(MilUnOp::INeg, _, ref val))) => {
@@ -478,7 +478,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                 _ => {}
             }
         },
-        MilInstructionKind::UnOp(MilUnOp::LNeg, tgt, MilOperand::Register(val)) => {
+        MilInstructionKind::UnOp(MilUnOp::LNeg, tgt, MilOperand::Register(_, val)) => {
             match flat_func.get_reg(val).map(MilRegisterSource::kind) {
                 // --x => x
                 Some(MilRegisterSourceKind::Instr(&MilInstructionKind::UnOp(MilUnOp::LNeg, _, ref val))) => {
@@ -580,11 +580,11 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
             };
 
             let true_instr = match *true_val {
-                MilOperand::Register(true_reg) => flat_func.get_reg(true_reg).map(MilRegisterSource::kind),
+                MilOperand::Register(_, true_reg) => flat_func.get_reg(true_reg).map(MilRegisterSource::kind),
                 _ => None
             };
             let false_instr = match *false_val {
-                MilOperand::Register(false_reg) => flat_func.get_reg(false_reg).map(MilRegisterSource::kind),
+                MilOperand::Register(_, false_reg) => flat_func.get_reg(false_reg).map(MilRegisterSource::kind),
                 _ => None
             };
 
@@ -595,11 +595,10 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::UnOp(false_op, _, ref false_val)))
                 ) if true_op == false_op => {
                     let temp_reg = reg_alloc.allocate_one();
-                    reg_map.add_reg_info(temp_reg, MilRegisterInfo { ty: true_val.get_type(reg_map) });
 
                     do_simplify(&mut [
                         MilInstructionKind::Select(temp_reg, cond.clone(), true_val.clone(), false_val.clone()),
-                        MilInstructionKind::UnOp(true_op, tgt, MilOperand::Register(temp_reg))
+                        MilInstructionKind::UnOp(true_op, tgt, MilOperand::Register(true_val.get_type(), temp_reg))
                     ], flat_func, instr);
                     return true;
                 },
@@ -609,11 +608,10 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::BinOp(false_op, _, ref false_lhs, ref false_rhs)))
                 ) if true_op == false_op && true_rhs == false_rhs => {
                     let temp_reg = reg_alloc.allocate_one();
-                    reg_map.add_reg_info(temp_reg, MilRegisterInfo { ty: true_lhs.get_type(reg_map) });
 
                     do_simplify(&mut [
                         MilInstructionKind::Select(temp_reg, cond.clone(), true_lhs.clone(), false_lhs.clone()),
-                        MilInstructionKind::BinOp(true_op, tgt, MilOperand::Register(temp_reg), true_rhs.clone())
+                        MilInstructionKind::BinOp(true_op, tgt, MilOperand::Register(true_lhs.get_type(), temp_reg), true_rhs.clone())
                     ], flat_func, instr);
                     return true;
                 },
@@ -623,11 +621,10 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::BinOp(false_op, _, ref false_lhs, ref false_rhs)))
                 ) if true_op == false_op && true_lhs == false_lhs => {
                     let temp_reg = reg_alloc.allocate_one();
-                    reg_map.add_reg_info(temp_reg, MilRegisterInfo { ty: true_rhs.get_type(reg_map) });
 
                     do_simplify(&mut [
                         MilInstructionKind::Select(temp_reg, cond.clone(), true_rhs.clone(), false_rhs.clone()),
-                        MilInstructionKind::BinOp(true_op, tgt, true_lhs.clone(), MilOperand::Register(temp_reg))
+                        MilInstructionKind::BinOp(true_op, tgt, true_lhs.clone(), MilOperand::Register(true_rhs.get_type(), temp_reg))
                     ], flat_func, instr);
                     return true;
                 },
@@ -647,14 +644,13 @@ pub fn simplify_instructions(func: &mut MilFunction, env: &ClassEnvironment, kno
     let mut num_simplified = 0;
 
     let reg_alloc = &mut func.reg_alloc;
-    let reg_map = &mut func.reg_map;
 
     loop {
         let mut simplified_this_loop = false;
         flat_func.visit_instrs(|flat_func, instr| {
             let simplified = match instr {
                 MilRegisterSourceMut::Phi(_) => false,
-                MilRegisterSourceMut::Instr(instr) => simplify_instruction(instr, flat_func, reg_alloc, reg_map, env, known_objects, log),
+                MilRegisterSourceMut::Instr(instr) => simplify_instruction(instr, flat_func, reg_alloc, env, known_objects, log),
                 MilRegisterSourceMut::EndInstr(_) => false
             };
 
@@ -689,7 +685,7 @@ pub fn eliminate_dead_stores(func: &mut MilFunction, env: &ClassEnvironment, log
     loop {
         used.clear();
         let mut mark_used = |op: &MilOperand| {
-            if let MilOperand::Register(reg) = *op {
+            if let MilOperand::Register(_, reg) = *op {
                 if reg != MilRegister::VOID {
                     used.set(reg, true);
                 };
@@ -703,7 +699,7 @@ pub fn eliminate_dead_stores(func: &mut MilFunction, env: &ClassEnvironment, log
                 for src in phi.sources.iter() {
                     // Unlike other types of instructions, phi nodes can legally be self-referencial. However, a self-reference shouldn't
                     // count as an actual use of the phi node's value, as the removal of the phi node would also remove the use.
-                    if &src.0 != &MilOperand::Register(phi.target) {
+                    if src.0.as_reg() != Some(phi.target) {
                         mark_used(&src.0);
                     };
                 };
@@ -753,8 +749,8 @@ pub fn eliminate_dead_stores(func: &mut MilFunction, env: &ClassEnvironment, log
 pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) {
     log_writeln!(log, "\n===== LOCAL TO PHI TRANSFORMATION =====\n");
 
-    let locals_len = func.reg_map.local_info.iter().map(|(id, _)| id.0).max().map_or(0, |i| i + 1);
-    let local_types = (0..locals_len).map(|i| func.reg_map.local_info.get(&MilLocalId(i)).map_or(MilType::Void, |info| info.ty)).collect_vec();
+    let locals_len = func.local_info.iter().map(|(id, _)| id.0).max().map_or(0, |i| i + 1);
+    let local_types = (0..locals_len).map(|i| func.local_info.get(&MilLocalId(i)).map_or(MilType::Void, |info| info.ty)).collect_vec();
     let mut local_phis = HashMap::new();
     let mut locals_out = HashMap::new();
 
@@ -763,28 +759,26 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
         log_writeln!(log, "{}:", block_id);
 
         let reg_alloc = &mut func.reg_alloc;
-        let reg_map = &mut func.reg_map;
         let mut locals = if !cfg.get(block_id).incoming.contains(&MilBlockId::ENTRY) {
             local_types.iter().copied().map(|ty| {
                 if ty != MilType::Void {
                     let reg = reg_alloc.allocate_one();
-                    reg_map.add_reg_info(reg, MilRegisterInfo { ty });
-
                     let i = block.phi_nodes.len();
                     let bc = block.initial_bytecode();
                     block.phi_nodes.push(MilPhiNode {
                         target: reg,
+                        ty,
                         sources: SmallVec::new(),
                         bytecode: bc
                     });
 
-                    (i, MilOperand::Register(reg))
+                    (i, MilOperand::Register(ty, reg))
                 } else {
-                    (!0, MilOperand::Register(MilRegister::VOID))
+                    (!0, MilOperand::Register(MilType::Void, MilRegister::VOID))
                 }
             }).collect_vec()
         } else {
-            (0..locals_len).map(|_| (!0, MilOperand::Register(MilRegister::VOID))).collect_vec()
+            (0..locals_len).map(|_| (!0, MilOperand::Register(MilType::Void, MilRegister::VOID))).collect_vec()
         };
 
         log_write!(log, "  Created local phis: [");

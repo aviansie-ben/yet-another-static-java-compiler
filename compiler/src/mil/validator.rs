@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use itertools::Itertools;
 
@@ -13,13 +14,32 @@ enum ValidatorLocation {
     EndInstruction(MilBlockId)
 }
 
+impl fmt::Display for ValidatorLocation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ValidatorLocation::Phi(block_id, i) => {
+                write!(f, "{}.phi_nodes[{}]", block_id, i)
+            },
+            ValidatorLocation::Instruction(block_id, i) => {
+                write!(f, "{}.instrs[{}]", block_id, i)
+            },
+            ValidatorLocation::EndInstruction(block_id) => {
+                write!(f, "{}.end_instr", block_id)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ValidatorErrorKind {
     PhiEntriesMismatch(Vec<MilBlockId>),
     MultipleRegisterDefinitions(MilRegister, ValidatorLocation),
+    ExpectedVoidTarget,
+    ExpectedNonVoidTarget,
+    OperandUndefinedRegister(MilOperand),
+    OperandWrongRegisterType(MilOperand, MilType, Option<ValidatorLocation>),
     FallsThroughLastBlock,
-    TargetTypeMismatch(MilRegister, MilType, MilType),
-    OperandTypeMismatch(MilOperand, MilType, MilType),
+    OperandTypeMismatch(MilOperand, MilType),
     BlockNotFound(MilBlockId),
     InlineSiteNotFound(u32)
 }
@@ -33,48 +53,281 @@ struct ValidatorError {
 struct ValidatorState<'a> {
     func: &'a MilFunction,
     loc: ValidatorLocation,
-    dup_defs: HashMap<MilRegister, ValidatorLocation>,
+    regs: HashMap<MilRegister, (ValidatorLocation, MilType)>,
     errors: Vec<ValidatorError>
 }
 
-fn validate_operand(op: &MilOperand, expected_ty: MilType, state: &mut ValidatorState) {
-    // TODO Check that operand definitions reach uses
-
-    let actual_ty = op.get_type(&state.func.reg_map);
-    if actual_ty != expected_ty {
-        state.errors.push(ValidatorError {
-            kind: ValidatorErrorKind::OperandTypeMismatch(op.clone(), expected_ty, actual_ty),
-            loc: state.loc
+impl ValidatorState<'_> {
+    fn push_error(&mut self, err: ValidatorErrorKind) {
+        self.errors.push(ValidatorError {
+            kind: err,
+            loc: self.loc
         });
+    }
+}
+
+fn validate_operand(op: &MilOperand, expected_ty: MilType, state: &mut ValidatorState) {
+    // TODO Check that operand definitions dominate uses
+
+    if op.get_type() != expected_ty {
+        state.push_error(ValidatorErrorKind::OperandTypeMismatch(op.clone(), expected_ty));
+    };
+
+    match *op {
+        MilOperand::Register(ty, reg) => {
+            if reg == MilRegister::VOID {
+                if ty != MilType::Void {
+                    state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), ty, None));
+                };
+            } else {
+                if let Some(&(def_loc, def_ty)) = state.regs.get(&reg) {
+                    if def_ty != ty {
+                        state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), def_ty, Some(def_loc)));
+                    };
+                } else {
+                    state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
+                };
+            };
+        },
+        _ => {}
     };
 }
 
 fn validate_target(tgt: MilRegister, expected_ty: MilType, state: &mut ValidatorState) {
-    if tgt != MilRegister::VOID {
-        if let Some(old_loc) = state.dup_defs.insert(tgt, state.loc) {
-            state.errors.push(ValidatorError {
-                kind: ValidatorErrorKind::MultipleRegisterDefinitions(tgt, old_loc),
-                loc: state.loc
-            });
+    if expected_ty == MilType::Void {
+        if tgt != MilRegister::VOID {
+            state.push_error(ValidatorErrorKind::ExpectedVoidTarget);
         };
-    };
-
-    let actual_ty = state.func.reg_map.get_reg_info(tgt).ty;
-    if actual_ty != expected_ty {
-        state.errors.push(ValidatorError {
-            kind: ValidatorErrorKind::TargetTypeMismatch(tgt, expected_ty, actual_ty),
-            loc: state.loc
-        });
+    } else {
+        if tgt == MilRegister::VOID {
+            state.push_error(ValidatorErrorKind::ExpectedNonVoidTarget);
+        } else if let Some((old_loc, _)) = state.regs.insert(tgt, (state.loc, expected_ty)) {
+            state.push_error(ValidatorErrorKind::MultipleRegisterDefinitions(tgt, old_loc));
+        };
     };
 }
 
 fn validate_bytecode(bytecode: (u32, u32), state: &mut ValidatorState) {
     if bytecode.0 != !0 && bytecode.0 as usize >= state.func.inline_sites.len() {
-        state.errors.push(ValidatorError {
-            kind: ValidatorErrorKind::InlineSiteNotFound(bytecode.0),
-            loc: state.loc
-        });
+        state.push_error(ValidatorErrorKind::InlineSiteNotFound(bytecode.0));
     };
+}
+
+fn validate_block_target(tgt: MilBlockId, state: &mut ValidatorState) {
+    if !state.func.blocks.contains_key(&tgt) {
+        state.push_error(ValidatorErrorKind::BlockNotFound(tgt));
+    };
+}
+
+fn validate_instr(
+    mut validate_target: impl FnMut (MilRegister, MilType, &mut ValidatorState),
+    mut validate_operand: impl FnMut (&MilOperand, MilType, &mut ValidatorState),
+    instr: &MilInstruction,
+    state: &mut ValidatorState
+) {
+    match instr.kind {
+        MilInstructionKind::Nop => {},
+        MilInstructionKind::Copy(tgt, ref val) => {
+            validate_operand(val, val.get_type(), state);
+            validate_target(tgt, val.get_type(), state);
+        },
+        MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
+            let ty = true_val.get_type();
+
+            validate_operand(cond, MilType::Bool, state);
+            validate_operand(true_val, ty, state);
+            validate_operand(false_val, ty, state);
+            validate_target(tgt, ty, state);
+        },
+        MilInstructionKind::UnOp(op, tgt, ref val) => {
+            let (tgt_ty, val_ty) = op.type_sig();
+
+            validate_operand(val, val_ty, state);
+            validate_target(tgt, tgt_ty, state);
+        },
+        MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
+            let (tgt_ty, lhs_ty, rhs_ty) = op.type_sig();
+
+            validate_operand(lhs, lhs_ty, state);
+            validate_operand(rhs, rhs_ty, state);
+            validate_target(tgt, tgt_ty, state);
+        },
+        MilInstructionKind::GetParam(_, constraint, tgt) => {
+            validate_target(tgt, MilType::for_class(constraint.class_id()), state);
+        },
+        MilInstructionKind::GetLocal(local_id, tgt) => {
+            validate_target(tgt, state.func.local_info[&local_id].ty, state);
+        },
+        MilInstructionKind::SetLocal(local_id, ref val) => {
+            validate_operand(val, state.func.local_info[&local_id].ty, state);
+        },
+        MilInstructionKind::GetField(_, constraint, tgt, ref obj) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::PutField(_, constraint, ref obj, ref val) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_operand(val, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::GetArrayLength(tgt, ref obj) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_target(tgt, MilType::Int, state);
+        },
+        MilInstructionKind::GetArrayElement(constraint, tgt, ref obj, ref idx) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_operand(idx, MilType::Int, state);
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::PutArrayElement(constraint, ref obj, ref idx, ref val) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_operand(idx, MilType::Int, state);
+            validate_operand(val, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::GetStatic(_, constraint, tgt) => {
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::PutStatic(_, constraint, ref val) => {
+            validate_operand(val, MilType::for_class(constraint), state);
+        },
+        MilInstructionKind::AllocObj(_, tgt) => {
+            validate_target(tgt, MilType::Ref, state);
+        },
+        MilInstructionKind::AllocArray(_, tgt, ref len) => {
+            validate_operand(len, MilType::Int, state);
+            validate_target(tgt, MilType::Ref, state);
+        },
+        MilInstructionKind::GetVTable(tgt, ref obj) => {
+            validate_operand(obj, MilType::Ref, state);
+            validate_target(tgt, MilType::Addr, state);
+        },
+        MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
+            validate_operand(vtable, MilType::Addr, state);
+            validate_target(tgt, MilType::Bool, state);
+        }
+    };
+}
+
+fn validate_end_instr(
+    mut validate_target: impl FnMut (MilRegister, MilType, &mut ValidatorState),
+    mut validate_operand: impl FnMut (&MilOperand, MilType, &mut ValidatorState),
+    mut validate_block_target: impl FnMut(MilBlockId, &mut ValidatorState),
+    end_instr: &MilEndInstruction,
+    state: &mut ValidatorState
+) {
+    match end_instr.kind {
+        MilEndInstructionKind::Nop => {},
+        MilEndInstructionKind::Unreachable => {},
+        MilEndInstructionKind::Call(constraint, _, tgt, ref args) => {
+            // TODO Typecheck calls
+            for arg in args.iter() {
+                validate_operand(arg, arg.get_type(), state);
+            };
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilEndInstructionKind::CallVirtual(constraint, _, tgt, ref vtable, ref args) => {
+            // TODO Typecheck calls
+            validate_operand(vtable, MilType::Addr, state);
+            for arg in args.iter() {
+                validate_operand(arg, arg.get_type(), state);
+            };
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilEndInstructionKind::CallInterface(constraint, _, tgt, ref vtable, ref args) => {
+            // TODO Typecheck calls
+            validate_operand(vtable, MilType::Addr, state);
+            for arg in args.iter() {
+                validate_operand(arg, arg.get_type(), state);
+            };
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilEndInstructionKind::CallNative(constraint, _, tgt, ref args) => {
+            // TODO Typecheck calls
+            for arg in args.iter() {
+                validate_operand(arg, arg.get_type(), state);
+            };
+            validate_target(tgt, MilType::for_class(constraint), state);
+        },
+        MilEndInstructionKind::Throw(ref val) => {
+            validate_operand(val, MilType::Ref, state);
+        },
+        MilEndInstructionKind::Return(ref val) => {
+            // TODO Typecheck returns
+            validate_operand(val, val.get_type(), state);
+        },
+        MilEndInstructionKind::Jump(tgt) => {
+            validate_block_target(tgt, state);
+        },
+        MilEndInstructionKind::JumpIf(tgt, ref cond) => {
+            validate_block_target(tgt, state);
+            validate_operand(cond, MilType::Bool, state);
+        }
+    };
+}
+
+fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Vec<ValidatorError> {
+    let cfg = FlowGraph::for_function(func);
+    let mut state = ValidatorState {
+        func,
+        loc: ValidatorLocation::EndInstruction(MilBlockId::ENTRY),
+        regs: HashMap::new(),
+        errors: vec![]
+    };
+
+    for block_id in func.block_order.iter().copied() {
+        let block = &func.blocks[&block_id];
+        let preds = cfg.get(block_id).incoming.iter().copied().sorted_by_key(|id| id.0).dedup().collect_vec();
+
+        for (i, phi) in block.phi_nodes.iter().enumerate() {
+            let phi_preds = phi.sources.iter().map(|&(_, pred)| pred).sorted_by_key(|id| id.0).collect_vec();
+
+            state.loc = ValidatorLocation::Phi(block_id, i);
+
+            if phi_preds != preds {
+                state.push_error(ValidatorErrorKind::PhiEntriesMismatch(preds.clone()));
+            };
+
+            validate_target(phi.target, phi.ty, &mut state);
+            validate_bytecode(phi.bytecode, &mut state);
+        };
+
+        for (i, instr) in block.instrs.iter().enumerate() {
+            state.loc = ValidatorLocation::Instruction(block_id, i);
+            validate_instr(validate_target, |_, _, _| {}, instr, &mut state);
+            validate_bytecode(instr.bytecode, &mut state);
+        };
+
+        state.loc = ValidatorLocation::EndInstruction(block_id);
+        validate_end_instr(validate_target, |_, _, _| {}, validate_block_target, &block.end_instr, &mut state);
+        validate_bytecode(block.end_instr.bytecode, &mut state);
+    };
+
+    if func.blocks[func.block_order.last().unwrap()].end_instr.can_fall_through() {
+        state.push_error(ValidatorErrorKind::FallsThroughLastBlock);
+    };
+
+    for block_id in func.block_order.iter().copied() {
+        let block = &func.blocks[&block_id];
+
+        for (i, phi) in block.phi_nodes.iter().enumerate() {
+            state.loc = ValidatorLocation::Phi(block_id, i);
+
+            for &(ref op, _) in phi.sources.iter() {
+                if op != &MilOperand::Register(MilType::Void, MilRegister::VOID) {
+                    validate_operand(op, phi.ty, &mut state);
+                };
+            };
+        };
+
+        for (i, instr) in block.instrs.iter().enumerate() {
+            state.loc = ValidatorLocation::Instruction(block_id, i);
+            validate_instr(|_, _, _| {}, validate_operand, instr, &mut state);
+        };
+
+        state.loc = ValidatorLocation::EndInstruction(block_id);
+        validate_end_instr(|_, _, _| {}, validate_operand, |_, _| {}, &block.end_instr, &mut state);
+    };
+
+    state.errors
 }
 
 fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &ValidatorError) {
@@ -104,28 +357,31 @@ fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &Vali
             eprintln!("]");
         },
         ValidatorErrorKind::MultipleRegisterDefinitions(reg, orig_loc) => {
-            eprint!("Register {} already defined at ", reg);
+            eprintln!("Register {} already defined at {}", reg, orig_loc);
+        },
+        ValidatorErrorKind::ExpectedVoidTarget => {
+            eprintln!("Instruction expected a void target");
+        },
+        ValidatorErrorKind::ExpectedNonVoidTarget => {
+            eprintln!("Instruction expected a non-void target");
+        },
+        ValidatorErrorKind::OperandUndefinedRegister(ref op) => {
+            eprintln!("Operand {} refers to a register that is never defined", op.pretty(env));
+        },
+        ValidatorErrorKind::OperandWrongRegisterType(ref op, defined_ty, defined_loc) => {
+            eprint!("Operand {} mismatches defined type {} of register", op.pretty(env), defined_ty);
 
-            match orig_loc {
-                ValidatorLocation::Phi(block_id, i) => {
-                    eprintln!("{}.phi_nodes[{}]", block_id, i);
-                },
-                ValidatorLocation::Instruction(block_id, i) => {
-                    eprintln!("{}.instrs[{}]", block_id, i);
-                },
-                ValidatorLocation::EndInstruction(block_id) => {
-                    eprintln!("{}.end_instr", block_id);
-                }
-            }
+            if let Some(defined_loc) = defined_loc {
+                eprintln!(" (defined at {})", defined_loc);
+            } else {
+                eprintln!();
+            };
         },
         ValidatorErrorKind::FallsThroughLastBlock => {
             eprintln!("Control falls through last block");
         },
-        ValidatorErrorKind::TargetTypeMismatch(tgt, expected_ty, actual_ty) => {
-            eprintln!("Expected target {} to be type {}, was {}", tgt, expected_ty, actual_ty);
-        },
-        ValidatorErrorKind::OperandTypeMismatch(ref op, expected_ty, actual_ty) => {
-            eprintln!("Expected operand {} to be type {}, was {}", op.pretty(env), expected_ty, actual_ty);
+        ValidatorErrorKind::OperandTypeMismatch(ref op, expected_ty) => {
+            eprintln!("Expected operand {} to be type {}, was {}", op.pretty(env), expected_ty, op.get_type());
         },
         ValidatorErrorKind::BlockNotFound(block_id) => {
             eprintln!("Block {} was not found", block_id);
@@ -134,216 +390,6 @@ fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &Vali
             eprintln!("Inline site {} was not found", site_id);
         }
     };
-}
-
-fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Vec<ValidatorError> {
-    let cfg = FlowGraph::for_function(func);
-    let mut state = ValidatorState {
-        func,
-        loc: ValidatorLocation::EndInstruction(MilBlockId::ENTRY),
-        dup_defs: HashMap::new(),
-        errors: vec![]
-    };
-
-    for block_id in func.block_order.iter().copied() {
-        let block = &func.blocks[&block_id];
-        let preds = cfg.get(block_id).incoming.iter().copied().sorted_by_key(|id| id.0).dedup().collect_vec();
-
-        for (i, phi) in block.phi_nodes.iter().enumerate() {
-            let phi_preds = phi.sources.iter().map(|&(_, pred)| pred).sorted_by_key(|id| id.0).collect_vec();
-
-            state.loc = ValidatorLocation::Phi(block_id, i);
-
-            if phi_preds != preds {
-                state.errors.push(ValidatorError {
-                    kind: ValidatorErrorKind::PhiEntriesMismatch(preds.clone()),
-                    loc: state.loc
-                });
-            };
-
-            let ty = func.reg_map.get_reg_info(phi.target).ty;
-
-            for &(ref op, _) in phi.sources.iter() {
-                if op != &MilOperand::Register(MilRegister::VOID) {
-                    validate_operand(op, ty, &mut state);
-                };
-            };
-
-            validate_target(phi.target, ty, &mut state);
-            validate_bytecode(phi.bytecode, &mut state);
-        };
-
-        for (i, instr) in block.instrs.iter().enumerate() {
-            state.loc = ValidatorLocation::Instruction(block_id, i);
-
-            match instr.kind {
-                MilInstructionKind::Nop => {},
-                MilInstructionKind::Copy(tgt, ref val) => {
-                    let ty = func.reg_map.get_reg_info(tgt).ty;
-
-                    validate_operand(val, ty, &mut state);
-                    validate_target(tgt, ty, &mut state);
-                },
-                MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
-                    let ty = func.reg_map.get_reg_info(tgt).ty;
-
-                    validate_operand(cond, MilType::Bool, &mut state);
-                    validate_operand(true_val, ty, &mut state);
-                    validate_operand(false_val, ty, &mut state);
-                    validate_target(tgt, ty, &mut state);
-                },
-                MilInstructionKind::UnOp(op, tgt, ref val) => {
-                    let (tgt_ty, val_ty) = op.type_sig();
-
-                    validate_operand(val, val_ty, &mut state);
-                    validate_target(tgt, tgt_ty, &mut state);
-                },
-                MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
-                    let (tgt_ty, lhs_ty, rhs_ty) = op.type_sig();
-
-                    validate_operand(lhs, lhs_ty, &mut state);
-                    validate_operand(rhs, rhs_ty, &mut state);
-                    validate_target(tgt, tgt_ty, &mut state);
-                },
-                MilInstructionKind::GetParam(_, _, tgt) => {
-                    // TODO Validate param type
-                    validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-                },
-                MilInstructionKind::GetLocal(_, tgt) => {
-                    // TODO Validate local type
-                    validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-                },
-                MilInstructionKind::SetLocal(_, ref val) => {
-                    // TODO Validate local type
-                    validate_operand(val, val.get_type(&func.reg_map), &mut state);
-                },
-                MilInstructionKind::GetField(_, _, tgt, ref obj) => {
-                    // TODO Validate field type
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-                },
-                MilInstructionKind::PutField(_, _, ref obj, ref val) => {
-                    // TODO Validate field type
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_operand(val, val.get_type(&func.reg_map), &mut state);
-                },
-                MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_target(tgt, MilType::Int, &mut state);
-                },
-                MilInstructionKind::GetArrayElement(_, tgt, ref obj, ref idx) => {
-                    // TODO Validate element type
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_operand(idx, MilType::Int, &mut state);
-                    validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-                },
-                MilInstructionKind::PutArrayElement(_, ref obj, ref idx, ref val) => {
-                    // TODO Validate element type
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_operand(idx, MilType::Int, &mut state);
-                    validate_operand(val, val.get_type(&func.reg_map), &mut state);
-                },
-                MilInstructionKind::GetStatic(_, _, tgt) => {
-                    // TODO Validate field type
-                    validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-                },
-                MilInstructionKind::PutStatic(_, _, ref val) => {
-                    // TODO Validate field type
-                    validate_operand(val, val.get_type(&func.reg_map), &mut state);
-                },
-                MilInstructionKind::AllocObj(_, tgt) => {
-                    validate_target(tgt, MilType::Ref, &mut state);
-                },
-                MilInstructionKind::AllocArray(_, tgt, ref len) => {
-                    validate_operand(len, MilType::Int, &mut state);
-                    validate_target(tgt, MilType::Ref, &mut state);
-                },
-                MilInstructionKind::GetVTable(tgt, ref obj) => {
-                    validate_operand(obj, MilType::Ref, &mut state);
-                    validate_target(tgt, MilType::Addr, &mut state);
-                },
-                MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
-                    validate_operand(vtable, MilType::Addr, &mut state);
-                    validate_target(tgt, MilType::Bool, &mut state);
-                }
-            };
-
-            validate_bytecode(instr.bytecode, &mut state);
-        };
-
-        state.loc = ValidatorLocation::EndInstruction(block_id);
-
-        match block.end_instr.kind {
-            MilEndInstructionKind::Nop => {},
-            MilEndInstructionKind::Unreachable => {},
-            MilEndInstructionKind::Call(_, _, tgt, ref args) => {
-                // TODO Typecheck calls
-                for arg in args.iter() {
-                    validate_operand(arg, arg.get_type(&func.reg_map), &mut state);
-                };
-                validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-            },
-            MilEndInstructionKind::CallVirtual(_, _, tgt, ref vtable, ref args) => {
-                // TODO Typecheck calls
-                validate_operand(vtable, MilType::Addr, &mut state);
-                for arg in args.iter() {
-                    validate_operand(arg, arg.get_type(&func.reg_map), &mut state);
-                };
-                validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-            },
-            MilEndInstructionKind::CallInterface(_, _, tgt, ref vtable, ref args) => {
-                // TODO Typecheck calls
-                validate_operand(vtable, MilType::Addr, &mut state);
-                for arg in args.iter() {
-                    validate_operand(arg, arg.get_type(&func.reg_map), &mut state);
-                };
-                validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-            },
-            MilEndInstructionKind::CallNative(_, _, tgt, ref args) => {
-                // TODO Typecheck calls
-                for arg in args.iter() {
-                    validate_operand(arg, arg.get_type(&func.reg_map), &mut state);
-                };
-                validate_target(tgt, func.reg_map.get_reg_info(tgt).ty, &mut state);
-            },
-            MilEndInstructionKind::Throw(ref val) => {
-                validate_operand(val, MilType::Ref, &mut state);
-            },
-            MilEndInstructionKind::Return(ref val) => {
-                // TODO Typecheck returns
-                validate_operand(val, val.get_type(&func.reg_map), &mut state);
-            },
-            MilEndInstructionKind::Jump(tgt) => {
-                if !func.blocks.contains_key(&tgt) {
-                    state.errors.push(ValidatorError {
-                        kind: ValidatorErrorKind::BlockNotFound(tgt),
-                        loc: state.loc
-                    });
-                };
-            },
-            MilEndInstructionKind::JumpIf(tgt, ref cond) => {
-                if !func.blocks.contains_key(&tgt) {
-                    state.errors.push(ValidatorError {
-                        kind: ValidatorErrorKind::BlockNotFound(tgt),
-                        loc: state.loc
-                    });
-                };
-
-                validate_operand(cond, MilType::Bool, &mut state);
-            }
-        };
-
-        validate_bytecode(block.end_instr.bytecode, &mut state);
-    };
-
-    if func.blocks[func.block_order.last().unwrap()].end_instr.can_fall_through() {
-        state.errors.push(ValidatorError {
-            kind: ValidatorErrorKind::FallsThroughLastBlock,
-            loc: ValidatorLocation::EndInstruction(*func.block_order.last().unwrap())
-        });
-    };
-
-    state.errors
 }
 
 pub fn validate_function(func: &MilFunction, env: &ClassEnvironment) {

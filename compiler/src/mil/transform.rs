@@ -6,7 +6,7 @@ use super::il::*;
 pub fn replace_register(block: &mut MilBlock, map: &HashMap<MilRegister, MilOperand>) {
     for phi in block.phi_nodes.iter_mut() {
         for &mut (ref mut src, _) in phi.sources.iter_mut() {
-            if let MilOperand::Register(ref mut src_reg) = *src {
+            if let MilOperand::Register(_, ref mut src_reg) = *src {
                 if let Some(new_src) = map.get(src_reg).cloned() {
                     *src = new_src;
                 };
@@ -16,7 +16,7 @@ pub fn replace_register(block: &mut MilBlock, map: &HashMap<MilRegister, MilOper
 
     for instr in block.instrs.iter_mut() {
         instr.for_operands_mut(|src| {
-            if let MilOperand::Register(ref mut src_reg) = *src {
+            if let MilOperand::Register(_, ref mut src_reg) = *src {
                 if let Some(new_src) = map.get(src_reg).cloned() {
                     *src = new_src;
                 };
@@ -25,7 +25,7 @@ pub fn replace_register(block: &mut MilBlock, map: &HashMap<MilRegister, MilOper
     };
 
     block.end_instr.for_operands_mut(|src| {
-        if let MilOperand::Register(ref mut src_reg) = *src {
+        if let MilOperand::Register(_, ref mut src_reg) = *src {
             if let Some(new_src) = map.get(src_reg).cloned() {
                 *src = new_src;
             };

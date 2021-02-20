@@ -98,47 +98,6 @@ pub struct MilLocalInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct MilRegisterInfo {
-    pub ty: MilType
-}
-
-impl MilRegisterInfo {
-    pub const VOID_INFO: MilRegisterInfo = MilRegisterInfo { ty: MilType::Void };
-}
-
-#[derive(Debug, Clone)]
-pub struct MilRegisterMap {
-    info: HashMap<MilRegister, MilRegisterInfo>,
-    pub local_info: HashMap<MilLocalId, MilLocalInfo>
-}
-
-impl MilRegisterMap {
-    pub fn new() -> MilRegisterMap {
-        MilRegisterMap {
-            info: HashMap::new(),
-            local_info: HashMap::new()
-        }
-    }
-
-    pub fn get_reg_info(&self, r: MilRegister) -> &MilRegisterInfo {
-        if r != MilRegister::VOID {
-            &self.info[&r]
-        } else {
-            &MilRegisterInfo::VOID_INFO
-        }
-    }
-
-    pub fn add_reg_info(&mut self, r: MilRegister, info: MilRegisterInfo) {
-        assert_ne!(r, MilRegister::VOID);
-        assert!(self.info.insert(r, info).is_none());
-    }
-
-    pub fn all_regs(&self) -> impl Iterator<Item=(MilRegister, &MilRegisterInfo)> {
-        self.info.iter().map(|(&r, i)| (r, i)).chain(itertools::repeat_n((MilRegister::VOID, &MilRegisterInfo::VOID_INFO), 1))
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct MilBlockIdAllocator {
     next: MilBlockId
 }
@@ -302,7 +261,7 @@ pub struct MilKnownObjectId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MilOperand {
-    Register(MilRegister),
+    Register(MilType, MilRegister),
     AddrNull,
     RefNull,
     KnownObject(MilKnownObjectId, ClassId),
@@ -314,22 +273,22 @@ pub enum MilOperand {
 }
 
 impl MilOperand {
-    pub fn get_const_type(&self) -> Option<MilType> {
+    pub fn get_type(&self) -> MilType {
         match *self {
-            MilOperand::Register(_) => None,
-            MilOperand::AddrNull => Some(MilType::Addr),
-            MilOperand::RefNull => Some(MilType::Ref),
-            MilOperand::KnownObject(_, _) => Some(MilType::Ref),
-            MilOperand::Bool(_) => Some(MilType::Bool),
-            MilOperand::Int(_) => Some(MilType::Int),
-            MilOperand::Long(_) => Some(MilType::Long),
-            MilOperand::Float(_) => Some(MilType::Float),
-            MilOperand::Double(_) => Some(MilType::Double)
+            MilOperand::Register(ty, _) => ty,
+            MilOperand::AddrNull => MilType::Addr,
+            MilOperand::RefNull => MilType::Ref,
+            MilOperand::KnownObject(_, _) => MilType::Ref,
+            MilOperand::Bool(_) => MilType::Bool,
+            MilOperand::Int(_) => MilType::Int,
+            MilOperand::Long(_) => MilType::Long,
+            MilOperand::Float(_) => MilType::Float,
+            MilOperand::Double(_) => MilType::Double
         }
     }
 
     pub fn is_const(&self) -> bool {
-        self.get_const_type().is_some()
+        self.as_reg().is_none()
     }
 
     pub fn from_const<'a>(val: Value<'a>, known_objects: &MilKnownObjectMap<'a>) -> MilOperand {
@@ -347,16 +306,9 @@ impl MilOperand {
         }
     }
 
-    pub fn get_type(&self, reg_map: &MilRegisterMap) -> MilType {
-        match *self {
-            MilOperand::Register(reg) => reg_map.get_reg_info(reg).ty,
-            _ => self.get_const_type().unwrap()
-        }
-    }
-
     pub fn as_reg(&self) -> Option<MilRegister> {
         match *self {
-            MilOperand::Register(reg) => Some(reg),
+            MilOperand::Register(_, reg) => Some(reg),
             _ => None
         }
     }
@@ -371,7 +323,8 @@ struct PrettyMilOperand<'a>(&'a MilOperand, &'a ClassEnvironment);
 impl <'a> fmt::Display for PrettyMilOperand<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.0 {
-            MilOperand::Register(reg) => write!(f, "{}", reg),
+            MilOperand::Register(MilType::Void, MilRegister::VOID) => write!(f, "void"),
+            MilOperand::Register(ty, reg) => write!(f, "{}:{}", ty, reg),
             MilOperand::AddrNull => write!(f, "addr:null"),
             MilOperand::RefNull => write!(f, "ref:null"),
             MilOperand::KnownObject(id, cls) => write!(f, "ref:<obj_{} {}>", id.0, self.1.get(cls).name(self.1)),
@@ -1190,7 +1143,7 @@ impl MilInstruction {
     }
 
     pub fn for_registers(&self, mut f: impl FnMut (MilRegister) -> ()) {
-        self.for_operands(|op| if let MilOperand::Register(reg) = *op {
+        self.for_operands(|op| if let MilOperand::Register(_, reg) = *op {
             f(reg);
         });
 
@@ -1387,7 +1340,7 @@ impl MilEndInstruction {
     }
 
     pub fn for_registers(&self, mut f: impl FnMut (MilRegister) -> ()) {
-        self.for_operands(|op| if let MilOperand::Register(reg) = *op {
+        self.for_operands(|op| if let MilOperand::Register(_, reg) = *op {
             f(reg);
         });
 
@@ -1460,6 +1413,7 @@ impl MilEndInstruction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MilPhiNode {
     pub target: MilRegister,
+    pub ty: MilType,
     pub sources: SmallVec<[(MilOperand, MilBlockId); 2]>,
     pub bytecode: (u32, u32)
 }
@@ -1468,6 +1422,7 @@ impl MilPhiNode {
     pub fn dummy() -> Self {
         MilPhiNode {
             target: MilRegister::VOID,
+            ty: MilType::Void,
             sources: smallvec![],
             bytecode: (!0, !0)
         }
@@ -1481,7 +1436,7 @@ impl MilPhiNode {
         f(self.target);
 
         for &(ref op, _) in self.sources.iter() {
-            if let MilOperand::Register(reg) = *op {
+            if let MilOperand::Register(_, reg) = *op {
                 f(reg);
             };
         };
@@ -1492,7 +1447,7 @@ struct PrettyMilPhiNode<'a>(&'a MilPhiNode, &'a ClassEnvironment);
 
 impl fmt::Display for PrettyMilPhiNode<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "phi {}", self.0.target)?;
+        write!(f, "phi {} {}", self.0.ty, self.0.target)?;
 
         for (src, pred) in self.0.sources.iter().cloned() {
             write!(f, ", {}:{}", pred, src.pretty(self.1))?;
@@ -1677,7 +1632,7 @@ pub struct MilInlineSiteInfo {
 pub struct MilFunction {
     pub id: MethodId,
     pub reg_alloc: MilRegisterAllocator,
-    pub reg_map: MilRegisterMap,
+    pub local_info: HashMap<MilLocalId, MilLocalInfo>,
     pub block_alloc: MilBlockIdAllocator,
     pub blocks: HashMap<MilBlockId, MilBlock>,
     pub block_order: Vec<MilBlockId>,
@@ -1692,7 +1647,7 @@ impl MilFunction {
         MilFunction {
             id,
             reg_alloc: MilRegisterAllocator::new(),
-            reg_map: MilRegisterMap::new(),
+            local_info: HashMap::new(),
             block_alloc: MilBlockIdAllocator::new(),
             blocks: HashMap::new(),
             block_order: vec![],

@@ -120,17 +120,12 @@ fn create_block_id_mapping(inlinee: &MilFunction, block_alloc: &mut MilBlockIdAl
     (block_order, block_mapping)
 }
 
-fn create_register_mapping(inlinee: &MilFunction, reg_alloc: &mut MilRegisterAllocator, reg_map: &mut MilRegisterMap) -> HashMap<MilRegister, MilRegister> {
+fn create_register_mapping(inlinee: &MilFunction, reg_alloc: &mut MilRegisterAllocator) -> HashMap<MilRegister, MilRegister> {
     let mut reg_mapping = HashMap::new();
     reg_mapping.insert(MilRegister::VOID, MilRegister::VOID);
 
     let mut add_reg = |old_reg| {
-        reg_mapping.entry(old_reg).or_insert_with(|| {
-            let new_reg = reg_alloc.allocate_one();
-            reg_map.add_reg_info(new_reg, inlinee.reg_map.get_reg_info(old_reg).clone());
-
-            new_reg
-        });
+        reg_mapping.entry(old_reg).or_insert_with(|| { reg_alloc.allocate_one() });
     };
 
     for block_id in inlinee.block_order.iter().copied() {
@@ -174,14 +169,14 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     let call_loc = call_block.end_instr.bytecode;
 
     let call_instr = mem::replace(&mut call_block.end_instr.kind, MilEndInstructionKind::Nop);
-    let (return_reg, args) = if let MilEndInstructionKind::Call(_, _, return_reg, args) = call_instr {
-        (return_reg, args)
+    let (return_ty, return_reg, args) = if let MilEndInstructionKind::Call(return_class, _, return_reg, args) = call_instr {
+        (MilType::for_class(return_class), return_reg, args)
     } else {
         unreachable!()
     };
 
     let (block_order, block_map) = create_block_id_mapping(inlinee, &mut func.block_alloc);
-    let reg_map = create_register_mapping(inlinee, &mut func.reg_alloc, &mut func.reg_map);
+    let reg_map = create_register_mapping(inlinee, &mut func.reg_alloc);
 
     let inline_site_id = func.inline_sites.len() as u32;
     func.inline_sites.push(MilInlineSiteInfo {
@@ -205,8 +200,8 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
             phi.target = *&reg_map[&phi.target];
 
             for &mut (ref mut op, ref mut pred) in phi.sources.iter_mut() {
-                if let MilOperand::Register(reg) = *op {
-                    *op = MilOperand::Register(*&reg_map[&reg]);
+                if let MilOperand::Register(ty, reg) = *op {
+                    *op = MilOperand::Register(ty, *&reg_map[&reg]);
                 };
 
                 *pred = *&block_map[pred];
@@ -215,8 +210,8 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
 
         for instr in new_block.instrs.iter_mut() {
             instr.bytecode.0 = inline_site_id;
-            instr.for_operands_mut(|op| if let MilOperand::Register(reg) = *op {
-                *op = MilOperand::Register(*&reg_map[&reg]);
+            instr.for_operands_mut(|op| if let MilOperand::Register(ty, reg) = *op {
+                *op = MilOperand::Register(ty, *&reg_map[&reg]);
             });
 
             if let Some(target) = instr.target_mut() {
@@ -229,8 +224,8 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         };
 
         new_block.end_instr.bytecode.0 = inline_site_id;
-        new_block.end_instr.for_operands_mut(|op| if let MilOperand::Register(reg) = *op {
-            *op = MilOperand::Register(*&reg_map[&reg]);
+        new_block.end_instr.for_operands_mut(|op| if let MilOperand::Register(ty, reg) = *op {
+            *op = MilOperand::Register(ty, *&reg_map[&reg]);
         });
 
         if let Some(target) = new_block.end_instr.target_mut() {
@@ -242,7 +237,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         });
 
         if let MilEndInstructionKind::Return(ref mut val) = new_block.end_instr.kind {
-            return_phi_sources.push((mem::replace(val, MilOperand::Register(MilRegister::VOID)), new_block_id));
+            return_phi_sources.push((mem::replace(val, MilOperand::Register(MilType::Void, MilRegister::VOID)), new_block_id));
             new_block.end_instr.kind = MilEndInstructionKind::Jump(return_block);
         };
 
@@ -255,7 +250,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         for phi in return_block.phi_nodes.iter_mut() {
             let (val, _) = phi.sources.remove(phi.sources.iter().find_position(|&&(_, pred)| pred == loc).unwrap().0);
 
-            if val == MilOperand::Register(return_reg) {
+            if val.as_reg() == Some(return_reg) {
                 phi.sources.extend(return_phi_sources.clone());
             } else {
                 phi.sources.extend(return_phi_sources.iter().map(|&(_, pred)| (val.clone(), pred)));
@@ -264,6 +259,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     } else if return_reg != MilRegister::VOID {
         return_block.phi_nodes.push(MilPhiNode {
             target: return_reg,
+            ty: return_ty,
             sources: return_phi_sources,
             bytecode: call_loc
         });
@@ -326,10 +322,10 @@ mod test {
             instrs: vec![],
             end_instr: MilEndInstruction {
                 kind: MilEndInstructionKind::Call(
-                    ClassId::UNRESOLVED,
+                    ClassId::PRIMITIVE_INT,
                     MethodId::UNRESOLVED,
                     MilRegister(1),
-                    vec![MilOperand::Int(0), MilOperand::Register(MilRegister(0))]
+                    vec![MilOperand::Int(0), MilOperand::Register(MilType::Int, MilRegister(0))]
                 ),
                 bytecode: (!0, 0)
             },
@@ -340,7 +336,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister(1))),
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(1))),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -348,9 +344,6 @@ mod test {
 
         f.block_order = vec![MilBlockId(0), MilBlockId(1)];
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(2));
-
-        f.reg_map.add_reg_info(MilRegister(0), MilRegisterInfo { ty: MilType::Int });
-        f.reg_map.add_reg_info(MilRegister(1), MilRegisterInfo { ty: MilType::Int });
         f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(2));
 
         let mut g = MilFunction::new(MethodId::UNRESOLVED);
@@ -369,7 +362,7 @@ mod test {
                 }
             ],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister(0))),
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(0))),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -377,9 +370,6 @@ mod test {
 
         g.block_order = vec![MilBlockId(0)];
         g.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(1));
-
-        g.reg_map.add_reg_info(MilRegister(0), MilRegisterInfo { ty: MilType::Int });
-        g.reg_map.add_reg_info(MilRegister(1), MilRegisterInfo { ty: MilType::Int });
         g.reg_alloc = MilRegisterAllocator::new_from(MilRegister(2));
 
         inline_single_method(&mut f, &g, MilBlockId(0));
@@ -406,7 +396,7 @@ mod test {
                     bytecode: (0, 0)
                 },
                 MilInstruction {
-                    kind: MilInstructionKind::Copy(MilRegister(3), MilOperand::Register(MilRegister(0))),
+                    kind: MilInstructionKind::Copy(MilRegister(3), MilOperand::Register(MilType::Int, MilRegister(0))),
                     bytecode: (0, 0)
                 }
             ],
@@ -425,8 +415,9 @@ mod test {
             &vec![
                 MilPhiNode {
                     target: MilRegister(1),
+                    ty: MilType::Int,
                     sources: smallvec![
-                        (MilOperand::Register(MilRegister(2)), MilBlockId(2))
+                        (MilOperand::Register(MilType::Int, MilRegister(2)), MilBlockId(2))
                     ],
                     bytecode: (!0, 0)
                 }
@@ -436,7 +427,7 @@ mod test {
         assert!(block_1.instrs.is_empty());
         assert_eq!(
             MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister(1))),
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(1))),
                 bytecode: (!0, 1)
             },
             block_1.end_instr
@@ -457,7 +448,7 @@ mod test {
             instrs: vec![],
             end_instr: MilEndInstruction {
                 kind: MilEndInstructionKind::Call(
-                    ClassId::UNRESOLVED,
+                    ClassId::PRIMITIVE_INT,
                     MethodId::UNRESOLVED,
                     MilRegister::VOID,
                     vec![]
@@ -471,7 +462,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID)),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -525,7 +516,7 @@ mod test {
             instrs: vec![],
             end_instr: MilEndInstruction {
                 kind: MilEndInstructionKind::Call(
-                    ClassId::UNRESOLVED,
+                    ClassId::PRIMITIVE_INT,
                     MethodId::UNRESOLVED,
                     MilRegister(0),
                     vec![]
@@ -539,6 +530,7 @@ mod test {
             phi_nodes: vec![
                 MilPhiNode {
                     target: MilRegister(1),
+                    ty: MilType::Int,
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
                         (MilOperand::Int(1), MilBlockId(1))
@@ -547,16 +539,17 @@ mod test {
                 },
                 MilPhiNode {
                     target: MilRegister(2),
+                    ty: MilType::Int,
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
-                        (MilOperand::Register(MilRegister(0)), MilBlockId(1))
+                        (MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(1))
                     ],
                     bytecode: (!0, 1)
                 }
             ],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilRegister::VOID)),
+                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID)),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -564,10 +557,6 @@ mod test {
 
         f.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(3));
-
-        f.reg_map.add_reg_info(MilRegister(0), MilRegisterInfo { ty: MilType::Int });
-        f.reg_map.add_reg_info(MilRegister(1), MilRegisterInfo { ty: MilType::Int });
-        f.reg_map.add_reg_info(MilRegister(2), MilRegisterInfo { ty: MilType::Int });
         f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(3));
 
         let mut g = MilFunction::new(MethodId::UNRESOLVED);
@@ -613,6 +602,7 @@ mod test {
             &vec![
                 MilPhiNode {
                     target: MilRegister(1),
+                    ty: MilType::Int,
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
                         (MilOperand::Int(1), MilBlockId(4)),
@@ -622,6 +612,7 @@ mod test {
                 },
                 MilPhiNode {
                     target: MilRegister(2),
+                    ty: MilType::Int,
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
                         (MilOperand::Int(0), MilBlockId(4)),

@@ -65,13 +65,13 @@ pub fn simplify_phis(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) 
             let block = func.blocks.get_mut(&block_id).unwrap();
 
             block.phi_nodes.drain_filter(|phi| {
-                if phi.sources.iter().any(|(op, _)| op == &MilOperand::Register(MilRegister::VOID)) {
+                if phi.sources.iter().any(|(op, _)| op == &MilOperand::Register(MilType::Void, MilRegister::VOID)) {
                     log_writeln!(log, "Replacing poisoned phi node {} with $void", phi.target);
-                    to_simplify.insert(phi.target, MilOperand::Register(MilRegister::VOID));
+                    to_simplify.insert(phi.target, MilOperand::Register(MilType::Void, MilRegister::VOID));
                     true
                 } else {
                     let first_real_source = phi.sources.iter().filter_map(|(op, _)| {
-                        if op != &MilOperand::Register(phi.target) {
+                        if op.as_reg() != Some(phi.target) {
                             Some(op)
                         } else {
                             None
@@ -79,9 +79,9 @@ pub fn simplify_phis(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) 
                     }).cloned().next();
 
                     if let Some(first_real_source) = first_real_source {
-                        if phi.sources.iter().skip(1).all(|(op, _)| op == &first_real_source || op == &MilOperand::Register(phi.target)) {
-                            let replacement = if let MilOperand::Register(first_real_source) = first_real_source {
-                                to_simplify.get(&first_real_source).cloned().unwrap_or(MilOperand::Register(first_real_source))
+                        if phi.sources.iter().skip(1).all(|(op, _)| op == &first_real_source || op.as_reg() == Some(phi.target)) {
+                            let replacement = if let MilOperand::Register(ty, first_real_source) = first_real_source {
+                                to_simplify.get(&first_real_source).cloned().unwrap_or(MilOperand::Register(ty, first_real_source))
                             } else {
                                 first_real_source
                             };
@@ -202,7 +202,7 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
 
                 for phi in next.phi_nodes.iter_mut() {
                     match remove_phi_predecessor(phi, prev_id) {
-                        MilOperand::Register(reg) => {
+                        MilOperand::Register(ty, reg) => {
                             if let Some(prev_phi) = prev.phi_nodes.iter().filter(|&phi| phi.target == reg).next() {
                                 phi.sources.reserve(nonoverlap_new_incoming.len());
                                 for &(ref val, pred_id) in prev_phi.sources.iter() {
@@ -211,7 +211,7 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
                                     };
                                 };
                             } else {
-                                phi.sources.extend(nonoverlap_new_incoming.iter().copied().map(|pred_id| (MilOperand::Register(reg), pred_id)));
+                                phi.sources.extend(nonoverlap_new_incoming.iter().copied().map(|pred_id| (MilOperand::Register(ty, reg), pred_id)));
                             };
                         },
                         val => {
@@ -508,7 +508,7 @@ mod tests {
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(2), MilBlockId(2))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(2), MilBlockId(2))], bytecode: NO_BYTECODE }],
             &[],
             MilEndInstructionKind::Return(MilOperand::RefNull)
         ));
@@ -602,9 +602,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -621,9 +621,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(1)), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -631,7 +631,7 @@ mod tests {
 
         assert_eq!(simplify_phis(&mut func, &TEST_ENV, &Log::none()), 1);
         assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(1))));
     }
 
     #[test]
@@ -640,9 +640,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -659,9 +659,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -669,7 +669,7 @@ mod tests {
 
         assert_eq!(simplify_phis(&mut func, &TEST_ENV, &Log::none()), 1);
         assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(1))));
     }
 
     #[test]
@@ -678,9 +678,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Register(MilRegister::VOID), MilBlockId(0)), (MilOperand::Register(MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Void, MilRegister::VOID), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -688,7 +688,7 @@ mod tests {
 
         assert_eq!(simplify_phis(&mut func, &TEST_ENV, &Log::none()), 1);
         assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister::VOID)));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Void, MilRegister::VOID)));
     }
 
     #[test]
@@ -698,12 +698,12 @@ mod tests {
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
             &[
-                MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: NO_BYTECODE },
-                MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(2)), MilBlockId(0)), (MilOperand::Register(MilRegister(3)), MilBlockId(1))], bytecode: NO_BYTECODE }
+                MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: NO_BYTECODE },
+                MilPhiNode { target: MilRegister(1), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(2)), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(3)), MilBlockId(1))], bytecode: NO_BYTECODE }
             ],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0))),
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0))),
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(1)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -711,8 +711,8 @@ mod tests {
 
         assert_eq!(simplify_phis(&mut func, &TEST_ENV, &Log::none()), 0);
         assert_eq!(func.blocks[&MilBlockId(0)].phi_nodes.len(), 2);
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0))));
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[1].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1))));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0))));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[1].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(1))));
     }
 
     #[test]
@@ -721,17 +721,17 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[],
             MilEndInstructionKind::Nop
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
-            &[MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(1), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
-            MilEndInstructionKind::Return(MilOperand::Register(MilRegister(0)))
+            MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(0)))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -748,15 +748,15 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[],
             MilEndInstructionKind::Nop
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
-            &[MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(1), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilRegister(1)))
+                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(1)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -821,13 +821,13 @@ mod tests {
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(1)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(1)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }],
             &[],
             MilEndInstructionKind::Jump(MilBlockId(2))
         ));
         func.blocks.insert(MilBlockId(3), create_test_block(
             MilBlockId(3),
-            &[MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Int(1), MilBlockId(3)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }],
+            &[MilPhiNode { target: MilRegister(1), ty: MilType::Int, sources: smallvec![(MilOperand::Int(1), MilBlockId(3)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }],
             &[],
             MilEndInstructionKind::Jump(MilBlockId(3))
         ));
@@ -989,7 +989,7 @@ mod tests {
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: (!0, 0) }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: (!0, 0) }],
             &[],
             MilEndInstructionKind::Return(MilOperand::RefNull)
         ));
@@ -1018,7 +1018,7 @@ mod tests {
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }],
             &[],
             MilEndInstructionKind::Return(MilOperand::RefNull)
         ));
@@ -1057,15 +1057,15 @@ mod tests {
         ));
         func.blocks.insert(MilBlockId(3), create_test_block(
             MilBlockId(3),
-            &[MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }],
             &[],
             MilEndInstructionKind::Nop
         ));
         func.blocks.insert(MilBlockId(4), create_test_block(
             MilBlockId(4),
             &[
-                MilPhiNode { target: MilRegister(1), sources: smallvec![(MilOperand::Int(0), MilBlockId(1)), (MilOperand::Int(1), MilBlockId(3))], bytecode: (!0, 0) },
-                MilPhiNode { target: MilRegister(2), sources: smallvec![(MilOperand::Register(MilRegister(0)), MilBlockId(3)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }
+                MilPhiNode { target: MilRegister(1), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(1)), (MilOperand::Int(1), MilBlockId(3))], bytecode: (!0, 0) },
+                MilPhiNode { target: MilRegister(2), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(3)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }
             ],
             &[],
             MilEndInstructionKind::Return(MilOperand::RefNull)
@@ -1113,7 +1113,7 @@ mod tests {
         func.blocks.insert(MilBlockId(3), create_test_block(
             MilBlockId(3),
             &[
-                MilPhiNode { target: MilRegister(0), sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }
+                MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(2))], bytecode: (!0, 0) }
             ],
             &[
                 MilInstructionKind::Nop

@@ -41,7 +41,7 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
     run_block_cleanup_group(func, &mut cfg, env);
 
     // Now turn local slots into phi nodes and perform some basic cleanup to deal with the results
-    if !func.reg_map.local_info.is_empty() {
+    if !func.local_info.is_empty() {
         value_prop::transform_locals_into_phis(func, &cfg, env.env, env.log);
         basic_control_flow::simplify_phis(func, env.env, env.log);
         value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
