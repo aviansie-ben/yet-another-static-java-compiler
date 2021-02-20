@@ -163,8 +163,6 @@ fn is_return_block_shared(func: &MilFunction, return_block_id: MilBlockId) -> bo
 fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilBlockId) -> HashMap<MilBlockId, MilBlockId> {
     let block_insertion_index = func.block_order.iter().copied().find_position(|&l| l == loc).unwrap().0 + 1;
     let return_block = func.block_order[block_insertion_index];
-    let return_block_shared = is_return_block_shared(func, return_block);
-
     let call_block = func.blocks.get_mut(&loc).unwrap();
     let call_loc = call_block.end_instr.bytecode;
 
@@ -173,6 +171,36 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         (MilType::for_class(return_class), return_reg, args)
     } else {
         unreachable!()
+    };
+
+    // If the next block is also reachable from another path, then we need to insert a new block after the inlined call so that we can
+    // create the phi node for the return value so that it is definitely dominated by the call.
+    let return_block = if is_return_block_shared(func, return_block) {
+        let new_return_block = func.block_alloc.allocate_one();
+
+        func.block_order.insert(block_insertion_index, new_return_block);
+        func.blocks.insert(new_return_block, MilBlock {
+            id: new_return_block,
+            phi_nodes: vec![],
+            instrs: vec![],
+            end_instr: MilEndInstruction {
+                kind: MilEndInstructionKind::Nop,
+                bytecode: call_loc
+            },
+            exception_successors: vec![]
+        });
+
+        for phi in func.blocks.get_mut(&return_block).unwrap().phi_nodes.iter_mut() {
+            for &mut (_, ref mut pred) in phi.sources.iter_mut() {
+                if *pred == loc {
+                    *pred = new_return_block;
+                };
+            };
+        };
+
+        new_return_block
+    } else {
+        return_block
     };
 
     let (block_order, block_map) = create_block_id_mapping(inlinee, &mut func.block_alloc);
@@ -246,17 +274,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
 
     let return_block = func.blocks.get_mut(&return_block).unwrap();
 
-    if return_block_shared {
-        for phi in return_block.phi_nodes.iter_mut() {
-            let (val, _) = phi.sources.remove(phi.sources.iter().find_position(|&&(_, pred)| pred == loc).unwrap().0);
-
-            if val.as_reg() == Some(return_reg) {
-                phi.sources.extend(return_phi_sources.clone());
-            } else {
-                phi.sources.extend(return_phi_sources.iter().map(|&(_, pred)| (val.clone(), pred)));
-            };
-        };
-    } else if return_reg != MilRegister::VOID {
+    if return_reg != MilRegister::VOID {
         return_block.phi_nodes.push(MilPhiNode {
             target: return_reg,
             ty: return_ty,
@@ -497,7 +515,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_return_block_phi() {
+    pub fn test_return_block_shared() {
         let mut f = MilFunction::new(MethodId::UNRESOLVED);
 
         f.blocks.insert(MilBlockId(0), MilBlock {
@@ -534,15 +552,6 @@ mod test {
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
                         (MilOperand::Int(1), MilBlockId(1))
-                    ],
-                    bytecode: (!0, 1)
-                },
-                MilPhiNode {
-                    target: MilRegister(2),
-                    ty: MilType::Int,
-                    sources: smallvec![
-                        (MilOperand::Int(0), MilBlockId(0)),
-                        (MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(1))
                     ],
                     bytecode: (!0, 1)
                 }
@@ -597,7 +606,7 @@ mod test {
 
         inline_single_method(&mut f, &g, MilBlockId(1));
 
-        assert_eq!(vec![MilBlockId(0), MilBlockId(1), MilBlockId(3), MilBlockId(4), MilBlockId(5), MilBlockId(2)], f.block_order);
+        assert_eq!(vec![MilBlockId(0), MilBlockId(1), MilBlockId(4), MilBlockId(5), MilBlockId(6), MilBlockId(3), MilBlockId(2)], f.block_order);
         assert_eq!(
             &vec![
                 MilPhiNode {
@@ -605,23 +614,26 @@ mod test {
                     ty: MilType::Int,
                     sources: smallvec![
                         (MilOperand::Int(0), MilBlockId(0)),
-                        (MilOperand::Int(1), MilBlockId(4)),
-                        (MilOperand::Int(1), MilBlockId(5))
-                    ],
-                    bytecode: (!0, 1)
-                },
-                MilPhiNode {
-                    target: MilRegister(2),
-                    ty: MilType::Int,
-                    sources: smallvec![
-                        (MilOperand::Int(0), MilBlockId(0)),
-                        (MilOperand::Int(0), MilBlockId(4)),
-                        (MilOperand::Int(1), MilBlockId(5))
+                        (MilOperand::Int(1), MilBlockId(3))
                     ],
                     bytecode: (!0, 1)
                 }
             ],
             &f.blocks[&MilBlockId(2)].phi_nodes
+        );
+        assert_eq!(
+            &vec![
+                MilPhiNode {
+                    target: MilRegister(0),
+                    ty: MilType::Int,
+                    sources: smallvec![
+                        (MilOperand::Int(0), MilBlockId(5)),
+                        (MilOperand::Int(1), MilBlockId(6))
+                    ],
+                    bytecode: (!0, 0)
+                }
+            ],
+            &f.blocks[&MilBlockId(3)].phi_nodes
         );
     }
 }
