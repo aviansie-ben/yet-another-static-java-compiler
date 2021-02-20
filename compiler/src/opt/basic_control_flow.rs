@@ -6,6 +6,7 @@ use smallvec::SmallVec;
 
 use crate::{log_write, log_writeln};
 use crate::log::Log;
+use crate::mil::dom::Dominators;
 use crate::mil::flow_graph::{FlowGraph, FlowGraphNode};
 use crate::mil::il::*;
 use crate::mil::transform;
@@ -154,6 +155,7 @@ fn remove_phi_predecessor(phi: &mut MilPhiNode, pred_id: MilBlockId) -> MilOpera
 pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== BLOCK MERGING =====\n");
 
+    let doms = Dominators::calculate_dominators(func, cfg);
     let mut num_merged = 0;
     let mut i = 1;
 
@@ -218,6 +220,22 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
                             phi.sources.extend(nonoverlap_new_incoming.iter().copied().map(|pred_id| (val.clone(), pred_id)));
                         }
                     }
+                };
+
+                if doms.get(next_id).get(prev_id) {
+                    let loop_incoming = next_cfg_node.incoming.iter().copied()
+                        .filter(|&pred_id| pred_id != prev_id && !prev_cfg_node.incoming.contains(&pred_id))
+                        .sorted_by_key(|i| i.0)
+                        .dedup()
+                        .collect_vec();
+
+                    for mut phi in prev.phi_nodes.into_iter() {
+                        let phi_ty = phi.ty;
+                        let phi_target = phi.target;
+
+                        phi.sources.extend(loop_incoming.iter().copied().map(|pred_id| (MilOperand::Register(phi_ty, phi_target), pred_id)));
+                        next.phi_nodes.push(phi);
+                    };
                 };
 
                 func.block_order.remove(i - 1);
@@ -1130,6 +1148,62 @@ mod tests {
         assert_eq!(
             vec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))],
             func.blocks[&MilBlockId(3)].phi_nodes[0].sources.clone().into_vec()
+        );
+    }
+
+    #[test]
+    fn test_merge_blocks_forward_loop_phi() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[],
+            &[],
+            MilEndInstructionKind::JumpIf(MilBlockId(4), MilOperand::Bool(true))
+        ));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[
+                MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(3))], bytecode: (!0, 0) }
+            ],
+            &[],
+            MilEndInstructionKind::Nop
+        ));
+        func.blocks.insert(MilBlockId(2), create_test_block(
+            MilBlockId(2),
+            &[],
+            &[
+                MilInstructionKind::Nop
+            ],
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+        ));
+        func.blocks.insert(MilBlockId(3), create_test_block(
+            MilBlockId(3),
+            &[],
+            &[
+                MilInstructionKind::Nop
+            ],
+            MilEndInstructionKind::Jump(MilBlockId(1))
+        ));
+        func.blocks.insert(MilBlockId(4), create_test_block(
+            MilBlockId(4),
+            &[],
+            &[],
+            MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID))
+        ));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(1, merge_blocks(&mut func, &mut cfg, &TEST_ENV, &Log::none()));
+        assert_eq!(vec![MilBlockId(0), MilBlockId(2), MilBlockId(3), MilBlockId(4)], func.block_order);
+
+        let block_2 = &func.blocks[&MilBlockId(2)];
+        assert_eq!(1, block_2.phi_nodes.len());
+        assert_eq!(MilRegister(0), block_2.phi_nodes[0].target);
+        assert_eq!(
+            vec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(3)), (MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(2))],
+            block_2.phi_nodes[0].sources.clone().into_vec()
         );
     }
 }
