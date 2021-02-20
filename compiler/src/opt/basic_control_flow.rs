@@ -387,39 +387,75 @@ pub fn devirtualize_nonoverriden_calls(func: &mut MilFunction, env: &ClassEnviro
     num_devirtualized
 }
 
+pub fn is_pass_through_block(func: &MilFunction, from_node: &FlowGraphNode<MilBlockId>, to_block_id: MilBlockId) -> bool {
+    if &from_node.outgoing != &[to_block_id] || from_node.incoming.len() != 1 {
+        return false;
+    };
+
+    let from_block = &func.blocks[&from_node.id];
+
+    if !from_block.phi_nodes.is_empty() {
+        return false;
+    } else if !from_block.instrs.is_empty() {
+        return false;
+    };
+
+    match from_block.end_instr.kind {
+        MilEndInstructionKind::Nop => {},
+        MilEndInstructionKind::Jump(_) => {},
+        _ => {
+            return false;
+        }
+    };
+
+    true
+}
+
 pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== SELECT PATTERN RECOGNITION =====\n");
 
     let mut num_recognized = 0;
 
-    for (block_id_0, block_id_1, block_id_2) in func.block_order.iter().copied().tuple_windows() {
-        let block_0 = &func.blocks[&block_id_0];
-        let block_1 = &func.blocks[&block_id_1];
+    for cond_block_id in func.block_order.iter().copied() {
+        let cond_block = &func.blocks[&cond_block_id];
 
-        if cfg.get(block_id_1).incoming.len() != 1 {
-            continue;
-        } else if !block_1.phi_nodes.is_empty() || !block_1.instrs.is_empty() {
-            continue;
-        };
+        if let MilEndInstructionKind::JumpIf(true_block_id, false_block_id, ref cond) = cond_block.end_instr.kind {
+            let true_node = cfg.get(true_block_id);
+            let false_node = cfg.get(false_block_id);
 
-        if let MilEndInstructionKind::JumpIf(true_block_id, false_block_id, ref cond) = block_0.end_instr.kind {
-            if cfg.get(true_block_id).incoming.len() != 2 || false_block_id != block_id_1 {
+            let (true_pred_id, false_pred_id, merge_id) = if true_node.incoming.len() == 2 {
+                // L0:
+                //   jc L2/L1, <cond>
+                // L1:
+                //   j L2
+                // L2:
+                //   phi <tgt>, L0:<true_val>, L1:<false_val>
+                if !is_pass_through_block(func, false_node, true_block_id) {
+                    continue;
+                };
+
+                (cond_block_id, false_block_id, true_block_id)
+            } else if false_node.incoming.len() == 2 {
+                // L0:
+                //   jc L1/L2, <cond>
+                // L1:
+                //   j L2
+                // L2:
+                //   phi <tgt>, L0:<false_val>, L1:<true_val>
+                if !is_pass_through_block(func, true_node, false_block_id) {
+                    continue;
+                };
+
+                (true_block_id, cond_block_id, false_block_id)
+            } else {
                 continue;
             };
 
-            match block_1.end_instr.kind {
-                MilEndInstructionKind::Nop if true_block_id == block_id_2 => {},
-                MilEndInstructionKind::Jump(jump_target) if jump_target == true_block_id => {},
-                _ => {
-                    continue;
-                }
-            };
-
-            log_writeln!(log, "Recognized select pattern [ {} {} {} ]", block_id_0, block_id_1, true_block_id);
+            log_writeln!(log, "Recognized select pattern {} -> [ {} {} ] -> {}, condition {}", cond_block_id, true_pred_id, false_pred_id, merge_id, cond.pretty(env));
 
             let cond = cond.clone();
-            let phis = mem::replace(&mut func.blocks.get_mut(&true_block_id).unwrap().phi_nodes, vec![]);
-            let block_0 = func.blocks.get_mut(&block_id_0).unwrap();
+            let phis = mem::replace(&mut func.blocks.get_mut(&merge_id).unwrap().phi_nodes, vec![]);
+            let cond_block = func.blocks.get_mut(&cond_block_id).unwrap();
 
             for mut phi in phis {
                 log_write!(log, "  {} -> ", phi.pretty(env));
@@ -429,13 +465,13 @@ pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilB
                 let src_0 = mem::replace(&mut phi.sources[0].0, MilOperand::RefNull);
                 let src_1 = mem::replace(&mut phi.sources[1].0, MilOperand::RefNull);
 
-                let (true_val, false_val) = if phi.sources[0].1 == block_id_0 {
-                    assert_eq!(block_id_1, phi.sources[1].1);
+                let (true_val, false_val) = if phi.sources[0].1 == true_pred_id {
+                    assert_eq!(false_pred_id, phi.sources[1].1);
 
                     (src_0, src_1)
                 } else {
-                    assert_eq!(block_id_1, phi.sources[0].1);
-                    assert_eq!(block_id_0, phi.sources[1].1);
+                    assert_eq!(false_pred_id, phi.sources[0].1);
+                    assert_eq!(true_pred_id, phi.sources[1].1);
 
                     (src_1, src_0)
                 };
@@ -446,11 +482,14 @@ pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilB
                 };
 
                 log_writeln!(log, "{}", select_instr.pretty(env));
-                block_0.instrs.push(select_instr);
+                cond_block.instrs.push(select_instr);
             };
 
-            block_0.end_instr.kind = MilEndInstructionKind::Jump(true_block_id);
-            cfg.remove_edge(block_id_0, block_id_1);
+            cfg.remove_edge(cond_block_id, true_block_id);
+            cfg.remove_edge(cond_block_id, false_block_id);
+            cfg.add_edge(cond_block_id, merge_id);
+
+            cond_block.end_instr.kind = MilEndInstructionKind::Jump(merge_id);
 
             num_recognized += 1;
         };
