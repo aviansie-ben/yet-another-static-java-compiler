@@ -288,8 +288,9 @@ fn validate_end_instr(
         MilEndInstructionKind::Jump(tgt) => {
             validate_block_target(tgt, state);
         },
-        MilEndInstructionKind::JumpIf(tgt, ref cond) => {
-            validate_block_target(tgt, state);
+        MilEndInstructionKind::JumpIf(true_tgt, false_tgt, ref cond) => {
+            validate_block_target(true_tgt, state);
+            validate_block_target(false_tgt, state);
             validate_operand(cond, MilType::Bool, state);
         }
     };

@@ -850,7 +850,7 @@ pub enum MilEndInstructionKind {
     Throw(MilOperand),
     Return(MilOperand),
     Jump(MilBlockId),
-    JumpIf(MilBlockId, MilOperand)
+    JumpIf(MilBlockId, MilBlockId, MilOperand)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1198,8 +1198,8 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Jump(block) => {
                 write!(f, "j {}", block)?;
             },
-            MilEndInstructionKind::JumpIf(block, ref cond) => {
-                write!(f, "jc {}, {}", block, cond.pretty(self.1))?;
+            MilEndInstructionKind::JumpIf(true_block, false_block, ref cond) => {
+                write!(f, "jc {}/{}, {}", true_block, false_block, cond.pretty(self.1))?;
             }
         };
 
@@ -1242,7 +1242,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIf(_, _) => None
+            MilEndInstructionKind::JumpIf(_, _, _) => None
         }
     }
 
@@ -1257,7 +1257,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => None,
             MilEndInstructionKind::Return(_) => None,
             MilEndInstructionKind::Jump(_) => None,
-            MilEndInstructionKind::JumpIf(_, _) => None
+            MilEndInstructionKind::JumpIf(_, _, _) => None
         }
     }
 
@@ -1294,7 +1294,7 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIf(_, ref cond) => {
+            MilEndInstructionKind::JumpIf(_, _, ref cond) => {
                 f(cond);
             }
         };
@@ -1333,7 +1333,7 @@ impl MilEndInstruction {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
-            MilEndInstructionKind::JumpIf(_, ref mut cond) => {
+            MilEndInstructionKind::JumpIf(_, _, ref mut cond) => {
                 f(cond);
             }
         };
@@ -1360,7 +1360,7 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(_) => false,
             MilEndInstructionKind::Return(_) => false,
             MilEndInstructionKind::Jump(_) => false,
-            MilEndInstructionKind::JumpIf(_, _) => true
+            MilEndInstructionKind::JumpIf(_, _, _) => false
         }
     }
 
@@ -1377,8 +1377,9 @@ impl MilEndInstruction {
             MilEndInstructionKind::Jump(ref tgt) => {
                 f(tgt);
             },
-            MilEndInstructionKind::JumpIf(ref tgt, _) => {
-                f(tgt);
+            MilEndInstructionKind::JumpIf(ref true_tgt, ref false_tgt, _) => {
+                f(true_tgt);
+                f(false_tgt);
             }
         }
     }
@@ -1396,8 +1397,9 @@ impl MilEndInstruction {
             MilEndInstructionKind::Jump(ref mut tgt) => {
                 f(tgt);
             },
-            MilEndInstructionKind::JumpIf(ref mut tgt, _) => {
-                f(tgt);
+            MilEndInstructionKind::JumpIf(ref mut true_tgt, ref mut false_tgt, _) => {
+                f(true_tgt);
+                f(false_tgt);
             }
         }
     }

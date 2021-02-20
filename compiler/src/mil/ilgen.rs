@@ -562,9 +562,9 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
     blocks
 }
 
-fn emit_npe_throw(builder: &mut MilBuilder) {
+fn emit_npe_throw(builder: &mut MilBuilder) -> MilBlockId {
     // TODO Create an actual exception
-    builder.append_end_instruction(MilEndInstructionKind::Throw(MilOperand::RefNull));
+    builder.append_end_instruction(MilEndInstructionKind::Throw(MilOperand::RefNull))
 }
 
 fn emit_null_check(builder: &mut MilBuilder, val: MilOperand) {
@@ -574,12 +574,12 @@ fn emit_null_check(builder: &mut MilBuilder, val: MilOperand) {
     );
 
     let check_block = builder.end_block();
-    emit_npe_throw(builder);
+    let throw_block = emit_npe_throw(builder);
 
     let not_null_block = builder.end_block();
     builder.insert_end_instruction(
         check_block,
-        MilEndInstructionKind::JumpIf(not_null_block, MilOperand::Register(MilType::Bool, check_cond))
+        MilEndInstructionKind::JumpIf(not_null_block, throw_block, MilOperand::Register(MilType::Bool, check_cond))
     );
 }
 
@@ -1174,20 +1174,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilOperand::Int(0)
                 ));
 
-                let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    MilBlockId::ENTRY,
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
+                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                            *block = blocks[&target].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                        blocks[&target].blocks[0],
+                        fallthrough_block,
+                        MilOperand::Register(MilType::Bool, cond_reg)
+                    );
                 }));
-                end_block = Some(block);
+                end_block = Some(fallthrough_block);
             },
             BytecodeInstruction::IfICmp(cond, target) => {
                 let rhs = stack.pop(MilType::Int);
@@ -1201,20 +1202,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     rhs
                 ));
 
-                let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    MilBlockId::ENTRY,
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
+                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                            *block = blocks[&target].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                        blocks[&target].blocks[0],
+                        fallthrough_block,
+                        MilOperand::Register(MilType::Bool, cond_reg)
+                    );
                 }));
-                end_block = Some(block);
+                end_block = Some(fallthrough_block);
             },
             BytecodeInstruction::IfACmp(cond, target) => {
                 let rhs = stack.pop(MilType::Ref);
@@ -1228,20 +1230,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     lhs
                 ));
 
-                let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    MilBlockId::ENTRY,
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
+                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                            *block = blocks[&target].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                        blocks[&target].blocks[0],
+                        fallthrough_block,
+                        MilOperand::Register(MilType::Bool, cond_reg)
+                    );
                 }));
-                end_block = Some(block);
+                end_block = Some(fallthrough_block);
             },
             BytecodeInstruction::IfNonNull(target) => {
                 let cond_reg = builder.allocate_reg(MilType::Bool);
@@ -1253,20 +1256,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilOperand::RefNull
                 ));
 
-                let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    MilBlockId::ENTRY,
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
+                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                            *block = blocks[&target].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                        blocks[&target].blocks[0],
+                        fallthrough_block,
+                        MilOperand::Register(MilType::Bool, cond_reg)
+                    );
                 }));
-                end_block = Some(block);
+                end_block = Some(fallthrough_block);
             },
             BytecodeInstruction::IfNull(target) => {
                 let cond_reg = builder.allocate_reg(MilType::Bool);
@@ -1278,20 +1282,21 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilOperand::RefNull
                 ));
 
-                let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    MilBlockId::ENTRY,
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
+                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                            *block = blocks[&target].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                        blocks[&target].blocks[0],
+                        fallthrough_block,
+                        MilOperand::Register(MilType::Bool, cond_reg)
+                    );
                 }));
-                end_block = Some(block);
+                end_block = Some(fallthrough_block);
             },
             BytecodeInstruction::Goto(target) => {
                 let block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
@@ -1340,16 +1345,16 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 };
 
                 let class_check_block = builder.end_block();
-                builder.append_end_instruction(MilEndInstructionKind::Throw(MilOperand::RefNull));
+                let throw_block = builder.append_end_instruction(MilEndInstructionKind::Throw(MilOperand::RefNull));
 
                 let continue_block = builder.end_block();
                 builder.insert_end_instruction(
                     null_check_block,
-                    MilEndInstructionKind::JumpIf(continue_block, MilOperand::Register(MilType::Bool, is_null_reg))
+                    MilEndInstructionKind::JumpIf(continue_block, class_check_block, MilOperand::Register(MilType::Bool, is_null_reg))
                 );
                 builder.insert_end_instruction(
                     class_check_block,
-                    MilEndInstructionKind::JumpIf(continue_block, MilOperand::Register(MilType::Bool, is_subclass_reg))
+                    MilEndInstructionKind::JumpIf(continue_block, throw_block, MilOperand::Register(MilType::Bool, is_subclass_reg))
                 );
 
                 stack.push(obj);
@@ -1404,7 +1409,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let merge_block = builder.end_block();
                 builder.insert_end_instruction(
                     null_check_block,
-                    MilEndInstructionKind::JumpIf(merge_block, MilOperand::Register(MilType::Bool, is_null_reg))
+                    MilEndInstructionKind::JumpIf(merge_block, is_subclass_block, MilOperand::Register(MilType::Bool, is_null_reg))
                 );
 
                 stack.push(MilOperand::Register(MilType::Int, result_reg));
@@ -1445,32 +1450,30 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                         MilOperand::Int(target_value)
                     ));
 
-                    let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                        MilBlockId::ENTRY,
                         MilBlockId::ENTRY,
                         MilOperand::Register(MilType::Bool, cond)
                     ));
+                    let fallthrough_block = builder.end_block();
 
                     fixups.push(Box::new(move |builder, blocks| {
-                        match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                            MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                                *block = blocks[&target_bc].blocks[0];
-                            },
-                            _ => unreachable!()
-                        };
+                        builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                            blocks[&target_bc].blocks[0],
+                            fallthrough_block,
+                            MilOperand::Register(MilType::Bool, cond)
+                        );
                     }));
                 };
 
-                let fallthrough_block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
+                let default_block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&fallthrough_block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::Jump(ref mut block) => {
-                            *block = blocks[&default_bc].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&default_block).unwrap().end_instr.kind = MilEndInstructionKind::Jump(
+                        blocks[&default_bc].blocks[0]
+                    );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(default_block);
             },
             BytecodeInstruction::TableSwitch(low_value, default_bc, ref table) => {
                 let value = stack.pop(MilType::Int);
@@ -1485,32 +1488,30 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                         MilOperand::Int(low_value + (i as i32))
                     ));
 
-                    let block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                    let cond_block = builder.append_end_instruction(MilEndInstructionKind::JumpIf(
+                        MilBlockId::ENTRY,
                         MilBlockId::ENTRY,
                         MilOperand::Register(MilType::Bool, cond)
                     ));
+                    let fallthrough_block = builder.end_block();
 
                     fixups.push(Box::new(move |builder, blocks| {
-                        match builder.func.blocks.get_mut(&block).unwrap().end_instr.kind {
-                            MilEndInstructionKind::JumpIf(ref mut block, _) => {
-                                *block = blocks[&target_bc].blocks[0];
-                            },
-                            _ => unreachable!()
-                        };
+                        builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
+                            blocks[&target_bc].blocks[0],
+                            fallthrough_block,
+                            MilOperand::Register(MilType::Bool, cond)
+                        );
                     }));
                 };
 
-                let fallthrough_block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
+                let default_block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
 
                 fixups.push(Box::new(move |builder, blocks| {
-                    match builder.func.blocks.get_mut(&fallthrough_block).unwrap().end_instr.kind {
-                        MilEndInstructionKind::Jump(ref mut block) => {
-                            *block = blocks[&default_bc].blocks[0];
-                        },
-                        _ => unreachable!()
-                    };
+                    builder.func.blocks.get_mut(&default_block).unwrap().end_instr.kind = MilEndInstructionKind::Jump(
+                        blocks[&default_bc].blocks[0]
+                    );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(default_block);
             },
             BytecodeInstruction::InvokeDynamic(idx) => {
                 eprintln!("{}: UNIMPLEMENTED {:?}", MethodName(builder.func.id, env), instr);

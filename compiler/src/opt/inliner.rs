@@ -287,16 +287,19 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     block_map
 }
 
-pub fn inline_from_plan(func: &mut MilFunction, program: &MilProgram, plan: &InliningPlan) {
+pub fn inline_from_plan(func: &mut MilFunction, program: &MilProgram, plan: &InliningPlan, env: &ClassEnvironment) {
     let mut block_map: HashMap<_, _> = func.block_order.iter().copied()
         .map(|block_id| (InliningSite::root().sub_site(block_id), block_id))
         .collect();
 
-    for (inline_site, method_id) in plan.sites_to_inline.iter() {
+    for &(ref inline_site, method_id) in plan.sites_to_inline.iter() {
         let call_block_id = *&block_map[&inline_site];
         let callee = &program.funcs[&method_id];
 
+        eprintln!("{}\n\n{}", MethodName(method_id, env), func.pretty(env));
+
         for (old_block_id, new_block_id) in inline_single_method(func, callee, call_block_id) {
+            validate_function(func, env);
             block_map.insert(inline_site.sub_site(old_block_id), new_block_id);
         };
     };
@@ -313,7 +316,7 @@ pub fn run_inliner<I: Inliner>(program: &mut MilProgram, inliner: I, env: &Optim
         log_writeln!(env.log, "{}\n", plan.pretty(env.env));
 
         let mut func = func.clone();
-        inline_from_plan(&mut func, program, &plan);
+        inline_from_plan(&mut func, program, &plan, env.env);
 
         validate_function(&func, env.env);
 
@@ -523,7 +526,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true)),
+                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true)),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]
@@ -575,7 +578,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true)),
+                kind: MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true)),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]

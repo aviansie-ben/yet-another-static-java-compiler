@@ -264,13 +264,13 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
     num_merged
 }
 
-fn try_fold_constant_jump(instr: &mut MilEndInstructionKind, fallthrough_block: MilBlockId) -> Option<MilBlockId> {
+fn try_fold_constant_jump(instr: &mut MilEndInstructionKind) -> Option<MilBlockId> {
     Some(match *instr {
-        MilEndInstructionKind::JumpIf(target_block, MilOperand::Bool(true)) => {
-            target_block
+        MilEndInstructionKind::JumpIf(true_block, _, MilOperand::Bool(true)) => {
+            true_block
         },
-        MilEndInstructionKind::JumpIf(_, MilOperand::Bool(false)) => {
-            fallthrough_block
+        MilEndInstructionKind::JumpIf(_, false_block, MilOperand::Bool(false)) => {
+            false_block
         },
         _ => {
             return None;
@@ -286,7 +286,7 @@ pub fn fold_constant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockI
     for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
         let block = func.blocks.get_mut(&block_id).unwrap();
 
-        if let Some(target) = try_fold_constant_jump(&mut block.end_instr.kind, next_block_id) {
+        if let Some(target) = try_fold_constant_jump(&mut block.end_instr.kind) {
             log_writeln!(log, "Folding conditional jump at end of {} to unconditionally go to {}", block_id, target);
 
             block.end_instr.kind = if target != next_block_id {
@@ -338,9 +338,14 @@ pub fn remove_redundant_jumps(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlo
                 block.end_instr.kind = MilEndInstructionKind::Nop;
                 num_removed += 1;
             },
-            MilEndInstructionKind::JumpIf(target_block_id, _) if target_block_id == next_block_id => {
-                log_writeln!(log, "Removed redundant conditional jump from {} to next block {}", block_id, next_block_id);
-                block.end_instr.kind = MilEndInstructionKind::Nop;
+            MilEndInstructionKind::JumpIf(true_block_id, false_block_id, _) if true_block_id == false_block_id => {
+                if true_block_id != next_block_id {
+                    log_writeln!(log, "Turned redundant conditional jump from {} into an unconditional jump to {}", block_id, true_block_id);
+                    block.end_instr.kind = MilEndInstructionKind::Jump(true_block_id)
+                } else {
+                    log_writeln!(log, "Removed redundant conditional jump from {} to next block {}", block_id, next_block_id);
+                    block.end_instr.kind = MilEndInstructionKind::Nop;
+                };
                 cfg.remove_edge(block_id, next_block_id);
                 num_removed += 1;
             },
@@ -397,23 +402,23 @@ pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilB
             continue;
         };
 
-        if let MilEndInstructionKind::JumpIf(target_block_id, ref cond) = block_0.end_instr.kind {
-            if cfg.get(target_block_id).incoming.len() != 2 {
+        if let MilEndInstructionKind::JumpIf(true_block_id, false_block_id, ref cond) = block_0.end_instr.kind {
+            if cfg.get(true_block_id).incoming.len() != 2 || false_block_id != block_id_1 {
                 continue;
             };
 
             match block_1.end_instr.kind {
-                MilEndInstructionKind::Nop if target_block_id == block_id_2 => {},
-                MilEndInstructionKind::Jump(jump_target) if jump_target == target_block_id => {},
+                MilEndInstructionKind::Nop if true_block_id == block_id_2 => {},
+                MilEndInstructionKind::Jump(jump_target) if jump_target == true_block_id => {},
                 _ => {
                     continue;
                 }
             };
 
-            log_writeln!(log, "Recognized select pattern [ {} {} {} ]", block_id_0, block_id_1, target_block_id);
+            log_writeln!(log, "Recognized select pattern [ {} {} {} ]", block_id_0, block_id_1, true_block_id);
 
             let cond = cond.clone();
-            let phis = mem::replace(&mut func.blocks.get_mut(&target_block_id).unwrap().phi_nodes, vec![]);
+            let phis = mem::replace(&mut func.blocks.get_mut(&true_block_id).unwrap().phi_nodes, vec![]);
             let block_0 = func.blocks.get_mut(&block_id_0).unwrap();
 
             for mut phi in phis {
@@ -444,7 +449,7 @@ pub fn recognize_select_pattern(func: &mut MilFunction, cfg: &mut FlowGraph<MilB
                 block_0.instrs.push(select_instr);
             };
 
-            block_0.end_instr.kind = MilEndInstructionKind::Jump(target_block_id);
+            block_0.end_instr.kind = MilEndInstructionKind::Jump(true_block_id);
             cfg.remove_edge(block_id_0, block_id_1);
 
             num_recognized += 1;
@@ -590,7 +595,7 @@ mod tests {
     fn test_no_eliminate_live_blocks() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIf(MilBlockId(3), MilBlockId(1), MilOperand::Bool(true))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(3), create_test_block(MilBlockId(3), &[], &[], MilEndInstructionKind::Jump(MilBlockId(2))));
@@ -835,7 +840,7 @@ mod tests {
             MilBlockId(1),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(3), MilBlockId(2), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
@@ -925,7 +930,7 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
@@ -956,7 +961,7 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
@@ -997,7 +1002,7 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
@@ -1026,7 +1031,7 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
@@ -1057,13 +1062,13 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(3), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(4), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(4), MilBlockId(2), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
@@ -1114,13 +1119,13 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(3), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(3), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(2), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(
             MilBlockId(2),
@@ -1159,7 +1164,7 @@ mod tests {
             MilBlockId(0),
             &[],
             &[],
-            MilEndInstructionKind::JumpIf(MilBlockId(4), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(4), MilBlockId(1), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(1), create_test_block(
             MilBlockId(1),
@@ -1175,7 +1180,7 @@ mod tests {
             &[
                 MilInstructionKind::Nop
             ],
-            MilEndInstructionKind::JumpIf(MilBlockId(2), MilOperand::Bool(true))
+            MilEndInstructionKind::JumpIf(MilBlockId(2), MilBlockId(3), MilOperand::Bool(true))
         ));
         func.blocks.insert(MilBlockId(3), create_test_block(
             MilBlockId(3),

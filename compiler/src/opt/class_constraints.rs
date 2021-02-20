@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter::FromIterator;
 
-use itertools::Itertools;
-
 use crate::log_writeln;
 use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
@@ -220,7 +218,7 @@ fn class_constraint_for_end_instr(instr: &MilEndInstructionKind) -> Option<MilCl
         MilEndInstructionKind::Throw(_) => None,
         MilEndInstructionKind::Return(_) => None,
         MilEndInstructionKind::Jump(_) => None,
-        MilEndInstructionKind::JumpIf(_, _) => None,
+        MilEndInstructionKind::JumpIf(_, _, _) => None,
     }
 }
 
@@ -277,7 +275,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
         };
     };
 
-    for (block_id, next_block_id) in func.block_order.iter().copied().chain(itertools::repeat_n(MilBlockId::EXIT, 1)).tuple_windows() {
+    for block_id in func.block_order.iter().copied() {
         let block = &func.blocks[&block_id];
         let killed = killed.entry(block_id).or_insert_with(HashSet::new);
 
@@ -319,12 +317,12 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             };
         };
 
-        if let MilEndInstructionKind::JumpIf(target_block_id, MilOperand::Register(_, cond)) = block.end_instr.kind {
+        if let MilEndInstructionKind::JumpIf(true_block_id, false_block_id, MilOperand::Register(_, cond)) = block.end_instr.kind {
             for_edge_constraints(cond, &instrs_by_reg, |taken, reg, constraint| {
                 let to_block_id = if taken {
-                    target_block_id
+                    true_block_id
                 } else {
-                    next_block_id
+                    false_block_id
                 };
 
                 log_writeln!(log, "  [{} -> {}] {} <- {}", block_id, to_block_id, reg, constraint.pretty(env));
