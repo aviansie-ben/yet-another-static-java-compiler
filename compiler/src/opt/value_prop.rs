@@ -649,9 +649,37 @@ pub fn simplify_instructions(func: &mut MilFunction, env: &ClassEnvironment, kno
         let mut simplified_this_loop = false;
         flat_func.visit_instrs(|flat_func, instr| {
             let simplified = match instr {
-                MilRegisterSourceMut::Phi(_) => false,
+                MilRegisterSourceMut::Phi(phi) => {
+                    for &mut (ref mut o, _) in phi.sources.iter_mut() {
+                        if let MilOperand::Register(_, reg) = *o {
+                            match flat_func.get_reg(reg) {
+                                Some(MilRegisterSource::Instr(instr)) => match instr.kind {
+                                    MilInstructionKind::Copy(_, ref val) => {
+                                        *o = val.clone();
+                                    },
+                                    _ => {}
+                                },
+                                _ => {}
+                            };
+                        }
+                    };
+                    false
+                },
                 MilRegisterSourceMut::Instr(instr) => simplify_instruction(instr, flat_func, reg_alloc, env, known_objects, log),
-                MilRegisterSourceMut::EndInstr(_) => false
+                MilRegisterSourceMut::EndInstr(instr) => {
+                    instr.for_operands_mut(|o| if let MilOperand::Register(_, reg) = *o {
+                        match flat_func.get_reg(reg) {
+                            Some(MilRegisterSource::Instr(instr)) => match instr.kind {
+                                MilInstructionKind::Copy(_, ref val) => {
+                                    *o = val.clone();
+                                },
+                                _ => {}
+                            },
+                            _ => {}
+                        };
+                    });
+                    false
+                }
             };
 
             if simplified {
