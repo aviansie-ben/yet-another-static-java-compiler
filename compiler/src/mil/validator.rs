@@ -3,6 +3,7 @@ use std::fmt;
 
 use itertools::Itertools;
 
+use crate::mil::dom::Dominators;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::resolve::ClassEnvironment;
@@ -12,6 +13,16 @@ enum ValidatorLocation {
     Phi(MilBlockId, usize),
     Instruction(MilBlockId, usize),
     EndInstruction(MilBlockId)
+}
+
+impl ValidatorLocation {
+    fn block(self) -> MilBlockId {
+        match self {
+            ValidatorLocation::Phi(block, _) => block,
+            ValidatorLocation::Instruction(block, _) => block,
+            ValidatorLocation::EndInstruction(block) => block
+        }
+    }
 }
 
 impl fmt::Display for ValidatorLocation {
@@ -38,6 +49,7 @@ enum ValidatorErrorKind {
     ExpectedNonVoidTarget,
     OperandUndefinedRegister(MilOperand),
     OperandWrongRegisterType(MilOperand, MilType, Option<ValidatorLocation>),
+    OperandRegisterDoesNotDominate(MilOperand, ValidatorLocation),
     FallsThroughLastBlock,
     OperandTypeMismatch(MilOperand, MilType),
     BlockNotFound(MilBlockId),
@@ -52,6 +64,8 @@ struct ValidatorError {
 
 struct ValidatorState<'a> {
     func: &'a MilFunction,
+    doms: Dominators,
+    regs_seen: Vec<MilRegister>,
     loc: ValidatorLocation,
     regs: HashMap<MilRegister, (ValidatorLocation, MilType)>,
     errors: Vec<ValidatorError>
@@ -66,31 +80,48 @@ impl ValidatorState<'_> {
     }
 }
 
-fn validate_operand(op: &MilOperand, expected_ty: MilType, state: &mut ValidatorState) {
-    // TODO Check that operand definitions dominate uses
-
+fn validate_operand(op: &MilOperand, expected_ty: MilType, phi_block: Option<MilBlockId>, state: &mut ValidatorState) {
     if op.get_type() != expected_ty {
         state.push_error(ValidatorErrorKind::OperandTypeMismatch(op.clone(), expected_ty));
     };
 
-    match *op {
+    let def = match *op {
         MilOperand::Register(ty, reg) => {
             if reg == MilRegister::VOID {
                 if ty != MilType::Void {
                     state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), ty, None));
                 };
+                None
             } else {
                 if let Some(&(def_loc, def_ty)) = state.regs.get(&reg) {
                     if def_ty != ty {
                         state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), def_ty, Some(def_loc)));
                     };
+                    Some((reg, def_loc))
                 } else {
                     state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
-                };
-            };
+                    None
+                }
+            }
         },
-        _ => {}
+        _ => None
     };
+
+    if let Some((reg, def_loc)) = def {
+        let doms_correctly = if phi_block.is_none() && def_loc.block() == state.loc.block() {
+            state.regs_seen.contains(&reg)
+        } else {
+            state.doms.get(phi_block.unwrap_or(state.loc.block())).get(def_loc.block())
+        };
+
+        if !doms_correctly {
+            state.push_error(ValidatorErrorKind::OperandRegisterDoesNotDominate(op.clone(), def_loc));
+        };
+    };
+}
+
+fn mark_target(tgt: MilRegister, _: MilType, state: &mut ValidatorState) {
+    state.regs_seen.push(tgt);
 }
 
 fn validate_target(tgt: MilRegister, expected_ty: MilType, state: &mut ValidatorState) {
@@ -268,6 +299,8 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
     let cfg = FlowGraph::for_function(func);
     let mut state = ValidatorState {
         func,
+        doms: Dominators::calculate_dominators(func, &cfg),
+        regs_seen: vec![],
         loc: ValidatorLocation::EndInstruction(MilBlockId::ENTRY),
         regs: HashMap::new(),
         errors: vec![]
@@ -308,23 +341,29 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
     for block_id in func.block_order.iter().copied() {
         let block = &func.blocks[&block_id];
 
+        state.regs_seen.clear();
+
         for (i, phi) in block.phi_nodes.iter().enumerate() {
             state.loc = ValidatorLocation::Phi(block_id, i);
 
-            for &(ref op, _) in phi.sources.iter() {
+            for &(ref op, pred) in phi.sources.iter() {
                 if op != &MilOperand::Register(MilType::Void, MilRegister::VOID) {
-                    validate_operand(op, phi.ty, &mut state);
+                    validate_operand(op, phi.ty, Some(pred), &mut state);
                 };
             };
         };
 
+        for phi in block.phi_nodes.iter() {
+            state.regs_seen.push(phi.target);
+        };
+
         for (i, instr) in block.instrs.iter().enumerate() {
             state.loc = ValidatorLocation::Instruction(block_id, i);
-            validate_instr(|_, _, _| {}, validate_operand, instr, &mut state);
+            validate_instr(mark_target, |op, expected_ty, state| validate_operand(op, expected_ty, None, state), instr, &mut state);
         };
 
         state.loc = ValidatorLocation::EndInstruction(block_id);
-        validate_end_instr(|_, _, _| {}, validate_operand, |_, _| {}, &block.end_instr, &mut state);
+        validate_end_instr(|_, _, _| {}, |op, expected_ty, state| validate_operand(op, expected_ty, None, state), |_, _| {}, &block.end_instr, &mut state);
     };
 
     state.errors
@@ -376,6 +415,9 @@ fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &Vali
             } else {
                 eprintln!();
             };
+        },
+        ValidatorErrorKind::OperandRegisterDoesNotDominate(ref op, defined_loc) => {
+            eprintln!("Operand {}'s use does not dominate its definition at {}", op.pretty(env), defined_loc);
         },
         ValidatorErrorKind::FallsThroughLastBlock => {
             eprintln!("Control falls through last block");
