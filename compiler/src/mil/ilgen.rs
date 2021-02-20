@@ -1374,7 +1374,6 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let vtable_reg = builder.allocate_reg(MilType::Addr);
                 let is_subclass_reg = builder.allocate_reg(MilType::Bool);
-                let is_subclass_int_reg = builder.allocate_reg(MilType::Int);
                 builder.append_instruction(MilInstructionKind::GetVTable(vtable_reg, obj));
 
                 if !env.get(cpe.class_id).is_interface() {
@@ -1388,18 +1387,19 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     builder.append_instruction(MilInstructionKind::Copy(is_subclass_reg, MilOperand::Bool(true)));
                 };
 
+                let is_subclass_block = builder.end_block();
+                let is_subclass_phi = builder.append_phi_node(vec![
+                    (MilOperand::Bool(false), null_check_block),
+                    (MilOperand::Register(MilType::Bool, is_subclass_reg), is_subclass_block)
+                ]);
+
+                let result_reg = builder.allocate_reg(MilType::Int);
                 builder.append_instruction(MilInstructionKind::Select(
-                    is_subclass_int_reg,
-                    MilOperand::Register(MilType::Bool, is_subclass_reg),
+                    result_reg,
+                    is_subclass_phi,
                     MilOperand::Int(1),
                     MilOperand::Int(0)
                 ));
-
-                let is_subclass_block = builder.end_block();
-                let result = builder.append_phi_node(vec![
-                    (MilOperand::Int(0), null_check_block),
-                    (MilOperand::Register(MilType::Int, is_subclass_int_reg), is_subclass_block)
-                ]);
 
                 let merge_block = builder.end_block();
                 builder.insert_end_instruction(
@@ -1407,7 +1407,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilEndInstructionKind::JumpIf(merge_block, MilOperand::Register(MilType::Bool, is_null_reg))
                 );
 
-                stack.push(result);
+                stack.push(MilOperand::Register(MilType::Int, result_reg));
             },
             BytecodeInstruction::AThrow => {
                 let val = stack.pop(MilType::Ref);
