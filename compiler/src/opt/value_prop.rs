@@ -778,7 +778,7 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
     log_writeln!(log, "\n===== LOCAL TO PHI TRANSFORMATION =====\n");
 
     let locals_len = func.local_info.iter().map(|(id, _)| id.0).max().map_or(0, |i| i + 1);
-    let local_types = (0..locals_len).map(|i| func.local_info.get(&MilLocalId(i)).map_or(MilType::Void, |info| info.ty)).collect_vec();
+    let local_types = (0..locals_len).map(|i| func.local_info.get(&MilLocalId(i)).map(|info| info.ty)).collect_vec();
     let mut local_phis = HashMap::new();
     let mut locals_out = HashMap::new();
 
@@ -789,7 +789,7 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
         let reg_alloc = &mut func.reg_alloc;
         let mut locals = if !cfg.get(block_id).incoming.contains(&MilBlockId::ENTRY) {
             local_types.iter().copied().map(|ty| {
-                if ty != MilType::Void {
+                if let Some(ty) = ty {
                     let reg = reg_alloc.allocate_one();
                     let i = block.phi_nodes.len();
                     let bc = block.initial_bytecode();
@@ -802,11 +802,11 @@ pub fn transform_locals_into_phis(func: &mut MilFunction, cfg: &FlowGraph<MilBlo
 
                     (i, MilOperand::Register(ty, reg))
                 } else {
-                    (!0, MilOperand::Register(MilType::Void, MilRegister::VOID))
+                    (!0, MilOperand::Poison(MilType::Int))
                 }
             }).collect_vec()
         } else {
-            (0..locals_len).map(|_| (!0, MilOperand::Register(MilType::Void, MilRegister::VOID))).collect_vec()
+            local_types.iter().copied().map(|ty| (!0, MilOperand::Poison(ty.unwrap_or(MilType::Int)))).collect_vec()
         };
 
         log_write!(log, "  Created local phis: [");

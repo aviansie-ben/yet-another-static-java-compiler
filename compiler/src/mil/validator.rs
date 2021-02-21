@@ -87,21 +87,14 @@ fn validate_operand(op: &MilOperand, expected_ty: MilType, phi_block: Option<Mil
 
     let def = match *op {
         MilOperand::Register(ty, reg) => {
-            if reg == MilRegister::VOID {
-                if ty != MilType::Void {
-                    state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), ty, None));
+            if let Some(&(def_loc, def_ty)) = state.regs.get(&reg) {
+                if def_ty != ty {
+                    state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), def_ty, Some(def_loc)));
                 };
-                None
+                Some((reg, def_loc))
             } else {
-                if let Some(&(def_loc, def_ty)) = state.regs.get(&reg) {
-                    if def_ty != ty {
-                        state.push_error(ValidatorErrorKind::OperandWrongRegisterType(op.clone(), def_ty, Some(def_loc)));
-                    };
-                    Some((reg, def_loc))
-                } else {
-                    state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
-                    None
-                }
+                state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
+                None
             }
         },
         _ => None
@@ -120,21 +113,21 @@ fn validate_operand(op: &MilOperand, expected_ty: MilType, phi_block: Option<Mil
     };
 }
 
-fn mark_target(tgt: MilRegister, _: MilType, state: &mut ValidatorState) {
-    state.regs_seen.push(tgt);
+fn mark_target(tgt: MilRegister, _: Option<MilType>, state: &mut ValidatorState) {
+    if tgt != MilRegister::VOID {
+        state.regs_seen.push(tgt);
+    };
 }
 
-fn validate_target(tgt: MilRegister, expected_ty: MilType, state: &mut ValidatorState) {
-    if expected_ty == MilType::Void {
-        if tgt != MilRegister::VOID {
-            state.push_error(ValidatorErrorKind::ExpectedVoidTarget);
-        };
-    } else {
+fn validate_target(tgt: MilRegister, expected_ty: Option<MilType>, state: &mut ValidatorState) {
+    if let Some(expected_ty) = expected_ty {
         if tgt == MilRegister::VOID {
             state.push_error(ValidatorErrorKind::ExpectedNonVoidTarget);
         } else if let Some((old_loc, _)) = state.regs.insert(tgt, (state.loc, expected_ty)) {
             state.push_error(ValidatorErrorKind::MultipleRegisterDefinitions(tgt, old_loc));
         };
+    } else if tgt != MilRegister::VOID {
+        state.push_error(ValidatorErrorKind::ExpectedVoidTarget);
     };
 }
 
@@ -151,7 +144,7 @@ fn validate_block_target(tgt: MilBlockId, state: &mut ValidatorState) {
 }
 
 fn validate_instr(
-    mut validate_target: impl FnMut (MilRegister, MilType, &mut ValidatorState),
+    mut validate_target: impl FnMut (MilRegister, Option<MilType>, &mut ValidatorState),
     mut validate_operand: impl FnMut (&MilOperand, MilType, &mut ValidatorState),
     instr: &MilInstruction,
     state: &mut ValidatorState
@@ -160,7 +153,7 @@ fn validate_instr(
         MilInstructionKind::Nop => {},
         MilInstructionKind::Copy(tgt, ref val) => {
             validate_operand(val, val.get_type(), state);
-            validate_target(tgt, val.get_type(), state);
+            validate_target(tgt, Some(val.get_type()), state);
         },
         MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
             let ty = true_val.get_type();
@@ -168,33 +161,33 @@ fn validate_instr(
             validate_operand(cond, MilType::Bool, state);
             validate_operand(true_val, ty, state);
             validate_operand(false_val, ty, state);
-            validate_target(tgt, ty, state);
+            validate_target(tgt, Some(ty), state);
         },
         MilInstructionKind::UnOp(op, tgt, ref val) => {
             let (tgt_ty, val_ty) = op.type_sig();
 
             validate_operand(val, val_ty, state);
-            validate_target(tgt, tgt_ty, state);
+            validate_target(tgt, Some(tgt_ty), state);
         },
         MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
             let (tgt_ty, lhs_ty, rhs_ty) = op.type_sig();
 
             validate_operand(lhs, lhs_ty, state);
             validate_operand(rhs, rhs_ty, state);
-            validate_target(tgt, tgt_ty, state);
+            validate_target(tgt, Some(tgt_ty), state);
         },
         MilInstructionKind::GetParam(_, constraint, tgt) => {
-            validate_target(tgt, MilType::for_class(constraint.class_id()), state);
+            validate_target(tgt, Some(MilType::for_class(constraint.class_id())), state);
         },
         MilInstructionKind::GetLocal(local_id, tgt) => {
-            validate_target(tgt, state.func.local_info[&local_id].ty, state);
+            validate_target(tgt, Some(state.func.local_info[&local_id].ty), state);
         },
         MilInstructionKind::SetLocal(local_id, ref val) => {
             validate_operand(val, state.func.local_info[&local_id].ty, state);
         },
         MilInstructionKind::GetField(_, constraint, tgt, ref obj) => {
             validate_operand(obj, MilType::Ref, state);
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, Some(MilType::for_class(constraint)), state);
         },
         MilInstructionKind::PutField(_, constraint, ref obj, ref val) => {
             validate_operand(obj, MilType::Ref, state);
@@ -202,12 +195,12 @@ fn validate_instr(
         },
         MilInstructionKind::GetArrayLength(tgt, ref obj) => {
             validate_operand(obj, MilType::Ref, state);
-            validate_target(tgt, MilType::Int, state);
+            validate_target(tgt, Some(MilType::Int), state);
         },
         MilInstructionKind::GetArrayElement(constraint, tgt, ref obj, ref idx) => {
             validate_operand(obj, MilType::Ref, state);
             validate_operand(idx, MilType::Int, state);
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, Some(MilType::for_class(constraint)), state);
         },
         MilInstructionKind::PutArrayElement(constraint, ref obj, ref idx, ref val) => {
             validate_operand(obj, MilType::Ref, state);
@@ -215,31 +208,31 @@ fn validate_instr(
             validate_operand(val, MilType::for_class(constraint), state);
         },
         MilInstructionKind::GetStatic(_, constraint, tgt) => {
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, Some(MilType::for_class(constraint)), state);
         },
         MilInstructionKind::PutStatic(_, constraint, ref val) => {
             validate_operand(val, MilType::for_class(constraint), state);
         },
         MilInstructionKind::AllocObj(_, tgt) => {
-            validate_target(tgt, MilType::Ref, state);
+            validate_target(tgt, Some(MilType::Ref), state);
         },
         MilInstructionKind::AllocArray(_, tgt, ref len) => {
             validate_operand(len, MilType::Int, state);
-            validate_target(tgt, MilType::Ref, state);
+            validate_target(tgt, Some(MilType::Ref), state);
         },
         MilInstructionKind::GetVTable(tgt, ref obj) => {
             validate_operand(obj, MilType::Ref, state);
-            validate_target(tgt, MilType::Addr, state);
+            validate_target(tgt, Some(MilType::Addr), state);
         },
         MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
             validate_operand(vtable, MilType::Addr, state);
-            validate_target(tgt, MilType::Bool, state);
+            validate_target(tgt, Some(MilType::Bool), state);
         }
     };
 }
 
 fn validate_end_instr(
-    mut validate_target: impl FnMut (MilRegister, MilType, &mut ValidatorState),
+    mut validate_target: impl FnMut (MilRegister, Option<MilType>, &mut ValidatorState),
     mut validate_operand: impl FnMut (&MilOperand, MilType, &mut ValidatorState),
     mut validate_block_target: impl FnMut(MilBlockId, &mut ValidatorState),
     end_instr: &MilEndInstruction,
@@ -253,7 +246,7 @@ fn validate_end_instr(
             for arg in args.iter() {
                 validate_operand(arg, arg.get_type(), state);
             };
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, MilType::for_class_return(constraint), state);
         },
         MilEndInstructionKind::CallVirtual(constraint, _, tgt, ref vtable, ref args) => {
             // TODO Typecheck calls
@@ -261,7 +254,7 @@ fn validate_end_instr(
             for arg in args.iter() {
                 validate_operand(arg, arg.get_type(), state);
             };
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, MilType::for_class_return(constraint), state);
         },
         MilEndInstructionKind::CallInterface(constraint, _, tgt, ref vtable, ref args) => {
             // TODO Typecheck calls
@@ -269,21 +262,23 @@ fn validate_end_instr(
             for arg in args.iter() {
                 validate_operand(arg, arg.get_type(), state);
             };
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, MilType::for_class_return(constraint), state);
         },
         MilEndInstructionKind::CallNative(constraint, _, tgt, ref args) => {
             // TODO Typecheck calls
             for arg in args.iter() {
                 validate_operand(arg, arg.get_type(), state);
             };
-            validate_target(tgt, MilType::for_class(constraint), state);
+            validate_target(tgt, MilType::for_class_return(constraint), state);
         },
         MilEndInstructionKind::Throw(ref val) => {
             validate_operand(val, MilType::Ref, state);
         },
         MilEndInstructionKind::Return(ref val) => {
             // TODO Typecheck returns
-            validate_operand(val, val.get_type(), state);
+            if let Some(ref val) = val {
+                validate_operand(val, val.get_type(), state);
+            };
         },
         MilEndInstructionKind::Jump(tgt) => {
             validate_block_target(tgt, state);
@@ -320,7 +315,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
                 state.push_error(ValidatorErrorKind::PhiEntriesMismatch(preds.clone()));
             };
 
-            validate_target(phi.target, phi.ty, &mut state);
+            validate_target(phi.target, Some(phi.ty), &mut state);
             validate_bytecode(phi.bytecode, &mut state);
         };
 
@@ -348,9 +343,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
             state.loc = ValidatorLocation::Phi(block_id, i);
 
             for &(ref op, pred) in phi.sources.iter() {
-                if op != &MilOperand::Register(MilType::Void, MilRegister::VOID) {
-                    validate_operand(op, phi.ty, Some(pred), &mut state);
-                };
+                validate_operand(op, phi.ty, Some(pred), &mut state);
             };
         };
 

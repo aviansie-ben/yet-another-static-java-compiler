@@ -168,7 +168,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
 
     let call_instr = mem::replace(&mut call_block.end_instr.kind, MilEndInstructionKind::Nop);
     let (return_ty, return_reg, args) = if let MilEndInstructionKind::Call(return_class, _, return_reg, args) = call_instr {
-        (MilType::for_class(return_class), return_reg, args)
+        (MilType::for_class_return(return_class), return_reg, args)
     } else {
         unreachable!()
     };
@@ -265,7 +265,9 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
         });
 
         if let MilEndInstructionKind::Return(ref mut val) = new_block.end_instr.kind {
-            return_phi_sources.push((mem::replace(val, MilOperand::Register(MilType::Void, MilRegister::VOID)), new_block_id));
+            if let Some(val) = val.take() {
+                return_phi_sources.push((val, new_block_id));
+            };
             new_block.end_instr.kind = MilEndInstructionKind::Jump(return_block);
         };
 
@@ -277,7 +279,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     if return_reg != MilRegister::VOID {
         return_block.phi_nodes.push(MilPhiNode {
             target: return_reg,
-            ty: return_ty,
+            ty: return_ty.unwrap(),
             sources: return_phi_sources,
             bytecode: call_loc
         });
@@ -357,7 +359,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(1))),
+                kind: MilEndInstructionKind::Return(Some(MilOperand::Register(MilType::Int, MilRegister(1)))),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -383,7 +385,7 @@ mod test {
                 }
             ],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(0))),
+                kind: MilEndInstructionKind::Return(Some(MilOperand::Register(MilType::Int, MilRegister(0)))),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -448,7 +450,7 @@ mod test {
         assert!(block_1.instrs.is_empty());
         assert_eq!(
             MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(1))),
+                kind: MilEndInstructionKind::Return(Some(MilOperand::Register(MilType::Int, MilRegister(1)))),
                 bytecode: (!0, 1)
             },
             block_1.end_instr
@@ -483,7 +485,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID)),
+                kind: MilEndInstructionKind::Return(None),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -561,7 +563,7 @@ mod test {
             ],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID)),
+                kind: MilEndInstructionKind::Return(None),
                 bytecode: (!0, 1)
             },
             exception_successors: vec![]
@@ -588,7 +590,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Int(0)),
+                kind: MilEndInstructionKind::Return(Some(MilOperand::Int(0))),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]
@@ -598,7 +600,7 @@ mod test {
             phi_nodes: vec![],
             instrs: vec![],
             end_instr: MilEndInstruction {
-                kind: MilEndInstructionKind::Return(MilOperand::Int(1)),
+                kind: MilEndInstructionKind::Return(Some(MilOperand::Int(1))),
                 bytecode: (!0, 0)
             },
             exception_successors: vec![]

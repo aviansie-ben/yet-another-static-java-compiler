@@ -114,6 +114,9 @@ fn define_function<'a>(module: &MochaModule<'a, '_, '_>, func: &MilFunction) -> 
 fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs: &HashMap<MilRegister, LLVMValue<'a>>) -> LLVMValue<'a> {
     match *op {
         MilOperand::Register(_, r) => regs[&r],
+        MilOperand::Poison(ty) => unsafe {
+            LLVMValue::from_raw(LLVMGetUndef(native_arg_type(ty, &module.types)))
+        },
         MilOperand::AddrNull => module.const_addr_null(),
         MilOperand::RefNull => module.const_obj_null(),
         MilOperand::KnownObject(object_id, _) => unsafe {
@@ -132,7 +135,6 @@ fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs:
 
 fn native_arg_type(ty: MilType, types: &LLVMTypes) -> LLVMTypeRef {
     match ty {
-        MilType::Void => types.void,
         MilType::Addr => types.any_raw_pointer,
         MilType::Ref => types.any_object_pointer,
         MilType::Bool => types.bool,
@@ -262,7 +264,6 @@ fn coerce_after_load<'a>(builder: &LLVMBuilder<'a>, class_id: ClassId, val: LLVM
 
 fn undefined_register_value<'a>(module: &MochaModule<'a, '_, '_>, ty: MilType) -> LLVMValue<'a> {
     match ty {
-        MilType::Void => module.const_addr_null(),
         MilType::Addr => module.const_addr_null(),
         MilType::Ref => module.const_obj_null(),
         MilType::Bool => module.const_bool(false),
@@ -883,7 +884,7 @@ unsafe fn emit_basic_block<'a, 'b>(
                 .collect_vec();
 
             let func_ty = LLVMFunctionType(
-                native_arg_type(MilType::for_class(ret_ty), &module.types),
+                MilType::for_class_return(ret_ty).map_or(module.types.void, |ret_ty| native_arg_type(ret_ty, &module.types)),
                 arg_tys.as_mut_ptr(),
                 arg_tys.len() as u32,
                 0
@@ -904,10 +905,10 @@ unsafe fn emit_basic_block<'a, 'b>(
             builder.build_call(LLVMValue::from_raw(module.builtins.throw), &[exception], None);
             builder.build_unreachable();
         },
-        MilEndInstructionKind::Return(MilOperand::Register(_, MilRegister::VOID)) => {
+        MilEndInstructionKind::Return(None) => {
             builder.build_ret_void();
         },
-        MilEndInstructionKind::Return(ref val) => {
+        MilEndInstructionKind::Return(Some(ref val)) => {
             let val = builder.build_bit_cast(
                 create_value_ref(module, val, &local_regs),
                 LLVMGetReturnType(module.types.method_types[&func.id]),

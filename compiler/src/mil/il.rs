@@ -164,7 +164,6 @@ impl BitVecIndex for MilBlockId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MilType {
-    Void,
     Addr,
     Ref,
     Bool,
@@ -175,9 +174,16 @@ pub enum MilType {
 }
 
 impl MilType {
+    pub fn for_class_return(class_id: ClassId) -> Option<MilType> {
+        match class_id {
+            ClassId::PRIMITIVE_VOID => None,
+            _ => Some(MilType::for_class(class_id))
+        }
+    }
+
     pub fn for_class(class_id: ClassId) -> MilType {
         match class_id {
-            ClassId::PRIMITIVE_VOID => MilType::Void,
+            ClassId::PRIMITIVE_VOID => unreachable!(),
             ClassId::PRIMITIVE_BYTE => MilType::Int,
             ClassId::PRIMITIVE_CHAR => MilType::Int,
             ClassId::PRIMITIVE_DOUBLE => MilType::Double,
@@ -194,7 +200,6 @@ impl MilType {
 impl fmt::Display for MilType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            MilType::Void => write!(f, "void"),
             MilType::Addr => write!(f, "addr"),
             MilType::Ref => write!(f, "ref"),
             MilType::Bool => write!(f, "bool"),
@@ -262,6 +267,7 @@ pub struct MilKnownObjectId(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MilOperand {
     Register(MilType, MilRegister),
+    Poison(MilType),
     AddrNull,
     RefNull,
     KnownObject(MilKnownObjectId, ClassId),
@@ -276,6 +282,7 @@ impl MilOperand {
     pub fn get_type(&self) -> MilType {
         match *self {
             MilOperand::Register(ty, _) => ty,
+            MilOperand::Poison(ty) => ty,
             MilOperand::AddrNull => MilType::Addr,
             MilOperand::RefNull => MilType::Ref,
             MilOperand::KnownObject(_, _) => MilType::Ref,
@@ -323,8 +330,8 @@ struct PrettyMilOperand<'a>(&'a MilOperand, &'a ClassEnvironment);
 impl <'a> fmt::Display for PrettyMilOperand<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.0 {
-            MilOperand::Register(MilType::Void, MilRegister::VOID) => write!(f, "void"),
             MilOperand::Register(ty, reg) => write!(f, "{}:{}", ty, reg),
+            MilOperand::Poison(ty) => write!(f, "{}:poison", ty),
             MilOperand::AddrNull => write!(f, "addr:null"),
             MilOperand::RefNull => write!(f, "ref:null"),
             MilOperand::KnownObject(id, cls) => write!(f, "ref:<obj_{} {}>", id.0, self.1.get(cls).name(self.1)),
@@ -848,7 +855,7 @@ pub enum MilEndInstructionKind {
     CallInterface(ClassId, MethodId, MilRegister, MilOperand, Vec<MilOperand>),
     CallNative(ClassId, String, MilRegister, Vec<MilOperand>),
     Throw(MilOperand),
-    Return(MilOperand),
+    Return(Option<MilOperand>),
     Jump(MilBlockId),
     JumpIf(MilBlockId, MilBlockId, MilOperand)
 }
@@ -1164,27 +1171,27 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Unreachable => {
                 write!(f, "unreachable")?;
             },
-            MilEndInstructionKind::Call(ty, method_id, tgt, ref args) => {
-                write!(f, "call_{} <{}> {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt)?;
+            MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
+                write!(f, "call <{}> {}", MethodName(method_id, self.1), tgt)?;
 
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
-            MilEndInstructionKind::CallVirtual(ty, method_id, tgt, ref obj, ref args) => {
-                write!(f, "call_virtual_{} <{}> {}, {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+            MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
+                write!(f, "call_virtual <{}> {}, {}", MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
-            MilEndInstructionKind::CallInterface(ty, method_id, tgt, ref obj, ref args) => {
-                write!(f, "call_interface_{} <{}> {}, {}", MilType::for_class(ty), MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+            MilEndInstructionKind::CallInterface(_, method_id, tgt, ref obj, ref args) => {
+                write!(f, "call_interface <{}> {}, {}", MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
-            MilEndInstructionKind::CallNative(ty, ref name, tgt, ref args) => {
-                write!(f, "call_native_{} <{}> {}", MilType::for_class(ty), name, tgt)?;
+            MilEndInstructionKind::CallNative(_, ref name, tgt, ref args) => {
+                write!(f, "call_native <{}> {}", name, tgt)?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
@@ -1192,7 +1199,10 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
             MilEndInstructionKind::Throw(ref val) => {
                 write!(f, "throw {}", val.pretty(self.1))?;
             },
-            MilEndInstructionKind::Return(ref val) => {
+            MilEndInstructionKind::Return(None) => {
+                write!(f, "ret void")?;
+            }
+            MilEndInstructionKind::Return(Some(ref val)) => {
                 write!(f, "ret {}", val.pretty(self.1))?;
             },
             MilEndInstructionKind::Jump(block) => {
@@ -1290,7 +1300,8 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(ref val) => {
                 f(val);
             },
-            MilEndInstructionKind::Return(ref val) => {
+            MilEndInstructionKind::Return(None) => {},
+            MilEndInstructionKind::Return(Some(ref val)) => {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
@@ -1329,7 +1340,8 @@ impl MilEndInstruction {
             MilEndInstructionKind::Throw(ref mut val) => {
                 f(val);
             },
-            MilEndInstructionKind::Return(ref mut val) => {
+            MilEndInstructionKind::Return(None) => {},
+            MilEndInstructionKind::Return(Some(ref mut val)) => {
                 f(val);
             },
             MilEndInstructionKind::Jump(_) => {},
@@ -1424,7 +1436,7 @@ impl MilPhiNode {
     pub fn dummy() -> Self {
         MilPhiNode {
             target: MilRegister::VOID,
-            ty: MilType::Void,
+            ty: MilType::Int,
             sources: smallvec![],
             bytecode: (!0, !0)
         }

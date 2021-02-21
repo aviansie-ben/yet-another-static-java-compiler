@@ -66,9 +66,9 @@ pub fn simplify_phis(func: &mut MilFunction, env: &ClassEnvironment, log: &Log) 
             let block = func.blocks.get_mut(&block_id).unwrap();
 
             block.phi_nodes.drain_filter(|phi| {
-                if phi.sources.iter().any(|(op, _)| op == &MilOperand::Register(MilType::Void, MilRegister::VOID)) {
-                    log_writeln!(log, "Replacing poisoned phi node {} with $void", phi.target);
-                    to_simplify.insert(phi.target, MilOperand::Register(MilType::Void, MilRegister::VOID));
+                if phi.sources.iter().any(|(op, _)| matches!(*op, MilOperand::Poison(_))) {
+                    log_writeln!(log, "Replacing poisoned phi node {} with poison", phi.target);
+                    to_simplify.insert(phi.target, MilOperand::Poison(phi.ty));
                     true
                 } else {
                     let first_real_source = phi.sources.iter().filter_map(|(op, _)| {
@@ -528,8 +528,8 @@ mod tests {
     fn test_eliminate_trivial_dead_block() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
-        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
+        func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
         let mut cfg = FlowGraph::for_function(&func);
@@ -547,7 +547,7 @@ mod tests {
     fn test_eliminate_dead_block_with_edge_to_live_block() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(0))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -572,7 +572,7 @@ mod tests {
             MilBlockId(1),
             &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(2), MilBlockId(2))], bytecode: NO_BYTECODE }],
             &[],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
@@ -595,7 +595,7 @@ mod tests {
     fn test_eliminate_dead_block_single_loop() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -613,7 +613,7 @@ mod tests {
     fn test_eliminate_dead_block_multi_loop() {
         let mut func = MilFunction::new(MethodId::UNRESOLVED);
 
-        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
@@ -638,7 +638,7 @@ mod tests {
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
         func.blocks.insert(MilBlockId(2), create_test_block(MilBlockId(2), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(3), create_test_block(MilBlockId(3), &[], &[], MilEndInstructionKind::Jump(MilBlockId(2))));
-        func.blocks.insert(MilBlockId(4), create_test_block(MilBlockId(4), &[], &[], MilEndInstructionKind::Return(MilOperand::RefNull)));
+        func.blocks.insert(MilBlockId(4), create_test_block(MilBlockId(4), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
 
         let mut cfg = FlowGraph::for_function(&func);
@@ -740,9 +740,9 @@ mod tests {
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
-            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Void, MilRegister::VOID), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Poison(MilType::Int), MilBlockId(0)), (MilOperand::Register(MilType::Int, MilRegister(1)), MilBlockId(1))], bytecode: NO_BYTECODE }],
             &[
-                MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
+                MilInstructionKind::Copy(MilRegister(1), MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
             MilEndInstructionKind::Nop
         ));
@@ -750,7 +750,7 @@ mod tests {
 
         assert_eq!(simplify_phis(&mut func, &TEST_ENV, &Log::none()), 1);
         assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
-        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Void, MilRegister::VOID)));
+        assert_eq!(func.blocks[&MilBlockId(0)].instrs[0].kind, MilInstructionKind::Copy(MilRegister(1), MilOperand::Poison(MilType::Int)));
     }
 
     #[test]
@@ -793,7 +793,7 @@ mod tests {
             &[
                 MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Register(MilType::Int, MilRegister(0)))
             ],
-            MilEndInstructionKind::Return(MilOperand::Register(MilType::Int, MilRegister(0)))
+            MilEndInstructionKind::Return(Some(MilOperand::Register(MilType::Int, MilRegister(0))))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -801,7 +801,7 @@ mod tests {
         assert!(func.blocks[&MilBlockId(0)].phi_nodes.is_empty());
         assert_eq!(func.blocks[&MilBlockId(1)].phi_nodes[0].sources.clone().into_vec(), vec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))]);
         assert_eq!(func.blocks[&MilBlockId(1)].instrs[0].kind, MilInstructionKind::Copy(MilRegister::VOID, MilOperand::Int(0)));
-        assert_eq!(func.blocks[&MilBlockId(1)].end_instr.kind, MilEndInstructionKind::Return(MilOperand::Int(0)));
+        assert_eq!(func.blocks[&MilBlockId(1)].end_instr.kind, MilEndInstructionKind::Return(Some(MilOperand::Int(0))));
     }
 
     #[test]
@@ -844,7 +844,7 @@ mod tests {
             MilBlockId(1),
             &[],
             &[MilInstructionKind::Copy(MilRegister(1), MilOperand::Int(1))],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(2, block_0.instrs.len());
         assert_eq!(MilInstructionKind::Copy(MilRegister(0), MilOperand::Int(0)), block_0.instrs[0].kind);
         assert_eq!(MilInstructionKind::Copy(MilRegister(1), MilOperand::Int(1)), block_0.instrs[1].kind);
-        assert_eq!(MilEndInstructionKind::Return(MilOperand::RefNull), block_0.end_instr.kind);
+        assert_eq!(MilEndInstructionKind::Return(Some(MilOperand::RefNull)), block_0.end_instr.kind);
 
         let cfg_0 = cfg.get(MilBlockId(0));
         assert_eq!(vec![MilBlockId::ENTRY], cfg_0.incoming);
@@ -939,7 +939,7 @@ mod tests {
             MilBlockId(2),
             &[],
             &[MilInstructionKind::Copy(MilRegister(2), MilOperand::Int(2))],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
 
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(MilInstructionKind::Copy(MilRegister(0), MilOperand::Int(0)), block_0.instrs[0].kind);
         assert_eq!(MilInstructionKind::Copy(MilRegister(1), MilOperand::Int(1)), block_0.instrs[1].kind);
         assert_eq!(MilInstructionKind::Copy(MilRegister(2), MilOperand::Int(2)), block_0.instrs[2].kind);
-        assert_eq!(MilEndInstructionKind::Return(MilOperand::RefNull), block_0.end_instr.kind);
+        assert_eq!(MilEndInstructionKind::Return(Some(MilOperand::RefNull)), block_0.end_instr.kind);
 
         let cfg_0 = cfg.get(MilBlockId(0));
         assert_eq!(vec![MilBlockId::ENTRY], cfg_0.incoming);
@@ -983,7 +983,7 @@ mod tests {
             MilBlockId(2),
             &[],
             &[],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
 
@@ -1014,7 +1014,7 @@ mod tests {
             &[
                 MilInstructionKind::Nop
             ],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
 
@@ -1027,7 +1027,7 @@ mod tests {
         assert!(block_2.phi_nodes.is_empty());
         assert_eq!(1, block_2.instrs.len());
         assert_eq!(MilInstructionKind::Nop, block_2.instrs[0].kind);
-        assert_eq!(MilEndInstructionKind::Return(MilOperand::RefNull), block_2.end_instr.kind);
+        assert_eq!(MilEndInstructionKind::Return(Some(MilOperand::RefNull)), block_2.end_instr.kind);
 
         assert_eq!(vec![MilBlockId(2), MilBlockId(2)], cfg.get(MilBlockId(0)).outgoing);
         assert_eq!(vec![MilBlockId(0), MilBlockId(0)], cfg.get(MilBlockId(2)).incoming);
@@ -1053,7 +1053,7 @@ mod tests {
             MilBlockId(2),
             &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: (!0, 0) }],
             &[],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
 
@@ -1082,7 +1082,7 @@ mod tests {
             MilBlockId(2),
             &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }],
             &[],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
 
@@ -1130,7 +1130,7 @@ mod tests {
                 MilPhiNode { target: MilRegister(2), ty: MilType::Int, sources: smallvec![(MilOperand::Register(MilType::Int, MilRegister(0)), MilBlockId(3)), (MilOperand::Int(0), MilBlockId(1))], bytecode: (!0, 0) }
             ],
             &[],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
 
@@ -1180,7 +1180,7 @@ mod tests {
             &[
                 MilInstructionKind::Nop
             ],
-            MilEndInstructionKind::Return(MilOperand::RefNull)
+            MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3)];
 
@@ -1233,7 +1233,7 @@ mod tests {
             MilBlockId(4),
             &[],
             &[],
-            MilEndInstructionKind::Return(MilOperand::Register(MilType::Void, MilRegister::VOID))
+            MilEndInstructionKind::Return(None)
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2), MilBlockId(3), MilBlockId(4)];
 
