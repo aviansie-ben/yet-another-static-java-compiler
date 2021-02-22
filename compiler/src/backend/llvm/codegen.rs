@@ -531,6 +531,7 @@ unsafe fn emit_basic_block<'a, 'b>(
                     MilBinOp::FSub => builder.build_fsub(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::FMul => builder.build_fmul(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::FDiv => builder.build_fdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::FRem => builder.build_frem(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::FCmp(mode) => builder.build_select(
                         builder.build_fcmp(LLVMRealPredicate::LLVMRealOEQ, lhs, rhs, None),
                         module.const_int(0),
@@ -554,6 +555,7 @@ unsafe fn emit_basic_block<'a, 'b>(
                     MilBinOp::DSub => builder.build_fsub(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::DMul => builder.build_fmul(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::DDiv => builder.build_fdiv(lhs, rhs, Some(register_name(tgt))),
+                    MilBinOp::DRem => builder.build_frem(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::DCmp(mode) => builder.build_select(
                         builder.build_fcmp(LLVMRealPredicate::LLVMRealOEQ, lhs, rhs, None),
                         module.const_int(0),

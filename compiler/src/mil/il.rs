@@ -648,11 +648,13 @@ pub enum MilBinOp {
     FSub,
     FMul,
     FDiv,
+    FRem,
     FCmp(MilFCmpMode),
     DAdd,
     DSub,
     DMul,
     DDiv,
+    DRem,
     DCmp(MilFCmpMode),
     RCmp(MilRefComparison)
 }
@@ -688,11 +690,13 @@ impl MilBinOp {
             MilBinOp::FSub => (MilType::Float, MilType::Float, MilType::Float),
             MilBinOp::FMul => (MilType::Float, MilType::Float, MilType::Float),
             MilBinOp::FDiv => (MilType::Float, MilType::Float, MilType::Float),
+            MilBinOp::FRem => (MilType::Float, MilType::Float, MilType::Float),
             MilBinOp::FCmp(_) => (MilType::Int, MilType::Float, MilType::Float),
             MilBinOp::DAdd => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DSub => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DMul => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DDiv => (MilType::Double, MilType::Double, MilType::Double),
+            MilBinOp::DRem => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double),
             MilBinOp::RCmp(_) => (MilType::Bool, MilType::Ref, MilType::Ref)
         }
@@ -728,12 +732,14 @@ impl MilBinOp {
             MilBinOp::FSub => None,
             MilBinOp::FMul => Some(MilBinOp::FMul),
             MilBinOp::FDiv => None,
+            MilBinOp::FRem => None,
             MilBinOp::FCmp(_) => None,
             MilBinOp::DAdd => Some(MilBinOp::DAdd),
             MilBinOp::DSub => None,
             MilBinOp::DMul => Some(MilBinOp::DMul),
             MilBinOp::DDiv => None,
             MilBinOp::DCmp(_) => None,
+            MilBinOp::DRem => None,
             MilBinOp::RCmp(cmp) => Some(MilBinOp::RCmp(cmp))
         }
     }
@@ -768,11 +774,13 @@ impl MilBinOp {
             MilBinOp::FSub => false,
             MilBinOp::FMul => false,
             MilBinOp::FDiv => false,
+            MilBinOp::FRem => false,
             MilBinOp::FCmp(_) => false,
             MilBinOp::DAdd => false,
             MilBinOp::DSub => false,
             MilBinOp::DMul => false,
             MilBinOp::DDiv => false,
+            MilBinOp::DRem => false,
             MilBinOp::DCmp(_) => false,
             MilBinOp::RCmp(_) => false
         }
@@ -810,12 +818,14 @@ impl fmt::Display for MilBinOp {
             MilBinOp::FSub => write!(f, "fsub"),
             MilBinOp::FMul => write!(f, "fmul"),
             MilBinOp::FDiv => write!(f, "fdiv"),
+            MilBinOp::FRem => write!(f, "frem"),
             MilBinOp::FCmp(MilFCmpMode::L) => write!(f, "fcmpl"),
             MilBinOp::FCmp(MilFCmpMode::G) => write!(f, "fcmpg"),
             MilBinOp::DAdd => write!(f, "dadd"),
             MilBinOp::DSub => write!(f, "dsub"),
             MilBinOp::DMul => write!(f, "dmul"),
             MilBinOp::DDiv => write!(f, "ddiv"),
+            MilBinOp::DRem => write!(f, "drem"),
             MilBinOp::DCmp(MilFCmpMode::L) => write!(f, "dcmpl"),
             MilBinOp::DCmp(MilFCmpMode::G) => write!(f, "dcmpg"),
             MilBinOp::RCmp(cond) => write!(f, "rcmp.{}", cond.name())

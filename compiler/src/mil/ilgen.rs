@@ -920,6 +920,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::FDiv => {
                 generate_bin_op(builder, &mut stack, MilBinOp::FDiv, MilType::Float, MilType::Float, MilType::Float);
             },
+            BytecodeInstruction::FRem => {
+                generate_bin_op(builder, &mut stack, MilBinOp::FRem, MilType::Float, MilType::Float, MilType::Float);
+            },
             BytecodeInstruction::D2I => {
                 generate_un_op(builder, &mut stack, MilUnOp::D2I, MilType::Double, MilType::Int);
             },
@@ -943,6 +946,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             },
             BytecodeInstruction::DDiv => {
                 generate_bin_op(builder, &mut stack, MilBinOp::DDiv, MilType::Double, MilType::Double, MilType::Double);
+            },
+            BytecodeInstruction::DRem => {
+                generate_bin_op(builder, &mut stack, MilBinOp::DRem, MilType::Double, MilType::Double, MilType::Double);
             },
             // TODO Support multithreading
             BytecodeInstruction::MonitorEnter => {

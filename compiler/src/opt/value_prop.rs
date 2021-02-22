@@ -208,6 +208,7 @@ fn try_fold_bin_op(op: MilBinOp, lhs: &MilOperand, rhs: &MilOperand) -> Option<M
         MilBinOp::FSub => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x - y).to_bits())),
         MilBinOp::FMul => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x * y).to_bits())),
         MilBinOp::FDiv => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x / y).to_bits())),
+        MilBinOp::FRem => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Float((x % y).to_bits())),
         MilBinOp::FCmp(mode) => try_fold_bin_float_float(lhs, rhs, |x, y| MilOperand::Int(
             match x.partial_cmp(&y) {
                 Some(Ordering::Less) => -1,
@@ -223,6 +224,7 @@ fn try_fold_bin_op(op: MilBinOp, lhs: &MilOperand, rhs: &MilOperand) -> Option<M
         MilBinOp::DSub => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x - y).to_bits())),
         MilBinOp::DMul => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x * y).to_bits())),
         MilBinOp::DDiv => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x / y).to_bits())),
+        MilBinOp::DRem => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Double((x % y).to_bits())),
         MilBinOp::DCmp(mode) => try_fold_bin_double_double(lhs, rhs, |x, y| MilOperand::Int(
             match x.partial_cmp(&y) {
                 Some(Ordering::Less) => -1,

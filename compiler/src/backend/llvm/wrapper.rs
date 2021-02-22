@@ -754,6 +754,12 @@ impl <'a> LLVMBuilder<'a> {
         }
     }
 
+    pub fn build_frem(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildFRem(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
     pub fn build_call(&self, func: LLVMValue<'a>, args: &[LLVMValue<'a>], name: Option<CString>) -> LLVMValue<'a> {
         unsafe {
             let mut args = args.iter().map(|arg| arg.ptr()).collect_vec();
