@@ -289,7 +289,7 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     block_map
 }
 
-pub fn inline_from_plan(func: &mut MilFunction, program: &MilProgram, plan: &InliningPlan, env: &ClassEnvironment) {
+pub fn inline_from_plan(func: &mut MilFunction, program: &MilProgram, plan: &InliningPlan) {
     let mut block_map: HashMap<_, _> = func.block_order.iter().copied()
         .map(|block_id| (InliningSite::root().sub_site(block_id), block_id))
         .collect();
@@ -298,10 +298,7 @@ pub fn inline_from_plan(func: &mut MilFunction, program: &MilProgram, plan: &Inl
         let call_block_id = *&block_map[&inline_site];
         let callee = &program.funcs[&method_id];
 
-        eprintln!("{}\n\n{}", MethodName(method_id, env), func.pretty(env));
-
         for (old_block_id, new_block_id) in inline_single_method(func, callee, call_block_id) {
-            validate_function(func, env);
             block_map.insert(inline_site.sub_site(old_block_id), new_block_id);
         };
     };
@@ -318,7 +315,7 @@ pub fn run_inliner<I: Inliner>(program: &mut MilProgram, inliner: I, env: &Optim
         log_writeln!(env.log, "{}\n", plan.pretty(env.env));
 
         let mut func = func.clone();
-        inline_from_plan(&mut func, program, &plan, env.env);
+        inline_from_plan(&mut func, program, &plan);
 
         validate_function(&func, env.env);
 
