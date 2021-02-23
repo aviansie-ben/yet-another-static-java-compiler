@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::hash::Hash;
 
 use itertools::Itertools;
+
+use crate::util::BitVec;
 
 use super::il::*;
 
@@ -171,6 +173,22 @@ impl FlowGraph<MilBlockId> {
 
     pub fn get_exit_mut(&mut self) -> &mut FlowGraphNode<MilBlockId> {
         self.get_mut(MilBlockId::EXIT)
+    }
+
+    pub fn compute_reachability(&self) -> BitVec<MilBlockId> {
+        let mut reachable = BitVec::new();
+        let mut worklist = VecDeque::new();
+        worklist.push_back(MilBlockId::ENTRY);
+
+        while let Some(block_id) = worklist.pop_front() {
+            for succ_id in self.get(block_id).outgoing.iter().copied() {
+                if succ_id != MilBlockId::EXIT && !reachable.set(succ_id, true) {
+                    worklist.push_back(succ_id);
+                };
+            };
+        };
+
+        reachable
     }
 }
 

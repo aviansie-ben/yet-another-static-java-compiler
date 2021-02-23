@@ -67,6 +67,7 @@ struct ValidatorState<'a> {
     doms: Dominators,
     regs_seen: Vec<MilRegister>,
     loc: ValidatorLocation,
+    reachable: bool,
     regs: HashMap<MilRegister, (ValidatorLocation, MilType)>,
     errors: Vec<ValidatorError>
 }
@@ -93,7 +94,9 @@ fn validate_operand(op: &MilOperand, expected_ty: MilType, phi_block: Option<Mil
                 };
                 Some((reg, def_loc))
             } else {
-                state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
+                if state.reachable {
+                    state.push_error(ValidatorErrorKind::OperandUndefinedRegister(op.clone()));
+                };
                 None
             }
         },
@@ -293,11 +296,13 @@ fn validate_end_instr(
 
 fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Vec<ValidatorError> {
     let cfg = FlowGraph::for_function(func);
+    let reachable = cfg.compute_reachability();
     let mut state = ValidatorState {
         func,
         doms: Dominators::calculate_dominators(func, &cfg),
         regs_seen: vec![],
         loc: ValidatorLocation::EndInstruction(MilBlockId::ENTRY),
+        reachable: true,
         regs: HashMap::new(),
         errors: vec![]
     };
@@ -330,7 +335,8 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
         validate_bytecode(block.end_instr.bytecode, &mut state);
     };
 
-    if func.blocks[func.block_order.last().unwrap()].end_instr.can_fall_through() {
+    let last_block_id = func.block_order.last().copied().unwrap();
+    if func.blocks[&last_block_id].end_instr.can_fall_through() && reachable.get(last_block_id) {
         state.push_error(ValidatorErrorKind::FallsThroughLastBlock);
     };
 
@@ -343,6 +349,7 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
             state.loc = ValidatorLocation::Phi(block_id, i);
 
             for &(ref op, pred) in phi.sources.iter() {
+                state.reachable = reachable.get(pred);
                 validate_operand(op, phi.ty, Some(pred), &mut state);
             };
         };
@@ -350,6 +357,8 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
         for phi in block.phi_nodes.iter() {
             state.regs_seen.push(phi.target);
         };
+
+        state.reachable = reachable.get(block_id);
 
         for (i, instr) in block.instrs.iter().enumerate() {
             state.loc = ValidatorLocation::Instruction(block_id, i);

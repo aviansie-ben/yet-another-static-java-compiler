@@ -11,23 +11,11 @@ use crate::mil::flow_graph::{FlowGraph, FlowGraphNode};
 use crate::mil::il::*;
 use crate::mil::transform;
 use crate::resolve::ClassEnvironment;
-use crate::util::BitVec;
 
 pub fn eliminate_dead_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== DEAD BLOCK ELIMINATION =====\n");
 
-    let mut reachable = BitVec::new();
-    let mut worklist = VecDeque::new();
-    worklist.push_back(MilBlockId::ENTRY);
-
-    while let Some(block_id) = worklist.pop_front() {
-        for succ_id in cfg.get(block_id).outgoing.iter().copied() {
-            if succ_id != MilBlockId::EXIT && !reachable.set(succ_id, true) {
-                worklist.push_back(succ_id);
-            };
-        };
-    };
-
+    let reachable = cfg.compute_reachability();
     let blocks = &mut func.blocks;
     let num_eliminated = func.block_order.drain_filter(|&mut block_id| {
         if !reachable.get(block_id) {
