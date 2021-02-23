@@ -25,6 +25,8 @@ impl std::fmt::Display for Indent {
 
 fn ensure_clinit_unchecked(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
     liveness.needs_class_object.insert(class_id);
+    liveness.needs_clinit.insert(class_id);
+
     let class = match **env.get(class_id) {
         ResolvedClass::User(ref class) => class,
         ResolvedClass::Array(elem_id) => {
@@ -53,7 +55,7 @@ fn ensure_clinit_unchecked(env: &ClassEnvironment, liveness: &mut LivenessInfo, 
 }
 
 fn ensure_clinit(env: &ClassEnvironment, liveness: &mut LivenessInfo, class_id: ClassId, indent: &mut Indent, verbose: bool) {
-    if class_id == ClassId::UNRESOLVED || !liveness.needs_clinit.insert(class_id) {
+    if class_id == ClassId::UNRESOLVED || !liveness.needs_class_object.insert(class_id) {
         return;
     };
 

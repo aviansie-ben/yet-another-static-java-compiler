@@ -10,7 +10,7 @@ use super::flow_graph::*;
 use super::il::*;
 use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{AttributeCode, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, LocalVariableTableEntry, Method, MethodFlags, PrimitiveType, TypeDescriptor};
+use crate::classfile::{AttributeCode, Class, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, LocalVariableTableEntry, Method, MethodBody, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::liveness::LivenessInfo;
 use crate::resolve::{ClassEnvironment, ClassId, MethodId};
 
@@ -1704,21 +1704,20 @@ fn build_local_debug_map(code: &AttributeCode, table: &[LocalVariableTableEntry]
     }).unwrap()))
 }
 
-pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, liveness: &LivenessInfo, verbose: bool) -> Option<MilFunction> {
-    let (class, method) = env.get_method(method_id);
-
-    if method.flags.contains(MethodFlags::NATIVE) {
-        let name = format!("{}_{}", class.meta.name.replace('/', "_"), method.name);
-        return Some(generate_native_thunk(name, method, method_id, known_objects, env));
-    } else if method.flags.contains(MethodFlags::ABSTRACT) {
-        return None;
-    };
-
+pub fn generate_il_for_code(
+    env: &ClassEnvironment,
+    method_id: MethodId,
+    class: &Class,
+    method: &Method,
+    code: &AttributeCode,
+    known_objects: &MilKnownObjectRefs,
+    liveness: &LivenessInfo,
+    verbose: bool
+) -> MilFunction {
     if verbose {
         eprintln!("===== MIL Generation for {}.{}{} =====\n", class.meta.name, method.name, method.descriptor);
     };
 
-    let code = method.code_attribute().unwrap();
     let instrs = BytecodeIterator::for_code(code);
 
     let mut locals = MilLocals::new(code.max_locals);
@@ -1771,5 +1770,15 @@ pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known
         eprintln!("\n\n{}", func.pretty(env));
     };
 
-    Some(func)
+    func
+}
+
+pub fn generate_il_for_method(env: &ClassEnvironment, method_id: MethodId, known_objects: &MilKnownObjectRefs, liveness: &LivenessInfo, verbose: bool) -> Option<MilFunction> {
+    let (class, method) = env.get_method(method_id);
+
+    match method.body {
+        Some(MethodBody::Code(ref code)) => Some(generate_il_for_code(env, method_id, class, method, code, known_objects, liveness, verbose)),
+        Some(MethodBody::NativeThunk(ref name)) => Some(generate_native_thunk(String::from(name), method, method_id, known_objects, env)),
+        None => None
+    }
 }

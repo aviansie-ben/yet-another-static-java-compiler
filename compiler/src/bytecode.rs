@@ -2,7 +2,7 @@ use std::fmt;
 
 use byteorder::{BigEndian, ByteOrder};
 
-use crate::classfile::{AttributeCode, AttributeData, ConstantPoolEntry, Method, PrimitiveType};
+use crate::classfile::{AttributeCode, ConstantPoolEntry, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BytecodeCondition {
@@ -699,19 +699,6 @@ pub struct BytecodeIterator<'a>(pub &'a [u8], pub usize);
 impl <'a> BytecodeIterator<'a> {
     pub fn for_code(code: &'a AttributeCode) -> BytecodeIterator<'a> {
         BytecodeIterator(&code.code, 0)
-    }
-
-    pub fn for_method(method: &'a Method) -> Option<BytecodeIterator<'a>> {
-        for a in method.attributes.iter() {
-            match a.data {
-                AttributeData::Code(ref code) => {
-                    return Some(BytecodeIterator::for_code(code));
-                },
-                _ => {}
-            };
-        };
-
-        None
     }
 }
 

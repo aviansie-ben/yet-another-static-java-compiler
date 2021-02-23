@@ -212,17 +212,24 @@ fn main() {
 
     let start_summarize_methods = std::time::Instant::now();
     let mut num_methods_summarized = 0;
+    let mut summaries = vec![];
     for id in env.class_ids() {
-        if let resolve::ResolvedClass::User(ref mut class) = **env.get_mut(id) {
-            for (i, m) in class.methods.iter_mut().enumerate() {
-                if let Some(code) = bytecode::BytecodeIterator::for_method(m) {
-                    m.summary = static_interp::summarize_bytecode(
-                        code,
+        if let resolve::ResolvedClass::User(ref class) = **env.get(id) {
+            for (i, m) in class.methods.iter().enumerate() {
+                summaries.push(if let Some(classfile::MethodBody::Code(ref code)) = m.body {
+                    num_methods_summarized += 1;
+                    static_interp::summarize_bytecode(
+                        bytecode::BytecodeIterator::for_code(code),
                         resolve::MethodId(id, i as u16),
                         &class.constant_pool
-                    );
-                    num_methods_summarized += 1;
-                };
+                    )
+                } else {
+                    classfile::MethodSummary::empty()
+                });
+            };
+
+            for (method, summary) in env.get_mut(id).as_user_class_mut().methods.iter_mut().zip(summaries.drain(..)) {
+                method.summary = summary;
             };
         };
     };
@@ -239,7 +246,7 @@ fn main() {
     let start_heap = std::time::Instant::now();
     let constant_strings = static_heap::collect_constant_strings(liveness.may_use_strings.iter().cloned(), &mut env);
     let mut heap = unsafe { static_heap::JavaStaticHeap::new(&env, 64 * 1024 * 1024) };
-    if heap.init_class_objects(liveness.needs_clinit.iter().cloned().sorted_by_key(|cls| cls.0)).is_err() {
+    if heap.init_class_objects(liveness.needs_class_object.iter().cloned().sorted_by_key(|cls| cls.0)).is_err() {
         eprintln!("Failed to create class objects in static heap");
         return;
     };

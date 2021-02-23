@@ -392,6 +392,21 @@ impl MethodOverrideInfo {
 }
 
 #[derive(Debug, Clone)]
+pub enum MethodBody {
+    Code(AttributeCode),
+    NativeThunk(String)
+}
+
+impl MethodBody {
+    pub fn as_code(&self) -> Option<&AttributeCode> {
+        match *self {
+            MethodBody::Code(ref code) => Some(code),
+            MethodBody::NativeThunk(_) => None
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Method {
     pub flags: MethodFlags,
     pub name: Arc<str>,
@@ -401,21 +416,8 @@ pub struct Method {
     pub attributes: Vec<Attribute>,
     pub virtual_slot: u32,
     pub summary: MethodSummary,
-    pub overrides: MethodOverrideInfo
-}
-
-impl Method {
-    pub fn code_attribute(&self) -> Option<&AttributeCode> {
-        for attr in self.attributes.iter() {
-            match attr.data {
-                AttributeData::Code(ref code) => {
-                    return Some(code);
-                },
-                _ => {}
-            }
-        };
-        None
-    }
+    pub overrides: MethodOverrideInfo,
+    pub body: Option<MethodBody>
 }
 
 #[derive(Debug, Clone)]
@@ -963,7 +965,8 @@ fn parse_method<R: Read>(cp: &[ConstantPoolEntry], r: &mut R, i: u16) -> Result<
         attributes,
         virtual_slot: !0,
         summary: MethodSummary::empty(),
-        overrides: MethodOverrideInfo::empty()
+        overrides: MethodOverrideInfo::empty(),
+        body: None
     })
 }
 

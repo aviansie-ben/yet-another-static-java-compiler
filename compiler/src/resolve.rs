@@ -734,8 +734,17 @@ pub fn resolve_all_classes(env: &mut ClassEnvironment, verbose: bool) -> Result<
         };
 
         for m in resolving_class.methods.iter_mut() {
-            if let Some(instrs) = BytecodeIterator::for_method(m) {
-                for (_, instr) in instrs {
+            m.body = if m.flags.contains(MethodFlags::NATIVE) {
+                Some(MethodBody::NativeThunk(format!("{}_{}", resolving_class.meta.name.replace('/', "_"), m.name)))
+            } else {
+                m.attributes.drain_filter(|a| &*a.name == "Code").map(|a| match a.data {
+                    AttributeData::Code(code) => MethodBody::Code(code),
+                    _ => unreachable!()
+                }).next()
+            };
+
+            if let Some(MethodBody::Code(ref code)) = m.body {
+                for (_, instr) in BytecodeIterator::for_code(code) {
                     match instr.unwrap() {
                         BytecodeInstruction::ANewArray(cpe) => {
                             let cpe = match resolving_class.constant_pool[cpe as usize] {
@@ -1005,22 +1014,20 @@ pub fn resolve_all_subitem_references(env: &mut ClassEnvironment, verbose: bool)
                 |d| env.try_find_for_descriptor(d).unwrap_or(ClassId::UNRESOLVED)
             );
 
-            for attr in m.attributes.iter_mut() {
-                match attr.data {
-                    AttributeData::Code(ref mut code) => {
-                        for attr in code.attributes.iter_mut() {
-                            match attr.data {
-                                AttributeData::LocalVariableTable(ref mut table) => {
-                                    for entry in table.iter_mut() {
-                                        entry.class_id = env.try_find_for_descriptor(&entry.signature).unwrap_or(ClassId::UNRESOLVED);
-                                    };
-                                },
-                                _ => {}
-                            };
+            match m.body {
+                Some(MethodBody::Code(ref mut code)) => {
+                    for attr in code.attributes.iter_mut() {
+                        match attr.data {
+                            AttributeData::LocalVariableTable(ref mut table) => {
+                                for entry in table.iter_mut() {
+                                    entry.class_id = env.try_find_for_descriptor(&entry.signature).unwrap_or(ClassId::UNRESOLVED);
+                                };
+                            },
+                            _ => {}
                         };
-                    },
-                    _ => {}
-                };
+                    };
+                },
+                _ => {}
             };
         };
 

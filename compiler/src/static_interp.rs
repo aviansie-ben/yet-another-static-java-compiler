@@ -7,7 +7,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
-use crate::classfile::{AttributeData, Class, ClassFlags, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodFlags, MethodSummary, PrimitiveType};
+use crate::classfile::{AttributeData, Class, ClassFlags, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodBody, MethodFlags, MethodSummary, PrimitiveType};
 use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, ResolvedClass};
 use crate::layout;
 use crate::mil::il::MethodName;
@@ -1088,7 +1088,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
 
             self.class = class;
             self.method_id = method_id;
-            self.instrs = BytecodeIterator(&method.code_attribute().unwrap().code, off);
+            self.instrs = BytecodeIterator(&method.body.as_ref().and_then(MethodBody::as_code).unwrap().code, off);
 
             Result::Ok(false)
         } else {
@@ -1156,7 +1156,7 @@ impl <'a, 'b> InterpreterState<'a, 'b> {
                 eprintln!("    CALL {}.{}{}", class.meta.name, method.name, method.descriptor);
             };
 
-            let code = method.code_attribute().unwrap();
+            let code = method.body.as_ref().and_then(MethodBody::as_code).unwrap();
 
             let mut num_param_slots = method.descriptor.param_types.iter().map(|t| {
                 if t.array_dims == 0 {
@@ -1237,9 +1237,9 @@ fn do_compare_ref<'a>(i: Option<JavaStaticRef<'a>>, j: Option<JavaStaticRef<'a>>
 
 fn try_interpret(env: &ClassEnvironment, heap: &JavaStaticHeap, method_id: MethodId, verbose: bool) -> Result<(), StaticInterpretError> {
     let (class, method) = env.get_method(method_id);
-    let code = match method.code_attribute() {
-        Some(code) => code,
-        None => {
+    let code = match method.body {
+        Some(MethodBody::Code(ref code)) => code,
+        _ => {
             return Err(StaticInterpretError(StaticInterpretErrorKind::UnknownNativeCall(method_id), vec![]));
         }
     };
