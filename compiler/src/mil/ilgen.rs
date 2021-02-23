@@ -410,7 +410,8 @@ struct GenBlockInfo {
     preds: SmallVec<[usize; 2]>,
     succs: SmallVec<[usize; 2]>,
     blocks: Vec<MilBlockId>,
-    end_stack: Vec<Option<MilOperand>>
+    end_stack: Vec<Option<MilOperand>>,
+    fallthrough_bc: usize
 }
 
 impl GenBlockInfo {
@@ -419,7 +420,8 @@ impl GenBlockInfo {
             preds: smallvec![],
             succs: smallvec![],
             blocks: vec![],
-            end_stack: vec![]
+            end_stack: vec![],
+            fallthrough_bc: !0
         }
     }
 }
@@ -500,6 +502,7 @@ fn scan_blocks(instrs: BytecodeIterator) -> HashMap<usize, GenBlockInfo> {
     for (bc, instr) in instrs {
         if blocks.contains_key(&bc) {
             if can_fall_through {
+                blocks.get_mut(&current_block).unwrap().fallthrough_bc = bc;
                 edges.push((current_block, bc));
             } else {
                 can_fall_through = true;
@@ -634,7 +637,9 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         eprintln!("(Start of bytecode basic block at {})", off);
     };
 
-    let incoming_stacks = blocks.get(&off).unwrap().preds.iter().filter_map(|pred| {
+    let block_info = &blocks[&off];
+    let fallthrough_bc = block_info.fallthrough_bc;
+    let incoming_stacks = block_info.preds.iter().filter_map(|pred| {
         let pred = blocks.get(&pred).unwrap();
 
         if let Some(&pred_end_block) = pred.blocks.last() {
@@ -1200,16 +1205,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
-                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
                     builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
                         blocks[&target].blocks[0],
-                        fallthrough_block,
+                        blocks[&fallthrough_bc].blocks[0],
                         MilOperand::Register(MilType::Bool, cond_reg)
                     );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(cond_block);
             },
             BytecodeInstruction::IfICmp(cond, target) => {
                 let rhs = stack.pop(MilType::Int);
@@ -1228,16 +1232,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
-                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
                     builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
                         blocks[&target].blocks[0],
-                        fallthrough_block,
+                        blocks[&fallthrough_bc].blocks[0],
                         MilOperand::Register(MilType::Bool, cond_reg)
                     );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(cond_block);
             },
             BytecodeInstruction::IfACmp(cond, target) => {
                 let rhs = stack.pop(MilType::Ref);
@@ -1256,16 +1259,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
-                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
                     builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
                         blocks[&target].blocks[0],
-                        fallthrough_block,
+                        blocks[&fallthrough_bc].blocks[0],
                         MilOperand::Register(MilType::Bool, cond_reg)
                     );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(cond_block);
             },
             BytecodeInstruction::IfNonNull(target) => {
                 let cond_reg = builder.allocate_reg();
@@ -1282,16 +1284,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
-                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
                     builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
                         blocks[&target].blocks[0],
-                        fallthrough_block,
+                        blocks[&fallthrough_bc].blocks[0],
                         MilOperand::Register(MilType::Bool, cond_reg)
                     );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(cond_block);
             },
             BytecodeInstruction::IfNull(target) => {
                 let cond_reg = builder.allocate_reg();
@@ -1308,16 +1309,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                     MilBlockId::ENTRY,
                     MilOperand::Register(MilType::Bool, cond_reg)
                 ));
-                let fallthrough_block = builder.end_block();
 
                 fixups.push(Box::new(move |builder, blocks| {
                     builder.func.blocks.get_mut(&cond_block).unwrap().end_instr.kind = MilEndInstructionKind::JumpIf(
                         blocks[&target].blocks[0],
-                        fallthrough_block,
+                        blocks[&fallthrough_bc].blocks[0],
                         MilOperand::Register(MilType::Bool, cond_reg)
                     );
                 }));
-                end_block = Some(fallthrough_block);
+                end_block = Some(cond_block);
             },
             BytecodeInstruction::Goto(target) => {
                 let block = builder.append_end_instruction(MilEndInstructionKind::Jump(MilBlockId::ENTRY));
