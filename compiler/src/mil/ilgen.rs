@@ -12,7 +12,7 @@ use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeCode, Class, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, LocalVariableTableEntry, Method, MethodBody, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::liveness::LivenessInfo;
-use crate::resolve::{ClassEnvironment, ClassId, MethodId};
+use crate::resolve::{ClassEnvironment, ClassId, MethodId, ResolvedClass};
 
 pub struct MilBuilder<'a> {
     func: MilFunction,
@@ -632,6 +632,72 @@ fn generate_array_store(builder: &mut MilBuilder, stack: &mut MilVirtualStack, e
     builder.append_instruction(MilInstructionKind::PutArrayElement(elem_class, obj, idx, val));
 }
 
+fn generate_multianewarray(builder: &mut MilBuilder, dims: &[MilOperand], class: ClassId) -> MilOperand {
+    let elem_class = match **builder.env.get(class) {
+        ResolvedClass::Array(elem_class) => elem_class,
+        _ => unreachable!()
+    };
+
+    let len = &dims[0];
+    let array_reg = builder.allocate_reg();
+
+    builder.append_instruction(MilInstructionKind::AllocArray(class, array_reg, len.clone()));
+
+    if dims.len() > 1 {
+        let loop_skip_cond = builder.allocate_reg();
+        builder.append_instruction(MilInstructionKind::BinOp(
+            MilBinOp::ICmp(MilIntComparison::Eq),
+            loop_skip_cond,
+            len.clone(),
+            MilOperand::Int(0)
+        ));
+
+        let header_block = builder.end_block();
+        let idx = builder.append_phi_node(vec![(MilOperand::Int(0), header_block)]);
+
+        let loop_start_block = builder.end_block();
+        let inner_array = generate_multianewarray(builder, &dims[1..], elem_class);
+
+        builder.append_instruction(MilInstructionKind::PutArrayElement(
+            elem_class,
+            MilOperand::Register(MilType::Ref, array_reg),
+            idx.clone(),
+            inner_array
+        ));
+
+        let next_idx = builder.allocate_reg();
+        let loop_cond = builder.allocate_reg();
+
+        builder.append_instruction(MilInstructionKind::BinOp(MilBinOp::IAdd, next_idx, idx, MilOperand::Int(1)));
+        builder.append_instruction(MilInstructionKind::BinOp(
+            MilBinOp::ICmp(MilIntComparison::Ne),
+            loop_cond,
+            MilOperand::Register(MilType::Int, next_idx),
+            len.clone()
+        ));
+
+        let loop_check_block = builder.end_block();
+        let loop_end_block = builder.end_block();
+
+        builder.insert_end_instruction(loop_check_block, MilEndInstructionKind::JumpIf(
+            loop_start_block,
+            loop_end_block,
+            MilOperand::Register(MilType::Bool, loop_cond)
+        ));
+        builder.insert_end_instruction(header_block, MilEndInstructionKind::JumpIf(
+            loop_end_block,
+            loop_start_block,
+            MilOperand::Register(MilType::Bool, loop_skip_cond)
+        ));
+
+        builder.func.blocks.get_mut(&loop_start_block).unwrap().phi_nodes[0].sources.push(
+            (MilOperand::Register(MilType::Int, next_idx), loop_check_block)
+        );
+    };
+
+    MilOperand::Register(MilType::Ref, array_reg)
+}
+
 fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code: &AttributeCode, off: usize, cp: &[ConstantPoolEntry], blocks: &mut HashMap<usize, GenBlockInfo>, block_worklist: &mut Vec<usize>, locals: &mut MilLocals, fixups: &mut Vec<Box<dyn FnMut (&mut MilBuilder, &HashMap<usize, GenBlockInfo>) -> ()>>, known_objects: &MilKnownObjectRefs, verbose: bool) {
     if verbose {
         eprintln!("(Start of bytecode basic block at {})", off);
@@ -990,6 +1056,15 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 let len = stack.pop(MilType::Int);
                 builder.append_instruction(MilInstructionKind::AllocArray(cpe.array_class_id, reg, len));
                 stack.push(MilOperand::Register(MilType::Ref, reg));
+            },
+            BytecodeInstruction::MultiANewArray(idx, dims) => {
+                let cpe = match cp[idx as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let dims = (0..dims).map(|_| stack.pop(MilType::Int)).rev().collect_vec();
+                stack.push(generate_multianewarray(builder, &dims, cpe.class_id));
             },
             BytecodeInstruction::NewArray(ty) => {
                 let reg = builder.allocate_reg();

@@ -37,7 +37,7 @@ fn add_may_clinit(summary: &mut MethodSummary, class_id: ClassId) {
     };
 }
 
-pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[ConstantPoolEntry]) -> MethodSummary {
+pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[ConstantPoolEntry], env: &ClassEnvironment) -> MethodSummary {
     let mut summary = MethodSummary {
         may_virtual_call: vec![],
         may_special_call: vec![],
@@ -120,8 +120,21 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
                     _ => {}
                 };
             },
-            BytecodeInstruction::MultiANewArray(_, _) => {
-                // TODO
+            BytecodeInstruction::MultiANewArray(cpe, dims) => {
+                let cpe = match cp[cpe as usize] {
+                    ConstantPoolEntry::Class(ref cpe) => cpe,
+                    _ => unreachable!()
+                };
+
+                let mut class_id = cpe.class_id;
+                for _ in 0..dims {
+                    add_may_construct(&mut summary, class_id);
+
+                    class_id = match **env.get(class_id) {
+                        ResolvedClass::Array(class_id) => class_id,
+                        _ => unreachable!()
+                    };
+                };
             },
             BytecodeInstruction::New(cpe) => {
                 let cpe = match cp[cpe as usize] {
@@ -131,9 +144,6 @@ pub fn summarize_bytecode(instrs: BytecodeIterator, method_id: MethodId, cp: &[C
 
                 add_may_clinit(&mut summary, cpe.class_id);
                 add_may_construct(&mut summary, cpe.class_id);
-            },
-            BytecodeInstruction::NewArray(_) => {
-                // TODO
             },
             BytecodeInstruction::PutField(_) => {
                 // TODO

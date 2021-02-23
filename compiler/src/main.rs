@@ -221,7 +221,8 @@ fn main() {
                     static_interp::summarize_bytecode(
                         bytecode::BytecodeIterator::for_code(code),
                         resolve::MethodId(id, i as u16),
-                        &class.constant_pool
+                        &class.constant_pool,
+                        &env
                     )
                 } else {
                     classfile::MethodSummary::empty()
