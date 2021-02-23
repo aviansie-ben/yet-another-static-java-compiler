@@ -118,6 +118,9 @@ fn create_value_ref<'a>(module: &MochaModule<'a, '_, '_>, op: &MilOperand, regs:
             LLVMValue::from_raw(LLVMGetUndef(native_arg_type(ty, &module.types)))
         },
         MilOperand::AddrNull => module.const_addr_null(),
+        MilOperand::VTable(class_id) => unsafe {
+            LLVMValue::from_raw(module.types.class_types[&class_id].vtable)
+        },
         MilOperand::RefNull => module.const_obj_null(),
         MilOperand::KnownObject(object_id, _) => unsafe {
             LLVMValue::from_raw(LLVMConstPointerCast(

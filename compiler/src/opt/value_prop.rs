@@ -146,8 +146,9 @@ fn try_fold_un_op(op: MilUnOp, val: &MilOperand) -> Option<MilOperand> {
             }
         )),
         MilUnOp::D2F => try_fold_un_double(val, |x| MilOperand::Float((x as f32).to_bits())),
-        MilUnOp::GetVTable => match val {
+        MilUnOp::GetVTable => match *val {
             MilOperand::RefNull => Some(MilOperand::Poison(MilType::Addr)),
+            MilOperand::KnownObject(_, class_id) => Some(MilOperand::VTable(class_id)),
             _ => None
         }
     }
