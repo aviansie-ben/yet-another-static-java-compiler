@@ -223,10 +223,6 @@ fn validate_instr(
             validate_operand(len, MilType::Int, state);
             validate_target(tgt, Some(MilType::Ref), state);
         },
-        MilInstructionKind::GetVTable(tgt, ref obj) => {
-            validate_operand(obj, MilType::Ref, state);
-            validate_target(tgt, Some(MilType::Addr), state);
-        },
         MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
             validate_operand(vtable, MilType::Addr, state);
             validate_target(tgt, Some(MilType::Bool), state);

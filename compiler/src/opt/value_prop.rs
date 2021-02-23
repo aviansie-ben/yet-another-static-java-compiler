@@ -145,7 +145,11 @@ fn try_fold_un_op(op: MilUnOp, val: &MilOperand) -> Option<MilOperand> {
                 x as i64
             }
         )),
-        MilUnOp::D2F => try_fold_un_double(val, |x| MilOperand::Float((x as f32).to_bits()))
+        MilUnOp::D2F => try_fold_un_double(val, |x| MilOperand::Float((x as f32).to_bits())),
+        MilUnOp::GetVTable => match val {
+            MilOperand::RefNull => Some(MilOperand::Poison(MilType::Addr)),
+            _ => None
+        }
     }
 }
 

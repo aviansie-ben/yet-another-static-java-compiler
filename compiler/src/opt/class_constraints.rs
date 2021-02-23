@@ -202,7 +202,6 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::PutStatic(_, _, _) => None,
         MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
         MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-        MilInstructionKind::GetVTable(_, _) => None,
         MilInstructionKind::IsSubclass(_, _, _) => None
     }
 }
@@ -245,7 +244,7 @@ fn for_edge_constraints(
         },
         Some(&&MilInstructionKind::IsSubclass(class_id, _, MilOperand::Register(_, vtable))) => {
             match instrs_by_reg.get(&vtable) {
-                Some(&&MilInstructionKind::GetVTable(_, MilOperand::Register(_, obj))) => {
+                Some(&&MilInstructionKind::UnOp(MilUnOp::GetVTable, _, MilOperand::Register(_, obj))) => {
                     add_constraint(!flip_cond, obj, MilClassConstraint::for_class(class_id));
                 },
                 _ => {}
@@ -297,7 +296,7 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             };
 
             match instr.kind {
-                MilInstructionKind::GetVTable(tgt, ref obj) => {
+                MilInstructionKind::UnOp(MilUnOp::GetVTable, tgt, ref obj) => {
                     log_writeln!(log, "  {} <- vtable of {}", tgt, obj.pretty(env));
                     constraints.set_vtable_of(tgt, obj.clone());
                 },

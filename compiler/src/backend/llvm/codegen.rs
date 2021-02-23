@@ -465,7 +465,8 @@ unsafe fn emit_basic_block<'a, 'b>(
                         ),
                         Some(register_name(tgt))
                     ),
-                    MilUnOp::D2F => builder.build_fptrunc(val, module.types.float, Some(register_name(tgt)))
+                    MilUnOp::D2F => builder.build_fptrunc(val, module.types.float, Some(register_name(tgt))),
+                    MilUnOp::GetVTable => create_vtable_load(builder, val, &module.types)
                 });
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
@@ -705,12 +706,6 @@ unsafe fn emit_basic_block<'a, 'b>(
                 );
 
                 set_register(&mut local_regs, all_regs, tgt, obj);
-            },
-            MilInstructionKind::GetVTable(tgt, ref obj) => {
-                let obj = create_value_ref(module, obj, &local_regs);
-                let vtable = create_vtable_load(builder, obj, &module.types);
-
-                set_register(&mut local_regs, all_regs, tgt, vtable);
             },
             MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
                 let class_depth = module.env.get_class_chain(class_id).len() - 1;

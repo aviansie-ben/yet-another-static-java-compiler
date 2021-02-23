@@ -1113,7 +1113,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 emit_null_check(builder, args[0].clone());
 
                 let vtable = builder.allocate_reg();
-                builder.append_instruction(MilInstructionKind::GetVTable(vtable, args[0].clone()));
+                builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetVTable, vtable, args[0].clone()));
 
                 if class.flags.contains(ClassFlags::INTERFACE) {
                     builder.append_end_instruction(MilEndInstructionKind::CallInterface(
@@ -1349,7 +1349,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let vtable_reg = builder.allocate_reg();
                 let is_subclass_reg = builder.allocate_reg();
-                builder.append_instruction(MilInstructionKind::GetVTable(vtable_reg, obj.clone()));
+                builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetVTable, vtable_reg, obj.clone()));
 
                 if !env.get(cpe.class_id).is_interface() {
                     builder.append_instruction(MilInstructionKind::IsSubclass(
@@ -1397,7 +1397,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
 
                 let vtable_reg = builder.allocate_reg();
                 let is_subclass_reg = builder.allocate_reg();
-                builder.append_instruction(MilInstructionKind::GetVTable(vtable_reg, obj));
+                builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetVTable, vtable_reg, obj));
 
                 if !env.get(cpe.class_id).is_interface() {
                     builder.append_instruction(MilInstructionKind::IsSubclass(
