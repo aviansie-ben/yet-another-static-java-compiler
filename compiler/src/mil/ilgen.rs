@@ -677,6 +677,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
         assert!(end_block.is_none());
 
         match instr {
+            BytecodeInstruction::Nop => {},
             BytecodeInstruction::Ldc(idx) | BytecodeInstruction::Ldc2(idx) => {
                 let val = constant_from_cpe(&cp[idx as usize], known_objects);
                 stack.push(val);
@@ -751,6 +752,13 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::Pop2 => {
                 stack.pop_slot();
                 stack.pop_slot();
+            },
+            BytecodeInstruction::Swap => {
+                let val1 = stack.pop_slot();
+                let val2 = stack.pop_slot();
+
+                stack.push_slot(val1);
+                stack.push_slot(val2);
             },
             BytecodeInstruction::ALoad(idx) => {
                 generate_local_load(builder, &mut stack, locals, idx, MilType::Ref);
