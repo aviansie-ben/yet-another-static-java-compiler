@@ -141,14 +141,9 @@ impl FlowGraph<MilBlockId> {
                 MilEndInstructionKind::Return(_) => {
                     cfg.add_edge(prev_block_id, MilBlockId::EXIT);
                 },
-                MilEndInstructionKind::Jump(target) => {
-                    cfg.add_edge(prev_block_id, target);
-                },
-                MilEndInstructionKind::JumpIf(true_target, false_target, _) => {
-                    cfg.add_edge(prev_block_id, true_target);
-                    cfg.add_edge(prev_block_id, false_target);
-                },
-                _ => {}
+                _ => {
+                    prev_block.end_instr.for_successors(|&succ_id| cfg.add_edge(prev_block_id, succ_id));
+                }
             };
 
             for catch_block in prev_block.exception_successors.iter().cloned() {

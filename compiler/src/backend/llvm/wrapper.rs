@@ -779,6 +779,16 @@ impl <'a> LLVMBuilder<'a> {
         }
     }
 
+    pub fn build_switch(&self, val: LLVMValue<'a>, cases: &[(LLVMValue<'a>, LLVMBasicBlockRef)], default: LLVMBasicBlockRef) {
+        unsafe {
+            let switch = self.wrap_value(LLVMBuildSwitch(self.ptr(), val.ptr(), default, cases.len() as u32));
+
+            for (val, tgt) in cases.iter().copied() {
+                LLVMAddCase(switch.ptr(), val.ptr(), tgt);
+            };
+        }
+    }
+
     pub fn build_unreachable(&self) {
         unsafe {
             self.wrap_value(LLVMBuildUnreachable(self.ptr()));

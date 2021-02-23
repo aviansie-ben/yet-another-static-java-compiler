@@ -219,6 +219,7 @@ fn class_constraint_for_end_instr(instr: &MilEndInstructionKind) -> Option<MilCl
         MilEndInstructionKind::Return(_) => None,
         MilEndInstructionKind::Jump(_) => None,
         MilEndInstructionKind::JumpIf(_, _, _) => None,
+        MilEndInstructionKind::ISwitch(_, _, _) => None
     }
 }
 

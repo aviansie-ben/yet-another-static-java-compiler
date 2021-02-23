@@ -922,6 +922,9 @@ unsafe fn emit_basic_block<'a, 'b>(
         MilEndInstructionKind::Jump(_) => {},
         MilEndInstructionKind::JumpIf(_, _, ref cond) => {
             cond_out = Some(create_value_ref(module, cond, &local_regs));
+        },
+        MilEndInstructionKind::ISwitch(ref val, _, _) => {
+            cond_out = Some(create_value_ref(module, val, &local_regs));
         }
     };
 
@@ -1025,6 +1028,12 @@ unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
             MilEndInstructionKind::JumpIf(true_tgt, false_tgt, _) => {
                 builder.build_cond_br(cond.unwrap(), llvm_blocks[&true_tgt].0, llvm_blocks[&false_tgt].0);
             },
+            MilEndInstructionKind::ISwitch(_, ref tgts, default_tgt) => {
+                let cases = tgts.iter().copied()
+                    .map(|(val, tgt)| (module.const_int(val), llvm_blocks[&tgt].0))
+                    .collect_vec();
+                builder.build_switch(cond.unwrap(), &cases, llvm_blocks[&default_tgt].0);
+            }
             MilEndInstructionKind::Throw(_) => {},
             MilEndInstructionKind::Return(_) => {},
             _ => {

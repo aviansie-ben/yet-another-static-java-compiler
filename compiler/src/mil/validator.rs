@@ -290,6 +290,13 @@ fn validate_end_instr(
             validate_block_target(true_tgt, state);
             validate_block_target(false_tgt, state);
             validate_operand(cond, MilType::Bool, state);
+        },
+        MilEndInstructionKind::ISwitch(ref val, ref tgts, default_tgt) => {
+            for (_, tgt) in tgts.iter().copied() {
+                validate_block_target(tgt, state);
+            };
+            validate_block_target(default_tgt, state);
+            validate_operand(val, MilType::Int, state);
         }
     };
 }
