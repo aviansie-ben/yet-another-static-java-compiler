@@ -336,6 +336,12 @@ unsafe fn emit_basic_block<'a, 'b>(
         };
     };
 
+    let mut incoming_times = HashMap::new();
+
+    for pred_id in cfg.get(block_id).incoming.iter().copied() {
+        *incoming_times.entry(pred_id).or_insert(0) += 1;
+    };
+
     for phi in block.phi_nodes.iter() {
         builder.set_current_debug_location(debug_locs.get_or_add_loc(phi.bytecode.1));
         if !phi.sources.is_empty() {
@@ -343,8 +349,10 @@ unsafe fn emit_basic_block<'a, 'b>(
 
             set_register(&mut local_regs, all_regs, phi.target, llvm_phi.into_val());
 
-            for (src, pred) in phi.sources.iter().cloned() {
-                phis_to_add.push((llvm_phi, pred, src));
+            for &(ref src, pred) in phi.sources.iter() {
+                for _ in 0..(*incoming_times.get(&pred).unwrap()) {
+                    phis_to_add.push((llvm_phi, pred, src.clone()));
+                };
             };
         } else {
             let val = undefined_register_value(module, phi.ty);
