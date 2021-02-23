@@ -299,6 +299,7 @@ fn main() {
     let mut program = mil::il::MilProgram::new(known_objects, main_method);
     for method_id in liveness.may_call.iter().cloned().sorted_by_key(|m| ((m.0).0, m.1)) {
         if let Some(func) = mil::ilgen::generate_il_for_method(&env, method_id, &program.known_objects.refs, &liveness, verbose_ilgen) {
+            mil::validator::validate_function(&func, &env);
             program.funcs.insert(method_id, func);
         };
     };
