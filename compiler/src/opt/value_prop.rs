@@ -514,6 +514,23 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
                 _ => {}
             }
         },
+        MilInstructionKind::UnOp(MilUnOp::GetVTable, tgt, MilOperand::Register(_, val)) => {
+            match flat_func.get_reg(val).map(MilRegisterSource::kind) {
+                Some(MilRegisterSourceKind::Instr(&MilInstructionKind::AllocObj(class_id, _))) => {
+                    do_simplify(&mut [
+                        MilInstructionKind::Copy(tgt, MilOperand::VTable(class_id))
+                    ], flat_func, instr);
+                    return true;
+                },
+                Some(MilRegisterSourceKind::Instr(&MilInstructionKind::AllocArray(class_id, _, _))) => {
+                    do_simplify(&mut [
+                        MilInstructionKind::Copy(tgt, MilOperand::VTable(class_id))
+                    ], flat_func, instr);
+                    return true;
+                },
+                _ => {}
+            }
+        },
         MilInstructionKind::BinOp(MilBinOp::IAdd, tgt, ref lhs, MilOperand::Int(0)) => {
             do_simplify(&mut [
                 MilInstructionKind::Copy(tgt, lhs.clone())
