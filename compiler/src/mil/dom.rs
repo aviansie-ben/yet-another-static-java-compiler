@@ -125,3 +125,72 @@ impl fmt::Debug for Dominators {
         Ok(())
     }
 }
+
+#[derive(Clone)]
+pub struct DominatorTree {
+    doms: HashMap<MilBlockId, MilBlockId>
+}
+
+impl DominatorTree {
+    pub fn calculate_dominator_tree(cfg: &FlowGraph<MilBlockId>, rpo: &[MilBlockId]) -> DominatorTree {
+        fn intersect(mut dom1: MilBlockId, mut dom2: MilBlockId, rpo_num: &HashMap<MilBlockId, usize>, doms: &HashMap<MilBlockId, MilBlockId>) -> MilBlockId {
+            loop {
+                if dom1 == dom2 {
+                    return dom1;
+                } else if rpo_num[&dom1] > rpo_num[&dom2] {
+                    dom1 = doms[&dom1];
+                } else {
+                    dom2 = doms[&dom2];
+                };
+            };
+        }
+
+        let rpo_num: HashMap<_, _> = itertools::repeat_n(MilBlockId::ENTRY, 1).chain(rpo.iter().copied()).enumerate().map(|(i, id)| (id, i)).collect();
+        let mut doms: HashMap<_, _> = rpo.iter().copied().map(|id| (id, MilBlockId::EXIT)).collect();
+
+        doms.insert(MilBlockId::ENTRY, MilBlockId::ENTRY);
+
+        loop {
+            let mut changed = false;
+
+            for id in rpo.iter().copied() {
+                let new_dom = cfg.get(id).incoming.iter().copied().filter(|&id| doms[&id] != MilBlockId::EXIT).fold(None, |dom1, dom2| {
+                    if let Some(dom1) = dom1 {
+                        Some(intersect(dom1, dom2, &rpo_num, &doms))
+                    } else {
+                        Some(dom2)
+                    }
+                }).unwrap_or(id);
+
+                if doms.insert(id, new_dom) != Some(new_dom) {
+                    changed = true;
+                };
+            };
+
+            if !changed {
+                break;
+            };
+        };
+
+        doms.remove(&MilBlockId::ENTRY);
+
+        DominatorTree { doms }
+    }
+
+    pub fn get(&self, id: MilBlockId) -> MilBlockId {
+        self.doms[&id]
+    }
+}
+
+impl fmt::Debug for DominatorTree {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "DominatorTree {{")?;
+
+        for (&block, &idom) in self.doms.iter() {
+            writeln!(f, "  {} <- {}", block, idom)?;
+        };
+
+        write!(f, "}}")?;
+        Ok(())
+    }
+}

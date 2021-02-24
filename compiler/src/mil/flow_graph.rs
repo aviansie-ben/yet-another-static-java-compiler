@@ -185,6 +185,38 @@ impl FlowGraph<MilBlockId> {
 
         reachable
     }
+
+    pub fn compute_postorder(&self) -> Vec<MilBlockId> {
+        fn visit_node(graph: &FlowGraph<MilBlockId>, visited: &mut BitVec<MilBlockId>, id: MilBlockId, result: &mut Vec<MilBlockId>) {
+            if id == MilBlockId::ENTRY || id == MilBlockId::EXIT {
+                return;
+            } else if visited.set(id, true) {
+                return;
+            };
+
+            for succ_id in graph.get(id).outgoing.iter().copied() {
+                visit_node(graph, visited, succ_id, result);
+            };
+
+            result.push(id);
+        }
+
+        let mut result = vec![];
+        let mut visited = BitVec::new();
+
+        for start_id in self.get_entry().outgoing.iter().copied() {
+            visit_node(self, &mut visited, start_id, &mut result);
+        };
+
+        result
+    }
+
+    pub fn compute_reverse_postorder(&self) -> Vec<MilBlockId> {
+        let mut result = self.compute_postorder();
+        result.reverse();
+
+        result
+    }
 }
 
 impl <T: Copy + PartialEq + Eq + Hash + fmt::Debug> fmt::Debug for FlowGraphNode<T> {

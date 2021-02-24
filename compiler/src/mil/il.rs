@@ -1457,6 +1457,16 @@ impl MilEndInstruction {
             _ => false
         }
     }
+
+    pub fn is_call(&self) -> bool {
+        match self.kind {
+            MilEndInstructionKind::Call(_, _, _, _) => true,
+            MilEndInstructionKind::CallVirtual(_, _, _, _, _) => true,
+            MilEndInstructionKind::CallInterface(_, _, _, _, _) => true,
+            MilEndInstructionKind::CallNative(_, _, _, _) => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

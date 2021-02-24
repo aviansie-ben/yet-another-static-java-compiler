@@ -10,6 +10,7 @@ use crate::static_heap::JavaStaticHeap;
 
 pub mod basic_control_flow;
 pub mod class_constraints;
+pub mod common_subexpr;
 pub mod inliner;
 pub mod value_prop;
 
@@ -50,6 +51,12 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
         run_block_cleanup_group(func, &mut cfg, env);
     };
 
+    common_subexpr::eliminate_common_subexpressions_globally(func, &cfg, env.env, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
+    basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
+    run_block_cleanup_group(func, &mut cfg, env);
+
     // Perform class constraint analysis and related cleanups
     class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
     value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
@@ -59,7 +66,15 @@ fn optimize_function_before_inlining(func: &mut MilFunction, env: &OptimizationE
 
     if basic_control_flow::recognize_select_pattern(func, &mut cfg, env.env, env.log) != 0 {
         run_block_cleanup_group(func, &mut cfg, env);
+        value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
+        value_prop::eliminate_dead_stores(func, env.env, env.log);
     };
+
+    common_subexpr::eliminate_common_subexpressions_globally(func, &cfg, env.env, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
+    basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
+    run_block_cleanup_group(func, &mut cfg, env);
 
     // Get things ready for inlining wherever possible
     basic_control_flow::devirtualize_nonoverriden_calls(func, env.env, env.log);
@@ -78,6 +93,12 @@ fn optimize_function_after_inlining(func: &mut MilFunction, env: &OptimizationEn
 
     // Perform another round of class constraint analysis
     class_constraints::perform_class_constraint_analysis(func, &cfg, env.env, env.log);
+    value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
+    basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
+    value_prop::eliminate_dead_stores(func, env.env, env.log);
+    run_block_cleanup_group(func, &mut cfg, env);
+
+    common_subexpr::eliminate_common_subexpressions_globally(func, &cfg, env.env, env.log);
     value_prop::simplify_instructions(func, env.env, env.known_objects, env.log);
     basic_control_flow::fold_constant_jumps(func, &mut cfg, env.env, env.log);
     value_prop::eliminate_dead_stores(func, env.env, env.log);
