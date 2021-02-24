@@ -561,7 +561,8 @@ pub enum MilUnOp {
     D2I,
     D2L,
     D2F,
-    GetVTable
+    GetVTable,
+    GetArrayLength
 }
 
 impl MilUnOp {
@@ -586,7 +587,8 @@ impl MilUnOp {
             MilUnOp::D2I => (MilType::Int, MilType::Double),
             MilUnOp::D2L => (MilType::Long, MilType::Double),
             MilUnOp::D2F => (MilType::Float, MilType::Double),
-            MilUnOp::GetVTable => (MilType::Addr, MilType::Ref)
+            MilUnOp::GetVTable => (MilType::Addr, MilType::Ref),
+            MilUnOp::GetArrayLength => (MilType::Int, MilType::Ref)
         }
     }
 }
@@ -613,7 +615,8 @@ impl fmt::Display for MilUnOp {
             MilUnOp::D2I => write!(f, "d2i"),
             MilUnOp::D2L => write!(f, "d2l"),
             MilUnOp::D2F => write!(f, "d2f"),
-            MilUnOp::GetVTable => write!(f, "get_vtable")
+            MilUnOp::GetVTable => write!(f, "get_vtable"),
+            MilUnOp::GetArrayLength => write!(f, "get_array_length")
         }
     }
 }
@@ -851,7 +854,6 @@ pub enum MilInstructionKind {
     SetLocal(MilLocalId, MilOperand),
     GetField(FieldId, ClassId, MilRegister, MilOperand),
     PutField(FieldId, ClassId, MilOperand, MilOperand),
-    GetArrayLength(MilRegister, MilOperand),
     GetArrayElement(ClassId, MilRegister, MilOperand, MilOperand),
     PutArrayElement(ClassId, MilOperand, MilOperand, MilOperand),
     GetStatic(FieldId, ClassId, MilRegister),
@@ -942,9 +944,6 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::PutField(field_id, _, ref obj, ref val) => {
                 write!(f, "put_field <{}> {}, {}", FieldName(field_id, self.1), obj.pretty(self.1), val.pretty(self.1))?;
             },
-            MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-                write!(f, "get_array_length {}, {}", tgt, obj.pretty(self.1))?;
-            },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
                 write!(f, "get_array_elem <{}> {}, {}, {}", self.1.get(class_id).name(self.1), tgt, obj.pretty(self.1), idx.pretty(self.1))?;
             },
@@ -1008,7 +1007,6 @@ impl MilInstruction {
             MilInstructionKind::SetLocal(_, _) => None,
             MilInstructionKind::GetField(_, _, ref tgt, _) => Some(tgt),
             MilInstructionKind::PutField(_, _, _, _) => None,
-            MilInstructionKind::GetArrayLength(ref tgt, _) => Some(tgt),
             MilInstructionKind::GetArrayElement(_, ref tgt, _, _) => Some(tgt),
             MilInstructionKind::PutArrayElement(_, _, _, _) => None,
             MilInstructionKind::GetStatic(_, _, ref tgt) => Some(tgt),
@@ -1031,7 +1029,6 @@ impl MilInstruction {
             MilInstructionKind::SetLocal(_, _) => None,
             MilInstructionKind::GetField(_, _, ref mut tgt, _) => Some(tgt),
             MilInstructionKind::PutField(_, _, _, _) => None,
-            MilInstructionKind::GetArrayLength(ref mut tgt, _) => Some(tgt),
             MilInstructionKind::GetArrayElement(_, ref mut tgt, _, _) => Some(tgt),
             MilInstructionKind::PutArrayElement(_, _, _, _) => None,
             MilInstructionKind::GetStatic(_, _, ref mut tgt) => Some(tgt),
@@ -1071,9 +1068,6 @@ impl MilInstruction {
             MilInstructionKind::PutField(_, _, ref obj, ref val) => {
                 f(obj);
                 f(val);
-            },
-            MilInstructionKind::GetArrayLength(_, ref obj) => {
-                f(obj);
             },
             MilInstructionKind::GetArrayElement(_, _, ref obj, ref idx) => {
                 f(obj);
@@ -1127,9 +1121,6 @@ impl MilInstruction {
             MilInstructionKind::PutField(_, _, ref mut obj, ref mut val) => {
                 f(obj);
                 f(val);
-            },
-            MilInstructionKind::GetArrayLength(_, ref mut obj) => {
-                f(obj);
             },
             MilInstructionKind::GetArrayElement(_, _, ref mut obj, ref mut idx) => {
                 f(obj);

@@ -115,7 +115,6 @@ pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &Fl
                     this_available_exprs.set_field(field_id, Some(obj), val);
                     None
                 },
-                MilInstructionKind::GetArrayLength(_, _) => None,
                 MilInstructionKind::GetArrayElement(_, _, _, _) => None,
                 MilInstructionKind::PutArrayElement(_, _, _, _) => None,
                 MilInstructionKind::GetStatic(field_id, cls, tgt) => this_available_exprs.handle_field_load(tgt, MilType::for_class(cls), field_id, None),

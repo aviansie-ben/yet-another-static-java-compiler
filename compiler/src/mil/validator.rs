@@ -196,10 +196,6 @@ fn validate_instr(
             validate_operand(obj, MilType::Ref, state);
             validate_operand(val, MilType::for_class(constraint), state);
         },
-        MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-            validate_operand(obj, MilType::Ref, state);
-            validate_target(tgt, Some(MilType::Int), state);
-        },
         MilInstructionKind::GetArrayElement(constraint, tgt, ref obj, ref idx) => {
             validate_operand(obj, MilType::Ref, state);
             validate_operand(idx, MilType::Int, state);

@@ -85,7 +85,7 @@ fn try_fold_bin_double_double<F: Fn (f64, f64) -> MilOperand>(lhs: &MilOperand, 
     }
 }
 
-fn try_fold_un_op(op: MilUnOp, val: &MilOperand) -> Option<MilOperand> {
+fn try_fold_un_op(op: MilUnOp, val: &MilOperand, known_objects: &MilKnownObjectMap) -> Option<MilOperand> {
     match op {
         MilUnOp::ZNot => try_fold_un_bool(val, |x| MilOperand::Bool(!x)),
         MilUnOp::INeg => try_fold_un_int(val, |x| MilOperand::Int(x.wrapping_neg())),
@@ -149,6 +149,18 @@ fn try_fold_un_op(op: MilUnOp, val: &MilOperand) -> Option<MilOperand> {
         MilUnOp::GetVTable => match *val {
             MilOperand::RefNull => Some(MilOperand::Poison(MilType::Addr)),
             MilOperand::KnownObject(_, class_id) => Some(MilOperand::VTable(class_id)),
+            _ => None
+        },
+        MilUnOp::GetArrayLength => match *val {
+            MilOperand::RefNull => Some(MilOperand::Poison(MilType::Int)),
+            MilOperand::KnownObject(obj_id, _) => {
+                let obj = known_objects.get(obj_id);
+
+                Some(match obj.class() {
+                    ResolvedClass::Array(_) => MilOperand::Int(obj.read_array_length()),
+                    _ => MilOperand::Poison(MilType::Int)
+                })
+            },
             _ => None
         }
     }
@@ -263,20 +275,11 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
         MilInstructionKind::Copy(_, ref val) => Some(val.clone()),
         MilInstructionKind::Select(_, MilOperand::Bool(true), ref true_val, _) => Some(true_val.clone()),
         MilInstructionKind::Select(_, MilOperand::Bool(false), _, ref false_val) => Some(false_val.clone()),
-        MilInstructionKind::UnOp(op, _, ref val) => try_fold_un_op(op, val),
+        MilInstructionKind::UnOp(op, _, ref val) => try_fold_un_op(op, val, known_objects),
         MilInstructionKind::BinOp(op, _, ref lhs, ref rhs) => try_fold_bin_op(op, lhs, rhs),
         MilInstructionKind::GetField(field_id, _, _, MilOperand::KnownObject(val, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
                 Some(MilOperand::from_const(known_objects.get(val).read_field(field_id), known_objects))
-            } else {
-                None
-            }
-        },
-        MilInstructionKind::GetArrayLength(_, MilOperand::KnownObject(val, _)) => {
-            let val = known_objects.get(val);
-
-            if matches!(val.class(), ResolvedClass::Array(_)) {
-                Some(MilOperand::Int(val.read_array_length()))
             } else {
                 None
             }
@@ -355,7 +358,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
             // -select(cond, const1, const2) => select(cond, -const1, -const2)
             match val_instr {
                 Some(MilRegisterSourceKind::Instr(&MilInstructionKind::Select(_, ref cond, ref true_val, ref false_val))) => {
-                    if let (Some(true_val), Some(false_val)) = (try_fold_un_op(op, true_val), try_fold_un_op(op, false_val)) {
+                    if let (Some(true_val), Some(false_val)) = (try_fold_un_op(op, true_val, known_objects), try_fold_un_op(op, false_val, known_objects)) {
                         do_simplify(&mut [
                             MilInstructionKind::Select(tgt, cond.clone(), true_val, false_val)
                         ], flat_func, instr);

@@ -1123,7 +1123,7 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
             BytecodeInstruction::ArrayLength => {
                 let reg = builder.allocate_reg();
                 let obj = stack.pop(MilType::Ref);
-                builder.append_instruction(MilInstructionKind::GetArrayLength(reg, obj));
+                builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetArrayLength, reg, obj));
                 stack.push(MilOperand::Register(MilType::Int, reg));
             },
             BytecodeInstruction::InvokeStatic(idx) => {

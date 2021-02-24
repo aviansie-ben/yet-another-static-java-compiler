@@ -469,7 +469,11 @@ unsafe fn emit_basic_block<'a, 'b>(
                         Some(register_name(tgt))
                     ),
                     MilUnOp::D2F => builder.build_fptrunc(val, module.types.float, Some(register_name(tgt))),
-                    MilUnOp::GetVTable => create_vtable_load(builder, val, &module.types)
+                    MilUnOp::GetVTable => create_vtable_load(builder, val, &module.types),
+                    MilUnOp::GetArrayLength => builder.build_load(
+                        create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), val, &module.types),
+                        Some(register_name(tgt))
+                    )
                 });
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
@@ -626,16 +630,6 @@ unsafe fn emit_basic_block<'a, 'b>(
                     coerce_before_store(builder, class_id, val, &module.types),
                     create_instance_field_gep(builder, field_id, obj, &module.types)
                 );
-            },
-            MilInstructionKind::GetArrayLength(tgt, ref obj) => {
-                let obj = create_value_ref(module, obj, &local_regs);
-
-                let val = builder.build_load(
-                    create_instance_field_gep(builder, FieldId(ClassId::JAVA_LANG_OBJECT_ARRAY, 0), obj,&module.types),
-                    Some(register_name(tgt))
-                );
-
-                set_register(&mut local_regs, all_regs, tgt, val);
             },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
                 let obj = create_value_ref(module, obj, &local_regs);

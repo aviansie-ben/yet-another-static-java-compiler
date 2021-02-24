@@ -195,7 +195,6 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::SetLocal(_, _) => None,
         MilInstructionKind::GetField(_, class_id, _, _) => Some(MilClassConstraint::for_class(class_id)),
         MilInstructionKind::PutField(_, _, _, _) => None,
-        MilInstructionKind::GetArrayLength(_, _) => None,
         MilInstructionKind::GetArrayElement(class_id, _, _, _) => Some(MilClassConstraint::for_class(class_id)),
         MilInstructionKind::PutArrayElement(_, _, _, _) => None,
         MilInstructionKind::GetStatic(_, class_id, _) => Some(MilClassConstraint::for_class(class_id)),
