@@ -277,9 +277,15 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
         MilInstructionKind::Select(_, MilOperand::Bool(false), _, ref false_val) => Some(false_val.clone()),
         MilInstructionKind::UnOp(op, _, ref val) => try_fold_un_op(op, val, known_objects),
         MilInstructionKind::BinOp(op, _, ref lhs, ref rhs) => try_fold_bin_op(op, lhs, rhs),
-        MilInstructionKind::GetField(field_id, _, _, MilOperand::KnownObject(val, _)) => {
+        MilInstructionKind::GetField(field_id, result_class, _, MilOperand::KnownObject(obj_id, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
-                Some(MilOperand::from_const(known_objects.get(val).read_field(field_id), known_objects))
+                let obj = known_objects.get(obj_id);
+
+                Some(if env.can_convert(obj.class_id(), field_id.0) {
+                    MilOperand::from_const(obj.read_field(field_id), known_objects)
+                } else {
+                    MilOperand::Poison(MilType::for_class(result_class))
+                })
             } else {
                 None
             }
