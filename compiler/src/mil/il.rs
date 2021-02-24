@@ -665,7 +665,8 @@ pub enum MilBinOp {
     DDiv,
     DRem,
     DCmp(MilFCmpMode),
-    RCmp(MilRefComparison)
+    RCmp(MilRefComparison),
+    IsSubclass
 }
 
 impl MilBinOp {
@@ -707,7 +708,8 @@ impl MilBinOp {
             MilBinOp::DDiv => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DRem => (MilType::Double, MilType::Double, MilType::Double),
             MilBinOp::DCmp(_) => (MilType::Int, MilType::Double, MilType::Double),
-            MilBinOp::RCmp(_) => (MilType::Bool, MilType::Ref, MilType::Ref)
+            MilBinOp::RCmp(_) => (MilType::Bool, MilType::Ref, MilType::Ref),
+            MilBinOp::IsSubclass => (MilType::Bool, MilType::Addr, MilType::Addr)
         }
     }
 
@@ -749,7 +751,8 @@ impl MilBinOp {
             MilBinOp::DDiv => None,
             MilBinOp::DCmp(_) => None,
             MilBinOp::DRem => None,
-            MilBinOp::RCmp(cmp) => Some(MilBinOp::RCmp(cmp))
+            MilBinOp::RCmp(cmp) => Some(MilBinOp::RCmp(cmp)),
+            MilBinOp::IsSubclass => None
         }
     }
 
@@ -791,7 +794,8 @@ impl MilBinOp {
             MilBinOp::DDiv => false,
             MilBinOp::DRem => false,
             MilBinOp::DCmp(_) => false,
-            MilBinOp::RCmp(_) => false
+            MilBinOp::RCmp(_) => false,
+            MilBinOp::IsSubclass => false
         }
     }
 }
@@ -837,7 +841,8 @@ impl fmt::Display for MilBinOp {
             MilBinOp::DRem => write!(f, "drem"),
             MilBinOp::DCmp(MilFCmpMode::L) => write!(f, "dcmpl"),
             MilBinOp::DCmp(MilFCmpMode::G) => write!(f, "dcmpg"),
-            MilBinOp::RCmp(cond) => write!(f, "rcmp.{}", cond.name())
+            MilBinOp::RCmp(cond) => write!(f, "rcmp.{}", cond.name()),
+            MilBinOp::IsSubclass => write!(f, "is_subclass")
         }
     }
 }
@@ -859,8 +864,7 @@ pub enum MilInstructionKind {
     GetStatic(FieldId, ClassId, MilRegister),
     PutStatic(FieldId, ClassId, MilOperand),
     AllocObj(ClassId, MilRegister),
-    AllocArray(ClassId, MilRegister, MilOperand),
-    IsSubclass(ClassId, MilRegister, MilOperand)
+    AllocArray(ClassId, MilRegister, MilOperand)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -961,9 +965,6 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
                 write!(f, "alloc_array <{}> {}, {}", self.1.get(class_id).name(self.1), tgt, len.pretty(self.1))?;
-            },
-            MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
-                write!(f, "is_subclass <{}> {}, {}", self.1.get(class_id).name(self.1), tgt, vtable.pretty(self.1))?;
             }
         };
 
@@ -1012,8 +1013,7 @@ impl MilInstruction {
             MilInstructionKind::GetStatic(_, _, ref tgt) => Some(tgt),
             MilInstructionKind::PutStatic(_, _, _) => None,
             MilInstructionKind::AllocObj(_, ref tgt) => Some(tgt),
-            MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt),
-            MilInstructionKind::IsSubclass(_, ref tgt, _) => Some(tgt)
+            MilInstructionKind::AllocArray(_, ref tgt, _) => Some(tgt)
         }
     }
 
@@ -1034,8 +1034,7 @@ impl MilInstruction {
             MilInstructionKind::GetStatic(_, _, ref mut tgt) => Some(tgt),
             MilInstructionKind::PutStatic(_, _, _) => None,
             MilInstructionKind::AllocObj(_, ref mut tgt) => Some(tgt),
-            MilInstructionKind::AllocArray(_, ref mut tgt, _) => Some(tgt),
-            MilInstructionKind::IsSubclass(_, ref mut tgt, _) => Some(tgt)
+            MilInstructionKind::AllocArray(_, ref mut tgt, _) => Some(tgt)
         }
     }
 
@@ -1085,9 +1084,6 @@ impl MilInstruction {
             MilInstructionKind::AllocObj(_, _) => {},
             MilInstructionKind::AllocArray(_, _, ref len) => {
                 f(len);
-            },
-            MilInstructionKind::IsSubclass(_, _, ref vtable) => {
-                f(vtable);
             }
         };
     }
@@ -1138,9 +1134,6 @@ impl MilInstruction {
             MilInstructionKind::AllocObj(_, _) => {},
             MilInstructionKind::AllocArray(_, _, ref mut len) => {
                 f(len);
-            },
-            MilInstructionKind::IsSubclass(_, _, ref mut vtable) => {
-                f(vtable);
             }
         };
     }

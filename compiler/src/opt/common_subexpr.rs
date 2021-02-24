@@ -123,8 +123,7 @@ pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &Fl
                     None
                 },
                 MilInstructionKind::AllocObj(_, _) => None,
-                MilInstructionKind::AllocArray(_, _, _) => None,
-                MilInstructionKind::IsSubclass(_, _, _) => None
+                MilInstructionKind::AllocArray(_, _, _) => None
             };
 
             if let Some(replace_val) = replace_val {

@@ -218,10 +218,6 @@ fn validate_instr(
         MilInstructionKind::AllocArray(_, tgt, ref len) => {
             validate_operand(len, MilType::Int, state);
             validate_target(tgt, Some(MilType::Ref), state);
-        },
-        MilInstructionKind::IsSubclass(_, tgt, ref vtable) => {
-            validate_operand(vtable, MilType::Addr, state);
-            validate_target(tgt, Some(MilType::Bool), state);
         }
     };
 }

@@ -185,6 +185,14 @@ fn create_vtable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue
     )
 }
 
+fn create_vtable_compress<'a>(builder: &LLVMBuilder<'a>, decompressed: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
+    builder.build_nuw_add(
+        builder.build_ptr_to_int(decompressed, types.int, None),
+        unsafe { LLVMValue::from_raw(LLVMConstInt(types.int, 8, 0)) },
+        None
+    )
+}
+
 fn create_itable_decompress<'a>(builder: &LLVMBuilder<'a>, compressed: LLVMValue<'a>, types: &LLVMTypes) -> LLVMValue<'a> {
     builder.build_int_to_ptr(
         builder.build_nuw_sub(compressed, unsafe { LLVMValue::from_raw(LLVMConstInt(types.int, 8, 0)) }, None),
@@ -476,9 +484,9 @@ unsafe fn emit_basic_block<'a, 'b>(
                     )
                 });
             },
-            MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
-                let lhs = create_value_ref(module, lhs, &local_regs);
-                let rhs = create_value_ref(module, rhs, &local_regs);
+            MilInstructionKind::BinOp(op, tgt, ref lhs_op, ref rhs_op) => {
+                let lhs = create_value_ref(module, lhs_op, &local_regs);
+                let rhs = create_value_ref(module, rhs_op, &local_regs);
                 set_register(&mut local_regs, all_regs, tgt, match op {
                     MilBinOp::IAdd => builder.build_add(lhs, rhs, Some(register_name(tgt))),
                     MilBinOp::ISub => builder.build_sub(lhs, rhs, Some(register_name(tgt))),
@@ -596,7 +604,63 @@ unsafe fn emit_basic_block<'a, 'b>(
                         lhs,
                         rhs,
                         Some(register_name(tgt))
-                    )
+                    ),
+                    MilBinOp::IsSubclass => {
+                        let rhs_compressed = create_vtable_compress(builder, rhs, &module.types);
+                        let class_depth = match *rhs_op {
+                            MilOperand::VTable(class_id) => module.const_short((module.env.get_class_chain(class_id).len() - 1) as i16),
+                            _ => builder.build_load(builder.build_struct_gep(rhs, VTABLE_DEPTH_FIELD as u32, None), None)
+                        };
+
+                        let vtable = builder.build_pointer_cast(
+                            lhs,
+                            LLVMPointerType(LLVMGlobalGetValueType(module.types.class_types[&ClassId::JAVA_LANG_OBJECT].vtable), 0),
+                            None
+                        );
+
+                        let read_supers_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+                        let merge_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
+
+                        builder.build_cond_br(
+                            builder.build_icmp(
+                                LLVMIntPredicate::LLVMIntUGE,
+                                builder.build_load(builder.build_struct_gep(vtable, VTABLE_DEPTH_FIELD as u32, None), None),
+                                class_depth,
+                                None
+                            ),
+                            read_supers_block,
+                            merge_block
+                        );
+
+                        LLVMPositionBuilderAtEnd(builder.ptr(), read_supers_block);
+
+                        let read_supers_match = builder.build_icmp(
+                            LLVMIntPredicate::LLVMIntEQ,
+                            builder.build_load(
+                                builder.build_gep(
+                                    builder.build_load(builder.build_struct_gep(vtable, VTABLE_SUPER_VTABLES_FIELD as u32, None), None),
+                                    &[
+                                        module.const_int(0),
+                                        class_depth
+                                    ],
+                                    None
+                                ),
+                                None
+                            ),
+                            rhs_compressed,
+                            None
+                        );
+                        builder.build_br(merge_block);
+
+                        LLVMPositionBuilderAtEnd(builder.ptr(), merge_block);
+
+                        let result = builder.build_phi(module.types.bool, Some(register_name(tgt)));
+
+                        result.add_incoming(&[(llvm_block, module.const_bool(false)), (read_supers_block, read_supers_match)]);
+                        llvm_block = merge_block;
+
+                        result.into_val()
+                    }
                 });
             },
             MilInstructionKind::GetParam(idx, _, tgt) => {
@@ -703,70 +767,6 @@ unsafe fn emit_basic_block<'a, 'b>(
                 );
 
                 set_register(&mut local_regs, all_regs, tgt, obj);
-            },
-            MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
-                let class_depth = module.env.get_class_chain(class_id).len() - 1;
-                let vtable = create_value_ref(module, vtable, &local_regs);
-                let vtable = builder.build_pointer_cast(
-                    vtable,
-                    LLVMPointerType(LLVMGlobalGetValueType(module.types.class_types[&class_id].vtable), 0),
-                    None
-                );
-
-                let read_supers_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
-                let merge_block = LLVMAppendBasicBlockInContext(module.ctx.ptr(), llvm_func.ptr(), b"\0".as_ptr() as *const c_char);
-
-                builder.build_cond_br(
-                    builder.build_icmp(
-                        LLVMIntPredicate::LLVMIntUGE,
-                        builder.build_load(
-                            builder.build_struct_gep(vtable, VTABLE_DEPTH_FIELD as u32, None),
-                            None
-                        ),
-                        module.const_short(class_depth as i16),
-                        None
-                    ),
-                    read_supers_block,
-                    merge_block
-                );
-
-                LLVMPositionBuilderAtEnd(builder.ptr(), read_supers_block);
-
-                let read_supers_match = builder.build_icmp(
-                    LLVMIntPredicate::LLVMIntEQ,
-                    builder.build_load(
-                        builder.build_struct_gep(
-                            builder.build_load(
-                                builder.build_struct_gep(vtable, VTABLE_SUPER_VTABLES_FIELD as u32, None),
-                                None
-                            ),
-                            class_depth as u32,
-                            None
-                        ),
-                        None
-                    ),
-                    LLVMValue::from_raw(
-                        LLVMConstIntCast(
-                            LLVMConstAdd(
-                                LLVMConstPointerCast(module.types.class_types[&class_id].vtable, module.types.long),
-                                module.const_long(8).ptr()
-                            ),
-                            module.types.int,
-                            0
-                        )
-                    ),
-                    None
-                );
-                builder.build_br(merge_block);
-
-                LLVMPositionBuilderAtEnd(builder.ptr(), merge_block);
-
-                let result = builder.build_phi(module.types.bool, Some(register_name(tgt)));
-
-                result.add_incoming(&[(llvm_block, module.const_bool(false)), (read_supers_block, read_supers_match)]);
-                set_register(&mut local_regs, all_regs, tgt, result.into_val());
-
-                llvm_block = merge_block;
             }
         };
     };

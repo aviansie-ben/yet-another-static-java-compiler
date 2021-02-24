@@ -200,8 +200,7 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::GetStatic(_, class_id, _) => Some(MilClassConstraint::for_class(class_id)),
         MilInstructionKind::PutStatic(_, _, _) => None,
         MilInstructionKind::AllocObj(class_id, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-        MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact()),
-        MilInstructionKind::IsSubclass(_, _, _) => None
+        MilInstructionKind::AllocArray(class_id, _, _) => Some(MilClassConstraint::for_class(class_id).not_null().exact())
     }
 }
 
@@ -241,7 +240,7 @@ fn for_edge_constraints(
             add_constraint(!flip_cond, obj, MilClassConstraint::non_null());
             add_constraint(flip_cond, obj, MilClassConstraint::null());
         },
-        Some(&&MilInstructionKind::IsSubclass(class_id, _, MilOperand::Register(_, vtable))) => {
+        Some(&&MilInstructionKind::BinOp(MilBinOp::IsSubclass, _, MilOperand::Register(_, vtable), MilOperand::VTable(class_id))) => {
             match instrs_by_reg.get(&vtable) {
                 Some(&&MilInstructionKind::UnOp(MilUnOp::GetVTable, _, MilOperand::Register(_, obj))) => {
                     add_constraint(!flip_cond, obj, MilClassConstraint::for_class(class_id));
@@ -465,13 +464,13 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
                         };
                     };
                 },
-                MilInstructionKind::IsSubclass(class_id, tgt, ref vtable) => {
+                MilInstructionKind::BinOp(MilBinOp::IsSubclass, tgt, ref vtable, MilOperand::VTable(class_id)) => {
                     if let Some(constraint) = block_constraints.find_vtable_of(vtable) {
                         if env.can_convert(constraint.class_id(), class_id) {
-                            log_writeln!(log, "  Replacing is_subclass <{}> check of vtable {} with bool:true in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
+                            log_writeln!(log, "  Replacing is_subclass({}) check of vtable {} with bool:true in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
                             instr.kind = MilInstructionKind::Copy(tgt, MilOperand::Bool(true));
                         } else if constraint.is_exact() || !env.can_convert(class_id, constraint.class_id()) {
-                            log_writeln!(log, "  Replacing is_subclass <{}> check of vtable {} with bool:false in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
+                            log_writeln!(log, "  Replacing is_subclass({}) check of vtable {} with bool:false in {}", env.get(class_id).name(env), vtable.pretty(env), block_id);
                             instr.kind = MilInstructionKind::Copy(tgt, MilOperand::Bool(false));
                         };
                     };

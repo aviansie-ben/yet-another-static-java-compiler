@@ -166,7 +166,7 @@ fn try_fold_un_op(op: MilUnOp, val: &MilOperand, known_objects: &MilKnownObjectM
     }
 }
 
-fn try_fold_bin_op(op: MilBinOp, lhs: &MilOperand, rhs: &MilOperand) -> Option<MilOperand> {
+fn try_fold_bin_op(op: MilBinOp, lhs: &MilOperand, rhs: &MilOperand, env: &ClassEnvironment) -> Option<MilOperand> {
     match op {
         MilBinOp::IAdd => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x.wrapping_add(y))),
         MilBinOp::ISub => try_fold_bin_int_int(lhs, rhs, |x, y| MilOperand::Int(x.wrapping_sub(y))),
@@ -266,6 +266,12 @@ fn try_fold_bin_op(op: MilBinOp, lhs: &MilOperand, rhs: &MilOperand) -> Option<M
                 MilRefComparison::Eq => eq,
                 MilRefComparison::Ne => !eq
             }))
+        },
+        MilBinOp::IsSubclass => match (lhs, rhs) {
+            (&MilOperand::VTable(lhs_class_id), &MilOperand::VTable(rhs_class_id)) => Some(MilOperand::Bool(
+                env.can_convert(lhs_class_id, rhs_class_id)
+            )),
+            _ => None
         }
     }
 }
@@ -276,7 +282,7 @@ fn try_fold_constant_instr(instr: &MilInstructionKind, env: &ClassEnvironment, k
         MilInstructionKind::Select(_, MilOperand::Bool(true), ref true_val, _) => Some(true_val.clone()),
         MilInstructionKind::Select(_, MilOperand::Bool(false), _, ref false_val) => Some(false_val.clone()),
         MilInstructionKind::UnOp(op, _, ref val) => try_fold_un_op(op, val, known_objects),
-        MilInstructionKind::BinOp(op, _, ref lhs, ref rhs) => try_fold_bin_op(op, lhs, rhs),
+        MilInstructionKind::BinOp(op, _, ref lhs, ref rhs) => try_fold_bin_op(op, lhs, rhs, env),
         MilInstructionKind::GetField(field_id, result_class, _, MilOperand::KnownObject(obj_id, _)) => {
             if env.get_field(field_id).1.flags.contains(FieldFlags::FINAL) {
                 let obj = known_objects.get(obj_id);
@@ -398,7 +404,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
             if op.is_associative() && rhs.is_const() {
                 match lhs_instr {
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::BinOp(lhs_op, _, ref lhs_lhs, ref lhs_rhs))) if lhs_op == op => {
-                        if let Some(new_rhs) = try_fold_bin_op(op, lhs_rhs, rhs) {
+                        if let Some(new_rhs) = try_fold_bin_op(op, lhs_rhs, rhs, env) {
                             do_simplify(&mut [
                                 MilInstructionKind::BinOp(op, tgt, lhs_lhs.clone(), new_rhs)
                             ], flat_func, instr);
@@ -413,7 +419,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
             if rhs.is_const() {
                 match lhs_instr {
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::Select(_, ref cond, ref true_val, ref false_val))) => {
-                        if let (Some(true_val), Some(false_val)) = (try_fold_bin_op(op, true_val, rhs), try_fold_bin_op(op, false_val, rhs)) {
+                        if let (Some(true_val), Some(false_val)) = (try_fold_bin_op(op, true_val, rhs, env), try_fold_bin_op(op, false_val, rhs, env)) {
                             do_simplify(&mut [
                                 MilInstructionKind::Select(tgt, cond.clone(), true_val, false_val)
                             ], flat_func, instr);
@@ -428,7 +434,7 @@ fn simplify_instruction(instr: &mut MilInstruction, flat_func: &mut MilFlatReprI
             if lhs.is_const() {
                 match rhs_instr {
                     Some(MilRegisterSourceKind::Instr(&MilInstructionKind::Select(_, ref cond, ref true_val, ref false_val))) => {
-                        if let (Some(true_val), Some(false_val)) = (try_fold_bin_op(op, lhs, true_val), try_fold_bin_op(op, rhs, false_val)) {
+                        if let (Some(true_val), Some(false_val)) = (try_fold_bin_op(op, lhs, true_val, env), try_fold_bin_op(op, rhs, false_val, env)) {
                             do_simplify(&mut [
                                 MilInstructionKind::Select(tgt, cond.clone(), true_val, false_val)
                             ], flat_func, instr);

@@ -1435,10 +1435,11 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetVTable, vtable_reg, obj.clone()));
 
                 if !env.get(cpe.class_id).is_interface() {
-                    builder.append_instruction(MilInstructionKind::IsSubclass(
-                        cpe.class_id,
+                    builder.append_instruction(MilInstructionKind::BinOp(
+                        MilBinOp::IsSubclass,
                         is_subclass_reg,
-                        MilOperand::Register(MilType::Addr, vtable_reg)
+                        MilOperand::Register(MilType::Addr, vtable_reg),
+                        MilOperand::VTable(cpe.class_id)
                     ));
                 } else {
                     // TODO
@@ -1483,10 +1484,11 @@ fn generate_il_for_block(env: &ClassEnvironment, builder: &mut MilBuilder, code:
                 builder.append_instruction(MilInstructionKind::UnOp(MilUnOp::GetVTable, vtable_reg, obj));
 
                 if !env.get(cpe.class_id).is_interface() {
-                    builder.append_instruction(MilInstructionKind::IsSubclass(
-                        cpe.class_id,
+                    builder.append_instruction(MilInstructionKind::BinOp(
+                        MilBinOp::IsSubclass,
                         is_subclass_reg,
-                        MilOperand::Register(MilType::Addr, vtable_reg)
+                        MilOperand::Register(MilType::Addr, vtable_reg),
+                        MilOperand::VTable(cpe.class_id)
                     ));
                 } else {
                     // TODO

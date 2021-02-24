@@ -550,6 +550,12 @@ impl <'a> LLVMBuilder<'a> {
         }
     }
 
+    pub fn build_ptr_to_int(&self, val: LLVMValue<'a>, ty: LLVMTypeRef, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildPtrToInt(self.ptr(), val.ptr(), ty, cstr_or_empty(&name)))
+        }
+    }
+
     pub fn build_load(&self, addr: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
         unsafe {
             self.wrap_value(LLVMBuildLoad(self.ptr(), addr.ptr(), cstr_or_empty(&name)))
@@ -655,6 +661,12 @@ impl <'a> LLVMBuilder<'a> {
     pub fn build_add(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
         unsafe {
             self.wrap_value(LLVMBuildAdd(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
+        }
+    }
+
+    pub fn build_nuw_add(&self, lhs: LLVMValue<'a>, rhs: LLVMValue<'a>, name: Option<CString>) -> LLVMValue<'a> {
+        unsafe {
+            self.wrap_value(LLVMBuildNUWAdd(self.ptr(), lhs.ptr(), rhs.ptr(), cstr_or_empty(&name)))
         }
     }
 
