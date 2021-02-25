@@ -12,7 +12,7 @@ use llvm_sys::prelude::*;
 use crate::liveness::LivenessInfo;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
-use crate::resolve::{ClassId, FieldId};
+use crate::resolve::{ClassId, FieldId, MethodName};
 
 use super::MochaModule;
 use super::types::{LLVMTypes, VTABLE_FIRST_VSLOT_FIELD, VTABLE_ITABLE_FIELD};

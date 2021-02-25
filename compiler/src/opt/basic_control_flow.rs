@@ -10,7 +10,7 @@ use crate::mil::dom::Dominators;
 use crate::mil::flow_graph::{FlowGraph, FlowGraphNode};
 use crate::mil::il::*;
 use crate::mil::transform;
-use crate::resolve::ClassEnvironment;
+use crate::resolve::{ClassEnvironment, MethodName};
 
 pub fn eliminate_dead_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
     log_writeln!(log, "\n===== DEAD BLOCK ELIMINATION =====\n");

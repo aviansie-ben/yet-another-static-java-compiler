@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use crate::classfile::{Class, FieldFlags, PrimitiveType};
 use crate::liveness::LivenessInfo;
-use crate::mil::il::MethodName;
-use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, FieldId, MethodId, MethodName, ResolvedClass};
 
 pub const JAVA_OBJECT_HEADER_SIZE: u32 = 8;
 pub const JAVA_ARRAY_HEADER_SIZE: u32 = 12;

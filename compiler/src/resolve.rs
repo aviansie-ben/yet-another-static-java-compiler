@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::collections::hash_map;
-use std::fmt::{Debug, Write};
+use std::fmt::{self, Write};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::mem;
@@ -125,7 +125,7 @@ impl FieldId {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ConstantId(pub ClassId, pub u16);
 
-pub trait ClassLoader: Debug + Send + Sync {
+pub trait ClassLoader: fmt::Debug + Send + Sync {
     fn try_load(
         &self,
         name: &str,
@@ -198,15 +198,15 @@ impl ClassLoader for FileClassLoader {
 }
 
 #[derive(Debug)]
-pub struct JarClassLoader<R: Read + Seek + Debug + Send + Sync>(Mutex<ZipArchive<R>>);
+pub struct JarClassLoader<R: Read + Seek + fmt::Debug + Send + Sync>(Mutex<ZipArchive<R>>);
 
-impl <R: Read + Seek + Debug + Send + Sync> JarClassLoader<R> {
+impl <R: Read + Seek + fmt::Debug + Send + Sync> JarClassLoader<R> {
     pub fn new(read: R) -> ZipResult<JarClassLoader<R>> {
         Result::Ok(JarClassLoader(Mutex::new(ZipArchive::new(read)?)))
     }
 }
 
-impl <R: Read + Seek + Debug + Send + Sync> ClassLoader for JarClassLoader<R> {
+impl <R: Read + Seek + fmt::Debug + Send + Sync> ClassLoader for JarClassLoader<R> {
     fn try_load(
         &self,
         name: &str,
@@ -645,6 +645,36 @@ impl ClassEnvironment {
 
     pub fn class_ids(&self) -> impl Iterator<Item=ClassId> {
         (0..(self.num_classes())).map(|i| ClassId(i as u32))
+    }
+}
+
+pub struct FieldName<'a>(pub FieldId, pub &'a ClassEnvironment);
+
+impl <'a> fmt::Display for FieldName<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let FieldName(field_id, env) = *self;
+
+        if field_id.0 != ClassId::UNRESOLVED {
+            let (class, field) = env.get_field(field_id);
+            write!(f, "{}.{} {}", class.meta.name, field.name, field.descriptor)
+        } else {
+            write!(f, "<unresolved>")
+        }
+    }
+}
+
+pub struct MethodName<'a>(pub MethodId, pub &'a ClassEnvironment);
+
+impl <'a> fmt::Display for MethodName<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let MethodName(method_id, env) = *self;
+
+        if method_id.0 != ClassId::UNRESOLVED {
+            let (class, method) = env.get_method(method_id);
+            write!(f, "{}.{}{}", class.meta.name, method.name, method.descriptor)
+        } else {
+            write!(f, "<unresolved>")
+        }
     }
 }
 

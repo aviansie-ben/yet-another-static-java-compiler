@@ -9,7 +9,7 @@ use smallvec::{smallvec, SmallVec};
 use crate::log_writeln;
 use crate::mil::il::*;
 use crate::mil::validator::validate_function;
-use crate::resolve::{MethodId, ClassEnvironment};
+use crate::resolve::{ClassEnvironment, MethodId, MethodName};
 use crate::util::FuncCache;
 
 use super::OptimizationEnvironment;

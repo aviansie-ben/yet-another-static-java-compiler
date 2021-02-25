@@ -11,7 +11,7 @@ use super::transform;
 use crate::bytecode::{BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeCode, Class, ClassFlags, ConstantPoolEntry, FlatTypeDescriptor, LocalVariableTableEntry, Method, MethodBody, MethodFlags, PrimitiveType, TypeDescriptor};
 use crate::liveness::LivenessInfo;
-use crate::resolve::{ClassEnvironment, ClassId, MethodId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, MethodId, MethodName, ResolvedClass};
 
 pub struct MilBuilder<'a> {
     func: MilFunction,

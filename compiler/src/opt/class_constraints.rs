@@ -5,7 +5,7 @@ use crate::log_writeln;
 use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
-use crate::resolve::{ClassEnvironment, ClassId};
+use crate::resolve::{ClassEnvironment, ClassId, MethodName};
 
 pub struct ClassConstraints {
     vtables: HashMap<MilRegister, MilOperand>,

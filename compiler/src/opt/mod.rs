@@ -5,7 +5,7 @@ use crate::log::Log;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::mil::validator::validate_function;
-use crate::resolve::ClassEnvironment;
+use crate::resolve::{ClassEnvironment, MethodName};
 use crate::static_heap::JavaStaticHeap;
 
 pub mod basic_control_flow;

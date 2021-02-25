@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::mil::dom::Dominators;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
-use crate::resolve::ClassEnvironment;
+use crate::resolve::{ClassEnvironment, MethodName};
 
 #[derive(Debug, Clone, Copy)]
 enum ValidatorLocation {

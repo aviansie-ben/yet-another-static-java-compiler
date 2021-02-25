@@ -8,9 +8,8 @@ use lazy_static::lazy_static;
 
 use crate::bytecode::{BytecodeCondition, BytecodeInstruction, BytecodeIterator};
 use crate::classfile::{AttributeData, Class, ClassFlags, ConstantPoolEntry, FieldFlags, FlatTypeDescriptor, MethodBody, MethodFlags, MethodSummary, PrimitiveType};
-use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, ResolvedClass};
+use crate::resolve::{ClassEnvironment, ClassId, ConstantId, FieldId, MethodId, MethodName, ResolvedClass};
 use crate::layout;
-use crate::mil::il::MethodName;
 use crate::static_heap::{self, ObjectFlags, JavaStaticHeap, JavaStaticRef};
 
 fn add_may_virtual_call(summary: &mut MethodSummary, method_id: MethodId) {
