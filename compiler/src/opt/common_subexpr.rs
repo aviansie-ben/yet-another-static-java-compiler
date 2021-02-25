@@ -8,6 +8,7 @@ use crate::mil::dom::DominatorTree;
 use crate::mil::flow_graph::FlowGraph;
 use crate::mil::il::*;
 use crate::resolve::{ClassEnvironment, FieldId};
+use crate::util::BitVec;
 
 #[derive(Debug, Clone)]
 struct AvailableExpressions {
@@ -55,7 +56,7 @@ impl AvailableExpressions {
     }
 
     pub fn set_field(&mut self, field_id: FieldId, obj: Option<&MilOperand>, val: &MilOperand) {
-        self.flush_field_loads(field_id);
+        self.flush_field_loads(&[field_id]);
         self.field_loads.push((field_id, obj.cloned(), val.clone()));
     }
 
@@ -65,11 +66,59 @@ impl AvailableExpressions {
         });
     }
 
-    pub fn flush_field_loads(&mut self, field_id: FieldId) {
+    pub fn flush_field_loads(&mut self, field_ids: &[FieldId]) {
         self.field_loads.drain_filter(|&mut (id, _, _)| {
-            id == field_id
+            field_ids.contains(&id)
         });
     }
+}
+
+fn find_intervening_blocks(b1: MilBlockId, b2: MilBlockId, cfg: &FlowGraph<MilBlockId>) -> Vec<MilBlockId> {
+    fn find_intervening_blocks_impl(block: MilBlockId, cfg: &FlowGraph<MilBlockId>, seen: &mut BitVec<MilBlockId>, reaches_target: &mut BitVec<MilBlockId>, path: &mut Vec<MilBlockId>, result: &mut Vec<MilBlockId>) {
+        if block == MilBlockId::EXIT {
+            return;
+        };
+
+        if reaches_target.get(block) {
+            path.pop();
+
+            for block in path.iter().copied() {
+                reaches_target.set(block, true);
+            };
+
+            result.extend(path.drain(..));
+            return;
+        };
+
+        if block != MilBlockId::ENTRY && seen.set(block, true) {
+            return;
+        };
+
+        for succ_id in cfg.get(block).outgoing.iter().copied() {
+            path.push(succ_id);
+            find_intervening_blocks_impl(succ_id, cfg, seen, reaches_target, path, result);
+            path.pop();
+        };
+    }
+
+    let mut seen = BitVec::new();
+    let mut reaches_target = BitVec::new();
+    let mut path = vec![];
+    let mut result = vec![];
+
+    reaches_target.set(b2, true);
+    find_intervening_blocks_impl(b1, cfg, &mut seen, &mut reaches_target, &mut path, &mut result);
+
+    // If the target block is the start of a loop, then control might reach it from its immediate dominator via itself. Thus, any successors
+    // of the target block might also be intervening blocks.
+    path.push(b2);
+    for succ_id in cfg.get(b2).outgoing.iter().copied() {
+        path.push(succ_id);
+        find_intervening_blocks_impl(succ_id, cfg, &mut seen, &mut reaches_target, &mut path, &mut result);
+        path.pop();
+    };
+
+    result
 }
 
 pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &FlowGraph<MilBlockId>, env: &ClassEnvironment, log: &Log) -> usize {
@@ -78,6 +127,35 @@ pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &Fl
     let mut num_commoned = 0;
     let rpo_blocks = cfg.compute_reverse_postorder();
     let doms = DominatorTree::calculate_dominator_tree(cfg, &rpo_blocks);
+
+    let block_kills: HashMap<_, _> = rpo_blocks.iter().copied().map(|block_id| {
+        let block = func.blocks.get_mut(&block_id).unwrap();
+
+        if block.end_instr.is_call() {
+            (block_id, None)
+        } else {
+            let mut kill = vec![];
+
+            for instr in block.instrs.iter() {
+                match instr.kind {
+                    MilInstructionKind::PutField(field_id, _, _, _) => {
+                        if !kill.contains(&field_id) {
+                            kill.push(field_id);
+                        };
+                    },
+                    MilInstructionKind::PutStatic(field_id, _, _) => {
+                        if !kill.contains(&field_id) {
+                            kill.push(field_id);
+                        };
+                    },
+                    _ => {}
+                };
+            };
+
+            (block_id, Some(kill))
+        }
+    }).collect();
+    let mut kill = vec![];
 
     let mut available_exprs: HashMap<MilBlockId, AvailableExpressions> = HashMap::new();
     let mut mappings: HashMap<MilRegister, MilOperand> = HashMap::new();
@@ -92,8 +170,25 @@ pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &Fl
         let block = func.blocks.get_mut(&block_id).unwrap();
 
         if cfg.get(block_id).incoming.len() > 1 {
-            log_writeln!(log, "  (Flushing non-final loads due to intervening blocks)");
-            this_available_exprs.flush_loads(env);
+            let intervening_blocks = find_intervening_blocks(idom_id, block_id, cfg);
+            log_writeln!(log, "  (Flushing loads killed by intervening blocks {:?})", find_intervening_blocks(idom_id, block_id, cfg));
+
+            let mut kill_all = false;
+            kill.clear();
+            for intervening_block_id in intervening_blocks {
+                if let Some(intervening_kill) = block_kills[&intervening_block_id].as_ref() {
+                    kill.extend(intervening_kill);
+                } else {
+                    kill_all = true;
+                    break;
+                };
+            };
+
+            if kill_all {
+                this_available_exprs.flush_loads(env);
+            } else {
+                this_available_exprs.flush_field_loads(&kill);
+            };
         };
 
         for instr in block.instrs.iter_mut() {
