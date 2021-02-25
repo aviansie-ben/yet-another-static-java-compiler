@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -345,39 +344,21 @@ fn constant_from_cpe(cpe: &ConstantPoolEntry, known_objects: &MilKnownObjectRefs
     }
 }
 
-fn read_param(builder: &mut MilBuilder, i: u16, param_constraint: MilClassConstraint) -> MilRegister {
-    let reg = builder.allocate_reg();
-
-    builder.append_instruction(
-        if param_constraint.class_id() != ClassId::UNRESOLVED {
-            MilInstructionKind::GetParam(i.try_into().unwrap(), param_constraint, reg)
-        } else {
-            MilInstructionKind::Copy(reg, MilOperand::RefNull)
-        }
-    );
-
-    reg
-}
-
-fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method) {
+fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals) {
     let mut next_param_local = 0;
+    let params = builder.func.sig.param_types.iter().cloned().zip(builder.func.param_regs.iter().copied()).collect_vec();
 
-    for (i, param_type) in method.param_types.iter().cloned().enumerate() {
+    for (ty, reg) in params {
         let local_id = locals.get_or_add(
             next_param_local,
-            MilType::for_class(param_type),
+            ty.ty,
             &mut builder.func.local_info
         );
-        let param_constraint = if i == 0 && !method.flags.contains(MethodFlags::STATIC) {
-            MilClassConstraint::for_class(param_type).not_null()
-        } else {
-            MilClassConstraint::for_class(param_type)
-        };
-        let reg = read_param(builder, i.try_into().unwrap(), param_constraint);
-        builder.append_instruction(MilInstructionKind::SetLocal(local_id, MilOperand::Register(MilType::for_class(param_type), reg)));
+
+        builder.append_instruction(MilInstructionKind::SetLocal(local_id, MilOperand::Register(ty.ty, reg)));
 
         next_param_local += 1;
-        if param_type.needs_dual_slot() {
+        if ty.ty == MilType::Long || ty.ty == MilType::Double {
             next_param_local += 1;
         };
     };
@@ -393,14 +374,12 @@ fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, kno
     };
 
     args.extend(
-        method.param_types.iter().cloned().enumerate()
-            .map(|(i, param_type)| MilOperand::Register(
-                MilType::for_class(param_type),
-                read_param(&mut builder, i.try_into().unwrap(), MilClassConstraint::for_class(param_type))
-            ))
+        builder.func.sig.param_types.iter().zip(builder.func.param_regs.iter().copied()).map(|(ty, reg)| {
+            MilOperand::Register(ty.ty, reg)
+        })
     );
 
-    let reg = if method.return_type == ClassId::PRIMITIVE_VOID {
+    let reg = if builder.func.sig.return_type.is_none() {
         MilRegister::VOID
     } else {
         builder.allocate_reg()
@@ -1786,7 +1765,7 @@ pub fn generate_il_for_code(
     let mut block_worklist = vec![0];
     let mut builder = MilBuilder::new(method_id, get_mil_signature_for_method(method), verbose, env);
 
-    get_params(&mut builder, &mut locals, method);
+    get_params(&mut builder, &mut locals);
 
     while let Some(next_block) = block_worklist.pop() {
         generate_il_for_block(env, &mut builder, code, next_block, &class.constant_pool, &mut blocks, &mut block_worklist, &mut locals, &mut fixups, known_objects, verbose);

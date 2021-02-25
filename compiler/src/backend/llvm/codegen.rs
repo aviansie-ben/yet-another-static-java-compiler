@@ -663,9 +663,6 @@ unsafe fn emit_basic_block<'a, 'b>(
                     }
                 });
             },
-            MilInstructionKind::GetParam(idx, _, tgt) => {
-                set_register(&mut local_regs, all_regs, tgt, LLVMValue::from_raw(LLVMGetParam(llvm_func.ptr(), idx as u32)));
-            },
             MilInstructionKind::GetLocal(local_id, tgt) => {
                 set_register(&mut local_regs, all_regs, tgt, builder.build_load(locals[&local_id], Some(register_name(tgt))));
             },
@@ -999,6 +996,10 @@ unsafe fn emit_function(module: &mut MochaModule, func: &MilFunction) {
 
     let mut all_regs = HashMap::new();
     let mut phis_to_add = vec![];
+
+    for (i, reg) in func.param_regs.iter().copied().enumerate() {
+        all_regs.insert(reg, LLVMValue::from_raw(LLVMGetParam(llvm_func.into_val().ptr(), i as u32)));
+    };
 
     for block_id in func.block_order.iter().cloned() {
         emit_basic_block(module, func, &cfg, block_id, &builder, llvm_func.into_val(), &mut locals, &mut llvm_blocks, &mut all_regs, &mut phis_to_add, &mut debug_locs);

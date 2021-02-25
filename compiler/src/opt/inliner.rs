@@ -128,6 +128,10 @@ fn create_register_mapping(inlinee: &MilFunction, reg_alloc: &mut MilRegisterAll
         reg_mapping.entry(old_reg).or_insert_with(|| { reg_alloc.allocate_one() });
     };
 
+    for param_reg in inlinee.param_regs.iter().copied() {
+        add_reg(param_reg);
+    };
+
     for block_id in inlinee.block_order.iter().copied() {
         let block = &inlinee.blocks[&block_id];
 
@@ -206,6 +210,14 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
     let (block_order, block_map) = create_block_id_mapping(inlinee, &mut func.block_alloc);
     let reg_map = create_register_mapping(inlinee, &mut func.reg_alloc);
 
+    let call_block = func.blocks.get_mut(&loc).unwrap();
+    for (reg, arg) in inlinee.param_regs.iter().copied().zip(args.into_iter()) {
+        call_block.instrs.push(MilInstruction {
+            kind: MilInstructionKind::Copy(reg_map[&reg], arg),
+            bytecode: call_loc
+        });
+    };
+
     let inline_site_id = func.inline_sites.len() as u32;
     func.inline_sites.push(MilInlineSiteInfo {
         method_id: inlinee.id,
@@ -244,10 +256,6 @@ fn inline_single_method(func: &mut MilFunction, inlinee: &MilFunction, loc: MilB
 
             if let Some(target) = instr.target_mut() {
                 *target = *&reg_map[target];
-            };
-
-            if let MilInstructionKind::GetParam(idx, _, tgt) = instr.kind {
-                instr.kind = MilInstructionKind::Copy(tgt, args[idx as usize].clone());
             };
         };
 
@@ -366,21 +374,12 @@ mod test {
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(2));
         f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(2));
 
-        let mut g = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Int), vec![]));
+        let mut g = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Int), vec![MilType::Int, MilType::Int]));
 
         g.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
             phi_nodes: vec![],
-            instrs: vec![
-                MilInstruction {
-                    kind: MilInstructionKind::GetParam(0, MilClassConstraint::for_class(ClassId::PRIMITIVE_INT), MilRegister(0)),
-                    bytecode: (!0, 0)
-                },
-                MilInstruction {
-                    kind: MilInstructionKind::GetParam(1, MilClassConstraint::for_class(ClassId::PRIMITIVE_INT), MilRegister(1)),
-                    bytecode: (!0, 0)
-                }
-            ],
+            instrs: vec![],
             end_instr: MilEndInstruction {
                 kind: MilEndInstructionKind::Return(Some(MilOperand::Register(MilType::Int, MilRegister(0)))),
                 bytecode: (!0, 1)
@@ -390,7 +389,6 @@ mod test {
 
         g.block_order = vec![MilBlockId(0)];
         g.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(1));
-        g.reg_alloc = MilRegisterAllocator::new_from(MilRegister(2));
 
         inline_single_method(&mut f, &g, MilBlockId(0));
 
@@ -398,7 +396,19 @@ mod test {
 
         let block_0 = &f.blocks[&MilBlockId(0)];
         assert!(block_0.phi_nodes.is_empty());
-        assert!(block_0.instrs.is_empty());
+        assert_eq!(
+            vec![
+                MilInstruction {
+                    kind: MilInstructionKind::Copy(MilRegister(2), MilOperand::Int(0)),
+                    bytecode: (!0, 0)
+                },
+                MilInstruction {
+                    kind: MilInstructionKind::Copy(MilRegister(3), MilOperand::Register(MilType::Int, MilRegister(0))),
+                    bytecode: (!0, 0)
+                }
+            ],
+            block_0.instrs
+        );
         assert_eq!(
             MilEndInstruction {
                 kind: MilEndInstructionKind::Nop,
@@ -409,19 +419,7 @@ mod test {
 
         let block_2 = &f.blocks[&MilBlockId(2)];
         assert!(block_2.phi_nodes.is_empty());
-        assert_eq!(
-            vec![
-                MilInstruction {
-                    kind: MilInstructionKind::Copy(MilRegister(2), MilOperand::Int(0)),
-                    bytecode: (0, 0)
-                },
-                MilInstruction {
-                    kind: MilInstructionKind::Copy(MilRegister(3), MilOperand::Register(MilType::Int, MilRegister(0))),
-                    bytecode: (0, 0)
-                }
-            ],
-            block_2.instrs
-        );
+        assert!(block_2.instrs.is_empty());
         assert_eq!(
             MilEndInstruction {
                 kind: MilEndInstructionKind::Jump(MilBlockId(1)),

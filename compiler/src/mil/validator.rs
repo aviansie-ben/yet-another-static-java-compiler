@@ -10,17 +10,19 @@ use crate::resolve::ClassEnvironment;
 
 #[derive(Debug, Clone, Copy)]
 enum ValidatorLocation {
+    Param(usize),
     Phi(MilBlockId, usize),
     Instruction(MilBlockId, usize),
     EndInstruction(MilBlockId)
 }
 
 impl ValidatorLocation {
-    fn block(self) -> MilBlockId {
+    fn block(self) -> Option<MilBlockId> {
         match self {
-            ValidatorLocation::Phi(block, _) => block,
-            ValidatorLocation::Instruction(block, _) => block,
-            ValidatorLocation::EndInstruction(block) => block
+            ValidatorLocation::Param(_) => None,
+            ValidatorLocation::Phi(block, _) => Some(block),
+            ValidatorLocation::Instruction(block, _) => Some(block),
+            ValidatorLocation::EndInstruction(block) => Some(block)
         }
     }
 }
@@ -28,6 +30,9 @@ impl ValidatorLocation {
 impl fmt::Display for ValidatorLocation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            ValidatorLocation::Param(i) => {
+                write!(f, "params[{}]", i)
+            },
             ValidatorLocation::Phi(block_id, i) => {
                 write!(f, "{}.phi_nodes[{}]", block_id, i)
             },
@@ -108,7 +113,15 @@ fn validate_operand(op: &MilOperand, expected_ty: MilType, phi_block: Option<Mil
         let doms_correctly = if phi_block.is_none() && def_loc.block() == state.loc.block() {
             state.regs_seen.contains(&reg)
         } else {
-            state.doms.get(phi_block.unwrap_or(state.loc.block())).get(def_loc.block())
+            if let Some(def_block) = def_loc.block() {
+                if let Some(current_block) = phi_block.or(state.loc.block()) {
+                    state.doms.get(current_block).get(def_block)
+                } else {
+                    false
+                }
+            } else {
+                true
+            }
         };
 
         if !doms_correctly {
@@ -179,9 +192,6 @@ fn validate_instr(
             validate_operand(lhs, lhs_ty, state);
             validate_operand(rhs, rhs_ty, state);
             validate_target(tgt, Some(tgt_ty), state);
-        },
-        MilInstructionKind::GetParam(_, constraint, tgt) => {
-            validate_target(tgt, Some(MilType::for_class(constraint.class_id())), state);
         },
         MilInstructionKind::GetLocal(local_id, tgt) => {
             validate_target(tgt, Some(state.func.local_info[&local_id].ty), state);
@@ -380,6 +390,9 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
 
 fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &ValidatorError) {
     match err.loc {
+        ValidatorLocation::Param(i) => {
+            eprintln!("{}\n  At params[{}]: ", func.pretty_decl(env), i);
+        },
         ValidatorLocation::Phi(block_id, i) => {
             let phi = &func.blocks[&block_id].phi_nodes[i];
             eprint!("{}\n  At {}.phi_nodes[{}]: ", phi.pretty(env), block_id, i);

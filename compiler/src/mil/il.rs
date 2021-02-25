@@ -905,7 +905,6 @@ pub enum MilInstructionKind {
     Select(MilRegister, MilOperand, MilOperand, MilOperand),
     UnOp(MilUnOp, MilRegister, MilOperand),
     BinOp(MilBinOp, MilRegister, MilOperand, MilOperand),
-    GetParam(u16, MilClassConstraint, MilRegister),
     GetLocal(MilLocalId, MilRegister),
     SetLocal(MilLocalId, MilOperand),
     GetField(FieldId, ClassId, MilRegister, MilOperand),
@@ -992,9 +991,6 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
                 write!(f, "{} {}, {}, {}", op, tgt, lhs.pretty(self.1), rhs.pretty(self.1))?;
             },
-            MilInstructionKind::GetParam(n, class_constraint, tgt) => {
-                write!(f, "get_param <{} {}> {}", n, class_constraint.pretty(self.1), tgt)?;
-            },
             MilInstructionKind::GetLocal(local_id, tgt) => {
                 write!(f, "get_local <{}> {}", local_id, tgt)?;
             },
@@ -1062,7 +1058,6 @@ impl MilInstruction {
             MilInstructionKind::Select(ref tgt, _, _, _) => Some(tgt),
             MilInstructionKind::UnOp(_, ref tgt, _) => Some(tgt),
             MilInstructionKind::BinOp(_, ref tgt, _, _) => Some(tgt),
-            MilInstructionKind::GetParam(_, _, ref tgt) => Some(tgt),
             MilInstructionKind::GetLocal(_, ref tgt) => Some(tgt),
             MilInstructionKind::SetLocal(_, _) => None,
             MilInstructionKind::GetField(_, _, ref tgt, _) => Some(tgt),
@@ -1083,7 +1078,6 @@ impl MilInstruction {
             MilInstructionKind::Select(ref mut tgt, _, _, _) => Some(tgt),
             MilInstructionKind::UnOp(_, ref mut tgt, _) => Some(tgt),
             MilInstructionKind::BinOp(_, ref mut tgt, _, _) => Some(tgt),
-            MilInstructionKind::GetParam(_, _, ref mut tgt) => Some(tgt),
             MilInstructionKind::GetLocal(_, ref mut tgt) => Some(tgt),
             MilInstructionKind::SetLocal(_, _) => None,
             MilInstructionKind::GetField(_, _, ref mut tgt, _) => Some(tgt),
@@ -1115,7 +1109,6 @@ impl MilInstruction {
                 f(lhs);
                 f(rhs);
             },
-            MilInstructionKind::GetParam(_, _, _) => {},
             MilInstructionKind::GetLocal(_, _) => {},
             MilInstructionKind::SetLocal(_, ref val) => {
                 f(val);
@@ -1165,7 +1158,6 @@ impl MilInstruction {
                 f(lhs);
                 f(rhs);
             },
-            MilInstructionKind::GetParam(_, _, _) => {},
             MilInstructionKind::GetLocal(_, _) => {},
             MilInstructionKind::SetLocal(_, ref mut val) => {
                 f(val);
@@ -1757,6 +1749,7 @@ impl MilFunctionSignature {
 pub struct MilFunction {
     pub id: MethodId,
     pub sig: MilFunctionSignature,
+    pub param_regs: Vec<MilRegister>,
     pub reg_alloc: MilRegisterAllocator,
     pub local_info: HashMap<MilLocalId, MilLocalInfo>,
     pub block_alloc: MilBlockIdAllocator,
@@ -1770,10 +1763,14 @@ pub struct MilFunction {
 
 impl MilFunction {
     pub fn new(id: MethodId, sig: MilFunctionSignature) -> MilFunction {
+        let mut reg_alloc = MilRegisterAllocator::new();
+        let param_regs = sig.param_types.iter().map(|_| reg_alloc.allocate_one()).collect();
+
         MilFunction {
             id,
             sig,
-            reg_alloc: MilRegisterAllocator::new(),
+            param_regs,
+            reg_alloc,
             local_info: HashMap::new(),
             block_alloc: MilBlockIdAllocator::new(),
             blocks: HashMap::new(),
@@ -1785,16 +1782,20 @@ impl MilFunction {
         }
     }
 
+    pub fn pretty_decl<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
+        PrettyMilFunctionDecl(self, env)
+    }
+
     pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
         PrettyMilFunction(self, env)
     }
 }
 
-struct PrettyMilFunction<'a>(&'a MilFunction, &'a ClassEnvironment);
+struct PrettyMilFunctionDecl<'a>(&'a MilFunction, &'a ClassEnvironment);
 
-impl <'a> fmt::Display for PrettyMilFunction<'a> {
+impl <'a> fmt::Display for PrettyMilFunctionDecl<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let PrettyMilFunction(func, env) = *self;
+        let PrettyMilFunctionDecl(func, env) = *self;
 
         write!(f, "func ")?;
 
@@ -1806,17 +1807,27 @@ impl <'a> fmt::Display for PrettyMilFunction<'a> {
 
         write!(f, "%\"{}\"(", MethodName(func.id, self.1))?;
 
-        match &func.sig.param_types[..] {
-            &[ first_param_type, ref rest_param_types @ .. ] => {
-                write!(f, "{}", first_param_type.pretty(env))?;
-                for param_type in rest_param_types.iter().copied() {
-                    write!(f, ", {}", param_type.pretty(env))?;
-                };
-            },
-            &[] => {}
+        let mut first = true;
+        for (ty, reg) in func.sig.param_types.iter().zip(func.param_regs.iter().copied()) {
+            if !first {
+                write!(f, ", ")?;
+            } else {
+                first = false;
+            };
+
+            write!(f, "{} {}", ty.pretty(env), reg)?;
         };
 
-        writeln!(f, ") {{")?;
+        write!(f, ")")
+    }
+}
+
+struct PrettyMilFunction<'a>(&'a MilFunction, &'a ClassEnvironment);
+
+impl <'a> fmt::Display for PrettyMilFunction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PrettyMilFunction(func, env) = *self;
+        writeln!(f, "{} {{", func.pretty_decl(env))?;
 
         for block_id in func.block_order.iter().cloned() {
             writeln!(f, "{}", func.blocks[&block_id].pretty(env))?;

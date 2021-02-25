@@ -190,7 +190,6 @@ fn class_constraint_for_instr(instr: &MilInstructionKind) -> Option<MilClassCons
         MilInstructionKind::Select(_, _, _, _) => None,
         MilInstructionKind::UnOp(_, _, _) => None,
         MilInstructionKind::BinOp(_, _, _, _) => None,
-        MilInstructionKind::GetParam(_, constraint, _) => Some(constraint),
         MilInstructionKind::GetLocal(_, _) => None,
         MilInstructionKind::SetLocal(_, _) => None,
         MilInstructionKind::GetField(_, class_id, _, _) => Some(MilClassConstraint::for_class(class_id)),
@@ -270,6 +269,13 @@ pub fn perform_class_constraint_analysis(func: &mut MilFunction, cfg: &FlowGraph
             if let Some(tgt) = instr.target().copied() {
                 instrs_by_reg.insert(tgt, &instr.kind);
             };
+        };
+    };
+
+    for (ty, reg) in func.sig.param_types.iter().zip(func.param_regs.iter().copied()) {
+        if let Some(constraint) = ty.constraint.clone() {
+            log_writeln!(log, "  {} <- {}", reg, constraint.pretty(env));
+            constraints.set(reg, constraint);
         };
     };
 

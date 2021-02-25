@@ -202,7 +202,6 @@ pub fn eliminate_common_subexpressions_globally(func: &mut MilFunction, cfg: &Fl
                 MilInstructionKind::Select(_, _, _, _) => None,
                 MilInstructionKind::UnOp(op, tgt, ref val) => this_available_exprs.handle_un_op(tgt, op, val),
                 MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => this_available_exprs.handle_bin_op(tgt, op, lhs, rhs),
-                MilInstructionKind::GetParam(_, _, _) => None,
                 MilInstructionKind::GetLocal(_, _) => None,
                 MilInstructionKind::SetLocal(_, _) => None,
                 MilInstructionKind::GetField(field_id, cls, tgt, ref obj) => this_available_exprs.handle_field_load(tgt, MilType::for_class(cls), field_id, Some(obj)),
