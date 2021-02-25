@@ -43,6 +43,7 @@ impl fmt::Display for ValidatorLocation {
 
 #[derive(Debug, Clone)]
 enum ValidatorErrorKind {
+    PhiOnEntryBlock,
     PhiEntriesMismatch(Vec<MilBlockId>),
     MultipleRegisterDefinitions(MilRegister, ValidatorLocation),
     ExpectedVoidTarget,
@@ -302,14 +303,24 @@ fn validate_function_internal(func: &MilFunction, _env: &ClassEnvironment) -> Ve
         errors: vec![]
     };
 
+    for (i, (ty, reg)) in func.sig.param_types.iter().zip(func.param_regs.iter().copied()).enumerate() {
+        state.loc = ValidatorLocation::Param(i);
+        validate_target(reg, Some(ty.ty), &mut state);
+    };
+
     for block_id in func.block_order.iter().copied() {
         let block = &func.blocks[&block_id];
         let preds = cfg.get(block_id).incoming.iter().copied().sorted_by_key(|id| id.0).dedup().collect_vec();
+        let is_entry_block = preds.contains(&MilBlockId::ENTRY);
 
         for (i, phi) in block.phi_nodes.iter().enumerate() {
             let phi_preds = phi.sources.iter().map(|&(_, pred)| pred).sorted_by_key(|id| id.0).collect_vec();
 
             state.loc = ValidatorLocation::Phi(block_id, i);
+
+            if is_entry_block {
+                state.push_error(ValidatorErrorKind::PhiOnEntryBlock);
+            };
 
             if phi_preds != preds {
                 state.push_error(ValidatorErrorKind::PhiEntriesMismatch(preds.clone()));
@@ -384,6 +395,9 @@ fn print_validation_error(func: &MilFunction, env: &ClassEnvironment, err: &Vali
     };
 
     match err.kind {
+        ValidatorErrorKind::PhiOnEntryBlock => {
+            eprintln!("Cannot have phi nodes on entry block");
+        },
         ValidatorErrorKind::PhiEntriesMismatch(ref expected_preds) => {
             eprint!("Phi predecessor mismatch, expected [ ");
 

@@ -176,7 +176,7 @@ pub fn merge_blocks(func: &mut MilFunction, cfg: &mut FlowGraph<MilBlockId>, env
                 prev.end_instr = next.end_instr;
 
                 true
-            } else if prev.instrs.is_empty() && is_phi_consistent(next, prev_id, &incoming_overlap) {
+            } else if i != 1 && prev.instrs.is_empty() && is_phi_consistent(next, prev_id, &incoming_overlap) {
                 log_writeln!(log, "Merging {} and {} since {} is empty", prev_id, next_id, prev_id);
 
                 let nonoverlap_new_incoming = prev_cfg_node.incoming.iter().copied()
@@ -1044,6 +1044,29 @@ mod tests {
             MilEndInstructionKind::Return(Some(MilOperand::RefNull))
         ));
         func.block_order = vec![MilBlockId(0), MilBlockId(1), MilBlockId(2)];
+
+        let mut cfg = FlowGraph::for_function(&func);
+
+        assert_eq!(0, merge_blocks(&mut func, &mut cfg, &TEST_ENV, &Log::none()));
+    }
+
+    #[test]
+    fn test_no_merge_blocks_forward_entry_phi() {
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
+
+        func.blocks.insert(MilBlockId(0), create_test_block(
+            MilBlockId(0),
+            &[],
+            &[],
+            MilEndInstructionKind::Nop
+        ));
+        func.blocks.insert(MilBlockId(1), create_test_block(
+            MilBlockId(1),
+            &[MilPhiNode { target: MilRegister(0), ty: MilType::Int, sources: smallvec![(MilOperand::Int(0), MilBlockId(0)), (MilOperand::Int(1), MilBlockId(1))], bytecode: (!0, 0) }],
+            &[],
+            MilEndInstructionKind::Jump(MilBlockId(1))
+        ));
+        func.block_order = vec![MilBlockId(0), MilBlockId(1)];
 
         let mut cfg = FlowGraph::for_function(&func);
 
