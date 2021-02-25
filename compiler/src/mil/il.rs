@@ -980,46 +980,46 @@ impl <'a> fmt::Display for PrettyMilInstruction<'a> {
                 write!(f, "nop")?;
             },
             MilInstructionKind::Copy(tgt, ref src) => {
-                write!(f, "copy {}, {}", tgt, src.pretty(self.1))?;
+                write!(f, "{} = copy {}", tgt, src.pretty(self.1))?;
             },
             MilInstructionKind::Select(tgt, ref cond, ref true_val, ref false_val) => {
-                write!(f, "select {}, {}, {}, {}", tgt, cond.pretty(self.1), true_val.pretty(self.1), false_val.pretty(self.1))?;
+                write!(f, "{} = select {}, {}, {}", tgt, cond.pretty(self.1), true_val.pretty(self.1), false_val.pretty(self.1))?;
             },
             MilInstructionKind::UnOp(op, tgt, ref val) => {
-                write!(f, "{} {}, {}", op, tgt, val.pretty(self.1))?;
+                write!(f, "{} = {} {}", tgt, op, val.pretty(self.1))?;
             },
             MilInstructionKind::BinOp(op, tgt, ref lhs, ref rhs) => {
-                write!(f, "{} {}, {}, {}", op, tgt, lhs.pretty(self.1), rhs.pretty(self.1))?;
+                write!(f, "{} = {} {}, {}", tgt, op, lhs.pretty(self.1), rhs.pretty(self.1))?;
             },
             MilInstructionKind::GetLocal(local_id, tgt) => {
-                write!(f, "get_local <{}> {}", local_id, tgt)?;
+                write!(f, "{} = get_local <{}>", tgt, local_id)?;
             },
             MilInstructionKind::SetLocal(local_id, ref src) => {
                 write!(f, "set_local <{}> {}", local_id, src.pretty(self.1))?;
             },
             MilInstructionKind::GetField(field_id, _, tgt, ref obj) => {
-                write!(f, "get_field <{}> {}, {}", FieldName(field_id, self.1), tgt, obj.pretty(self.1))?;
+                write!(f, "{} = get_field <{}> {}", tgt, FieldName(field_id, self.1), obj.pretty(self.1))?;
             },
             MilInstructionKind::PutField(field_id, _, ref obj, ref val) => {
                 write!(f, "put_field <{}> {}, {}", FieldName(field_id, self.1), obj.pretty(self.1), val.pretty(self.1))?;
             },
             MilInstructionKind::GetArrayElement(class_id, tgt, ref obj, ref idx) => {
-                write!(f, "get_array_elem <{}> {}, {}, {}", self.1.get(class_id).name(self.1), tgt, obj.pretty(self.1), idx.pretty(self.1))?;
+                write!(f, "{} = get_array_elem <{}> {}, {}", tgt, self.1.get(class_id).name(self.1), obj.pretty(self.1), idx.pretty(self.1))?;
             },
             MilInstructionKind::PutArrayElement(class_id, ref obj, ref idx, ref val) => {
                 write!(f, "put_array_elem <{}> {}, {}, {}", self.1.get(class_id).name(self.1), obj.pretty(self.1), idx.pretty(self.1), val.pretty(self.1))?;
             },
             MilInstructionKind::GetStatic(field_id, _, tgt) => {
-                write!(f, "get_static <{}> {}", FieldName(field_id, self.1), tgt)?;
+                write!(f, "{} = get_static <{}>", tgt, FieldName(field_id, self.1))?;
             },
             MilInstructionKind::PutStatic(field_id, _, ref val) => {
                 write!(f, "put_static <{}> {}", FieldName(field_id, self.1), val.pretty(self.1))?;
             },
             MilInstructionKind::AllocObj(class_id, tgt) => {
-                write!(f, "alloc_obj <{}> {}", self.1.get(class_id).name(self.1), tgt)?;
+                write!(f, "{} = alloc_obj <{}>", tgt, self.1.get(class_id).name(self.1))?;
             },
             MilInstructionKind::AllocArray(class_id, tgt, ref len) => {
-                write!(f, "alloc_array <{}> {}, {}", self.1.get(class_id).name(self.1), tgt, len.pretty(self.1))?;
+                write!(f, "{} = alloc_array <{}> {}", tgt, self.1.get(class_id).name(self.1), len.pretty(self.1))?;
             }
         };
 
@@ -1212,26 +1212,41 @@ impl <'a> fmt::Display for PrettyMilEndInstruction<'a> {
                 write!(f, "unreachable")?;
             },
             MilEndInstructionKind::Call(_, method_id, tgt, ref args) => {
-                write!(f, "call <{}> {}", MethodName(method_id, self.1), tgt)?;
+                if tgt != MilRegister::VOID {
+                    write!(f, "{} = ", tgt)?;
+                };
 
+                write!(f, "call <{}>", MethodName(method_id, self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
             MilEndInstructionKind::CallVirtual(_, method_id, tgt, ref obj, ref args) => {
-                write!(f, "call_virtual <{}> {}, {}", MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+                if tgt != MilRegister::VOID {
+                    write!(f, "{} = ", tgt)?;
+                };
+
+                write!(f, "call_virtual <{}> {}", MethodName(method_id, self.1), obj.pretty(self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
             MilEndInstructionKind::CallInterface(_, method_id, tgt, ref obj, ref args) => {
-                write!(f, "call_interface <{}> {}, {}", MethodName(method_id, self.1), tgt, obj.pretty(self.1))?;
+                if tgt != MilRegister::VOID {
+                    write!(f, "{} = ", tgt)?;
+                };
+
+                write!(f, "call_interface <{}> {}", MethodName(method_id, self.1), obj.pretty(self.1))?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
             },
             MilEndInstructionKind::CallNative(_, ref name, tgt, ref args) => {
-                write!(f, "call_native <{}> {}", name, tgt)?;
+                if tgt != MilRegister::VOID {
+                    write!(f, "{} = ", tgt)?;
+                };
+
+                write!(f, "call_native <{}>", name)?;
                 for a in args.iter() {
                     write!(f, ", {}", a.pretty(self.1))?;
                 };
