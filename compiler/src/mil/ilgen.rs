@@ -23,8 +23,8 @@ pub struct MilBuilder<'a> {
 }
 
 impl <'a> MilBuilder<'a> {
-    pub fn new(id: MethodId, verbose: bool, env: &'a ClassEnvironment) -> MilBuilder {
-        let func = MilFunction::new(id);
+    pub fn new(id: MethodId, sig: MilFunctionSignature, verbose: bool, env: &'a ClassEnvironment) -> MilBuilder {
+        let func = MilFunction::new(id, sig);
 
         if verbose {
             eprintln!("  {}:", func.block_alloc.next());
@@ -299,6 +299,19 @@ fn get_mil_type_for_descriptor(ty: &TypeDescriptor) -> MilType {
     }
 }
 
+pub fn get_mil_signature_for_method(method: &Method) -> MilFunctionSignature {
+    let mut sig = MilFunctionSignature::new(
+        MilAnnotatedType::for_class_return(method.return_type),
+        method.param_types.iter().copied().map(MilAnnotatedType::for_class).collect()
+    );
+
+    if !method.flags.contains(MethodFlags::STATIC) {
+        sig.param_types[0].constraint = sig.param_types[0].constraint.take().map(|constraint| constraint.not_null());
+    };
+
+    sig
+}
+
 fn pop_args(stack: &mut MilVirtualStack, tys: &[TypeDescriptor], has_receiver: bool) -> Vec<MilOperand> {
     let mut args = vec![];
 
@@ -371,7 +384,7 @@ fn get_params(builder: &mut MilBuilder, locals: &mut MilLocals, method: &Method)
 }
 
 fn generate_native_thunk(name: String, method: &Method, method_id: MethodId, known_objects: &MilKnownObjectRefs, env: &ClassEnvironment) -> MilFunction {
-    let mut builder = MilBuilder::new(method_id, false, env);
+    let mut builder = MilBuilder::new(method_id, get_mil_signature_for_method(method), false, env);
 
     let mut args = vec![];
 
@@ -1771,7 +1784,7 @@ pub fn generate_il_for_code(
 
     let mut blocks = scan_blocks(instrs);
     let mut block_worklist = vec![0];
-    let mut builder = MilBuilder::new(method_id, verbose, env);
+    let mut builder = MilBuilder::new(method_id, get_mil_signature_for_method(method), verbose, env);
 
     get_params(&mut builder, &mut locals, method);
 

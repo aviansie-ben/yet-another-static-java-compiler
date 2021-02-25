@@ -211,6 +211,57 @@ impl fmt::Display for MilType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MilAnnotatedType {
+    pub ty: MilType,
+    pub constraint: Option<MilClassConstraint>
+}
+
+impl MilAnnotatedType {
+    pub fn new(ty: MilType, constraint: Option<MilClassConstraint>) -> MilAnnotatedType {
+        MilAnnotatedType { ty, constraint }
+    }
+
+    pub fn for_class_return(class_id: ClassId) -> Option<MilAnnotatedType> {
+        MilType::for_class_return(class_id).map(|ty| {
+            if ty == MilType::Ref {
+                MilAnnotatedType::new(ty, Some(MilClassConstraint::for_class(class_id)))
+            } else {
+                MilAnnotatedType::new(ty, None)
+            }
+        })
+    }
+
+    pub fn for_class(class_id: ClassId) -> MilAnnotatedType {
+        let ty = MilType::for_class(class_id);
+
+        if ty == MilType::Ref {
+            MilAnnotatedType::new(ty, Some(MilClassConstraint::for_class(class_id)))
+        } else {
+            MilAnnotatedType::new(ty, None)
+        }
+    }
+
+    pub fn pretty<'a>(&'a self, env: &'a ClassEnvironment) -> impl fmt::Display + 'a {
+        PrettyMilAnnotatedType(self, env)
+    }
+}
+
+struct PrettyMilAnnotatedType<'a>(&'a MilAnnotatedType, &'a ClassEnvironment);
+
+impl fmt::Display for PrettyMilAnnotatedType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PrettyMilAnnotatedType(ty, env) = *self;
+
+        write!(f, "{}", ty.ty)?;
+        if let Some(constraint) = ty.constraint {
+            write!(f, " @constraint {}", constraint.pretty(env))?;
+        };
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MilKnownObjectRefs {
     pub classes: HashMap<ClassId, MilKnownObjectId>,
@@ -896,9 +947,13 @@ pub struct FieldName<'a>(pub FieldId, pub &'a ClassEnvironment);
 impl <'a> fmt::Display for FieldName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let FieldName(field_id, env) = *self;
-        let (class, field) = env.get_field(field_id);
 
-        write!(f, "{}.{} {}", class.meta.name, field.name, field.descriptor)
+        if field_id.0 != ClassId::UNRESOLVED {
+            let (class, field) = env.get_field(field_id);
+            write!(f, "{}.{} {}", class.meta.name, field.name, field.descriptor)
+        } else {
+            write!(f, "<unresolved>")
+        }
     }
 }
 
@@ -907,9 +962,13 @@ pub struct MethodName<'a>(pub MethodId, pub &'a ClassEnvironment);
 impl <'a> fmt::Display for MethodName<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let MethodName(method_id, env) = *self;
-        let (class, method) = env.get_method(method_id);
 
-        write!(f, "{}.{}{}", class.meta.name, method.name, method.descriptor)
+        if method_id.0 != ClassId::UNRESOLVED {
+            let (class, method) = env.get_method(method_id);
+            write!(f, "{}.{}{}", class.meta.name, method.name, method.descriptor)
+        } else {
+            write!(f, "<unresolved>")
+        }
     }
 }
 
@@ -1672,8 +1731,32 @@ pub struct MilInlineSiteInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct MilFunctionSignature {
+    pub return_type: Option<MilAnnotatedType>,
+    pub param_types: Vec<MilAnnotatedType>
+}
+
+impl MilFunctionSignature {
+    pub fn new(return_type: Option<MilAnnotatedType>, param_types: Vec<MilAnnotatedType>) -> MilFunctionSignature {
+        MilFunctionSignature { return_type, param_types }
+    }
+
+    pub fn new_bare(return_type: Option<MilType>, param_types: Vec<MilType>) -> MilFunctionSignature {
+        MilFunctionSignature::new(
+            return_type.map(|ty| MilAnnotatedType::new(ty, None)),
+            param_types.into_iter().map(|ty| MilAnnotatedType::new(ty, None)).collect()
+        )
+    }
+
+    pub fn void() -> MilFunctionSignature {
+        MilFunctionSignature::new(None, vec![])
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MilFunction {
     pub id: MethodId,
+    pub sig: MilFunctionSignature,
     pub reg_alloc: MilRegisterAllocator,
     pub local_info: HashMap<MilLocalId, MilLocalInfo>,
     pub block_alloc: MilBlockIdAllocator,
@@ -1686,9 +1769,10 @@ pub struct MilFunction {
 }
 
 impl MilFunction {
-    pub fn new(id: MethodId) -> MilFunction {
+    pub fn new(id: MethodId, sig: MilFunctionSignature) -> MilFunction {
         MilFunction {
             id,
+            sig,
             reg_alloc: MilRegisterAllocator::new(),
             local_info: HashMap::new(),
             block_alloc: MilBlockIdAllocator::new(),
@@ -1710,9 +1794,35 @@ struct PrettyMilFunction<'a>(&'a MilFunction, &'a ClassEnvironment);
 
 impl <'a> fmt::Display for PrettyMilFunction<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for block_id in self.0.block_order.iter().cloned() {
-            writeln!(f, "{}", self.0.blocks[&block_id].pretty(self.1))?;
+        let PrettyMilFunction(func, env) = *self;
+
+        write!(f, "func ")?;
+
+        if let Some(return_type) = func.sig.return_type {
+            write!(f, "{} ", return_type.pretty(env))?;
+        } else {
+            write!(f, "void ")?;
         };
+
+        write!(f, "%\"{}\"(", MethodName(func.id, self.1))?;
+
+        match &func.sig.param_types[..] {
+            &[ first_param_type, ref rest_param_types @ .. ] => {
+                write!(f, "{}", first_param_type.pretty(env))?;
+                for param_type in rest_param_types.iter().copied() {
+                    write!(f, ", {}", param_type.pretty(env))?;
+                };
+            },
+            &[] => {}
+        };
+
+        writeln!(f, ") {{")?;
+
+        for block_id in func.block_order.iter().cloned() {
+            writeln!(f, "{}", func.blocks[&block_id].pretty(env))?;
+        };
+
+        writeln!(f, "}}")?;
 
         Ok(())
     }

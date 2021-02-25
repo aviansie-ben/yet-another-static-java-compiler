@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_eliminate_trivial_dead_block() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_eliminate_dead_block_with_edge_to_live_block() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(0))));
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_eliminate_dead_block_with_phi_to_live_block() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Nop));
         func.blocks.insert(MilBlockId(1), create_test_block(
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn test_eliminate_dead_block_single_loop() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(1))));
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_eliminate_dead_block_multi_loop() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::Return(Some(MilOperand::RefNull))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Nop));
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_no_eliminate_live_blocks() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(MilBlockId(0), &[], &[], MilEndInstructionKind::JumpIf(MilBlockId(3), MilBlockId(1), MilOperand::Bool(true))));
         func.blocks.insert(MilBlockId(1), create_test_block(MilBlockId(1), &[], &[], MilEndInstructionKind::Jump(MilBlockId(4))));
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_same_const() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_same_reg() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_const_and_self() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_reg_and_self() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn test_simplify_poisoned_phi() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_unsimplifiable_phis() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -767,7 +767,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_with_nonlocal_refs() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn test_simplify_phi_nested() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_back_trivial() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_back_with_outgoing_phi() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_back_triple() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -951,7 +951,7 @@ mod tests {
 
     #[test]
     fn test_no_merge_blocks_back_multi_predecessor() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_forward_trivial() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -1023,7 +1023,7 @@ mod tests {
 
     #[test]
     fn test_no_merge_blocks_forward_inconsistent_phi() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -1052,7 +1052,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_forward_consistent_phi() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -1083,7 +1083,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_forward_complex_phis() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -1140,7 +1140,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_forward_duplicate_predecessor() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),
@@ -1185,7 +1185,7 @@ mod tests {
 
     #[test]
     fn test_merge_blocks_forward_loop_phi() {
-        let mut func = MilFunction::new(MethodId::UNRESOLVED);
+        let mut func = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Ref), vec![]));
 
         func.blocks.insert(MilBlockId(0), create_test_block(
             MilBlockId(0),

@@ -334,7 +334,7 @@ mod test {
 
     #[test]
     pub fn test_basic_inline() {
-        let mut f = MilFunction::new(MethodId::UNRESOLVED);
+        let mut f = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Int), vec![]));
 
         f.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
@@ -366,7 +366,7 @@ mod test {
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(2));
         f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(2));
 
-        let mut g = MilFunction::new(MethodId::UNRESOLVED);
+        let mut g = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Int), vec![]));
 
         g.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
@@ -460,7 +460,7 @@ mod test {
 
     #[test]
     pub fn test_inline_loop() {
-        let mut f = MilFunction::new(MethodId::UNRESOLVED);
+        let mut f = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         f.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
@@ -491,7 +491,7 @@ mod test {
         f.block_order = vec![MilBlockId(0), MilBlockId(1)];
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(2));
 
-        let mut g = MilFunction::new(MethodId::UNRESOLVED);
+        let mut g = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         g.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
@@ -518,7 +518,7 @@ mod test {
 
     #[test]
     pub fn test_return_block_shared() {
-        let mut f = MilFunction::new(MethodId::UNRESOLVED);
+        let mut f = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::void());
 
         f.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
@@ -570,7 +570,7 @@ mod test {
         f.block_alloc = MilBlockIdAllocator::new_from(MilBlockId(3));
         f.reg_alloc = MilRegisterAllocator::new_from(MilRegister(3));
 
-        let mut g = MilFunction::new(MethodId::UNRESOLVED);
+        let mut g = MilFunction::new(MethodId::UNRESOLVED, MilFunctionSignature::new_bare(Some(MilType::Int), vec![]));
 
         g.blocks.insert(MilBlockId(0), MilBlock {
             id: MilBlockId(0),
